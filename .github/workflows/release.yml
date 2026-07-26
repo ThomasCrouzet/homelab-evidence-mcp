@@ -20,7 +20,8 @@ jobs:
       - name: Configurer Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: '1.25.x'
+          check-latest: true
           cache-dependency-path: go.sum
 
       - name: Valider le tag
