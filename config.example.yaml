@@ -1,0 +1,133 @@
+# Exemple de configuration pour homelab-evidence-mcp.
+# Copier ce fichier hors du dépôt puis le fournir avec --config.
+# Ne jamais placer de vrais jetons, e-mails ou noms privés dans Git.
+# Schéma JSON pour l’éditeur : config.schema.json.
+# Validation sans démarrer MCP : homelab-evidence-mcp --config chemin --validate
+
+---
+version: 1
+
+limits:
+  default_window: 1h
+  max_incident_window: 24h
+  max_cron_window: 168h
+  max_log_lines: 100
+  max_evidence_items: 200
+  per_source_timeout: 3s
+  total_timeout: 10s
+  max_log_line_bytes: 2048
+  max_body_bytes: 2097152
+  evidence_cache_ttl: 5m
+  evidence_cache_max: 256
+  # Cache court des réponses GET identiques (0 le désactive).
+  # Sur un hit, observed_at conserve la collecte originale ; cached concerne
+  # uniquement get_evidence. Garder une valeur faible pour les instantanés.
+  source_cache_ttl: 15s
+  max_tool_calls_per_minute: 120
+  max_concurrent_tools: 8
+  warn_empty_bindings: true
+
+# Fichier d’audit JSONL rotatif facultatif.
+# stderr reçoit toujours les événements.
+# audit:
+#   file: /var/log/homelab-evidence-mcp/audit.jsonl
+#   max_bytes: 10485760
+#   max_files: 3
+
+sources:
+  gatus:
+    kind: gatus
+    base_url: https://gatus.example.internal
+    # Les préfixes de chemin sont préservés.
+    # Exemple : https://proxy.example/gatus.
+    # En-têtes statiques facultatifs, sans secret :
+    # headers:
+    #   X-Scope-OrgID: lab
+
+  loki:
+    kind: loki
+    base_url: https://loki.example.internal
+    # Bearer facultatif depuis l’environnement, jamais depuis YAML :
+    # token_env: LOKI_TOKEN
+    # token_header: Authorization
+
+  docker-main:
+    kind: docker
+    # Utiliser un proxy de socket Docker limité aux routes GET.
+    # Le socket unix:///var/run/docker.sock n’est pas pris en charge.
+    base_url: http://docker-proxy.example.internal:2375
+
+  healthchecks:
+    kind: healthchecks
+    base_url: https://healthchecks.example.internal
+    # Clé en lecture seule via l’environnement ou un token_file privé.
+    token_env: HEALTHCHECKS_API_TOKEN
+    # token_file: /run/secrets/healthchecks_api_token
+
+# Règles d’expurgation facultatives ; les règles intégrées restent actives.
+redact:
+  - exact: "example-local-token-value"
+  - regex: '(?i)sessionid=[A-Za-z0-9]+'
+
+services:
+  - id: reverse-proxy
+    display_name: Reverse Proxy
+    sources:
+      gatus:
+        source: gatus
+        endpoint_key: infra_proxy
+      docker:
+        source: docker-main
+        container_name: caddy
+      loki:
+        source: loki
+        selector: '{container="caddy"}'
+      healthchecks:
+        source: healthchecks
+        check_tags: [proxy]
+
+  - id: media
+    display_name: Media Server
+    sources:
+      gatus:
+        source: gatus
+        endpoint_key: media_app
+      docker:
+        source: docker-main
+        container_name: media
+      loki:
+        source: loki
+        selector: '{container="media"}'
+      healthchecks:
+        source: healthchecks
+        check_tags: [media]
+        # status_filter: down
+
+  - id: git-forge
+    display_name: Git Forge
+    sources:
+      gatus:
+        source: gatus
+        endpoint_key: forge_web
+      docker:
+        source: docker-main
+        container_name: gitea
+      loki:
+        source: loki
+        selector: '{container="gitea"}'
+
+  - id: monitoring
+    display_name: Monitoring Stack
+    sources:
+      gatus:
+        source: gatus
+        endpoint_key: monitoring_grafana
+      docker:
+        source: docker-main
+        container_name: grafana
+      loki:
+        source: loki
+        selector: '{container="grafana"}'
+      healthchecks:
+        source: healthchecks
+        check_name: monitoring-heartbeat

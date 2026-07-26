@@ -1,0 +1,116 @@
+---
+name: CI
+
+"on":
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: formatage / analyse / tests / compilation
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v6
+
+      - name: Configurer Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: false
+          cache-dependency-path: go.sum
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "Fichiers non formatés :"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Hygiène du dépôt public
+        shell: bash
+        run: |
+          status=0
+          tailscale_ip='100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.'
+          tailscale_dns='[[:alnum:].-]+\.ts\.net'
+          if git grep -nIE "$tailscale_ip" -- . ':(exclude).git' ||
+            git grep -nIE "$tailscale_dns" -- . ':(exclude).git'; then
+            echo "Adresse ou domaine Tailscale privé potentiel" >&2
+            status=1
+          fi
+          exit "$status"
+
+      - name: Cohérence des dépendances
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+          go mod verify
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          args: --timeout=5m
+
+      - name: Détection de courses
+        run: go test ./... -race -count=1
+
+      - name: Couverture
+        run: |
+          go test ./... -coverprofile=coverage.out -count=1
+          go tool cover -func=coverage.out | tail -20
+
+      - name: Fuzzing court
+        run: |
+          go test ./internal/config -fuzz=FuzzParse -fuzztime=8s
+          go test ./internal/redaction -fuzz=FuzzApply -fuzztime=5s
+          go test ./internal/adapters/loki -fuzz=FuzzParseNano -fuzztime=5s
+
+      - name: Démonstration
+        run: go run ./demo
+
+      - name: Vulnérabilités Go
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+      - name: Recherche de secrets
+        uses: gitleaks/gitleaks-action@v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Matrice de compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          version_path="github.com/ThomasCrouzet/homelab-evidence-mcp"
+          version_path+="/internal/version.Version"
+          mkdir -p dist
+          for pair in linux/amd64 linux/arm64 darwin/arm64 windows/amd64; do
+            os="${pair%/*}"
+            arch="${pair#*/}"
+            ext=""
+            if [ "$os" = "windows" ]; then ext=".exe"; fi
+            out="dist/homelab-evidence-mcp_${os}_${arch}${ext}"
+            echo "Construction de $out"
+            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath \
+              -ldflags="-s -w -X ${version_path}=0.1.0" \
+              -o "$out" ./cmd/homelab-evidence-mcp
+          done
+          ls -la dist

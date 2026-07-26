@@ -1,0 +1,22 @@
+# Secrets
+.env*
+*.env
+!.env.example
+
+# Build
+/bin/
+/dist/
+/homelab-evidence-mcp
+
+# Coverage
+coverage.out
+coverage.html
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+
+# Configuration locale
+*.local.yaml
+config.local.yaml

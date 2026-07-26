@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ThomasCrouzet/homelab-evidence-mcp/config.schema.json",
+  "title": "Configuration de homelab-evidence-mcp",
+  "description": "Aide pour l’éditeur. La validation du binaire est plus stricte. Toujours exécuter : homelab-evidence-mcp --config chemin --validate",
+  "type": "object",
+  "required": ["version", "sources"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default_window": { "type": "string", "description": "Durée Go, par exemple 1h" },
+        "max_incident_window": { "type": "string" },
+        "max_cron_window": { "type": "string" },
+        "max_log_lines": { "type": "integer", "minimum": 1, "maximum": 500 },
+        "max_evidence_items": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "per_source_timeout": { "type": "string" },
+        "total_timeout": { "type": "string" },
+        "max_log_line_bytes": { "type": "integer", "minimum": 1, "maximum": 16384 },
+        "max_body_bytes": { "type": "integer", "minimum": 1, "maximum": 8388608, "description": "Taille maximale d’un corps HTTP, limitée à 8 Mio" },
+        "evidence_cache_ttl": { "type": "string", "description": "Durée de vie du cache local utilisé par get_evidence" },
+        "evidence_cache_max": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "source_cache_ttl": {
+          "type": "string",
+          "description": "Cache court des réponses GET identiques. Valeur par défaut : 15s ; 0 le désactive. La fraîcheur des preuves reste fondée sur les horodatages de source ou de collecte."
+        },
+        "max_tool_calls_per_minute": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "max_concurrent_tools": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "warn_empty_bindings": { "type": "boolean" }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "file": { "type": "string", "maxLength": 4096, "description": "Chemin facultatif du journal d’audit JSONL rotatif, en mode 0600 sous Unix ou avec une ACL utilisateur sous Windows" },
+        "max_bytes": { "type": "integer", "minimum": 1, "maximum": 104857600 },
+        "max_files": { "type": "integer", "minimum": 1, "maximum": 20 }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 64,
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["kind", "base_url"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["gatus", "docker", "loki", "healthchecks", "beszel", "ntfy"]
+          },
+          "base_url": {
+            "type": "string",
+            "maxLength": 4096,
+            "format": "uri",
+            "pattern": "^https?://[^\\s/?#]+(?:/[^\\s?#]*)?$",
+            "description": "URL http(s) absolue. Les préfixes de chemin sont préservés. Informations utilisateur, chaînes de requête et fragments sont refusés."
+          },
+          "token_env": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+          "token_file": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Fichier régulier limité à 4 Kio, en mode 0600 sous Unix ou avec une ACL utilisateur sous Windows" },
+          "token_header": {
+            "type": "string",
+            "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$",
+            "description": "X-Api-Key par défaut pour Healthchecks, Authorization pour les autres sources"
+          },
+          "headers": {
+            "type": "object",
+            "maxProperties": 64,
+            "additionalProperties": { "type": "string", "maxLength": 4096 },
+            "propertyNames": { "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$" },
+            "description": "En-têtes statiques sans secret. Le binaire refuse les noms associés à l’authentification et les en-têtes réservés."
+          }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "kind": { "const": "healthchecks" } }, "required": ["kind"] },
+            "then": {
+              "anyOf": [
+                { "required": ["token_env"] },
+                { "required": ["token_file"] }
+              ]
+            }
+          },
+          {
+            "not": {
+              "required": ["token_env", "token_file"]
+            },
+            "description": "Définir un seul champ parmi token_env et token_file"
+          },
+          {
+            "if": { "required": ["token_header"] },
+            "then": {
+              "anyOf": [
+                { "required": ["token_env"] },
+                { "required": ["token_file"] }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "services": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+          "display_name": { "type": "string", "maxLength": 256 },
+          "sources": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "gatus": {
+                "type": "object",
+                "required": ["source", "endpoint_key"],
+                "additionalProperties": false,
+                "properties": {
+                  "source": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+                  "endpoint_key": { "type": "string", "minLength": 1, "maxLength": 256 }
+                }
+              },
+              "docker": {
+                "type": "object",
+                "required": ["source", "container_name"],
+                "additionalProperties": false,
+                "properties": {
+                  "source": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+                  "container_name": { "type": "string", "minLength": 1, "maxLength": 256 }
+                }
+              },
+              "loki": {
+                "type": "object",
+                "required": ["source", "selector"],
+                "additionalProperties": false,
+                "properties": {
+                  "source": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+                  "selector": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 512,
+                    "description": "Sélecteur LogQL simple avec filtres |= ou |~ facultatifs. Le binaire valide strictement la syntaxe."
+                  }
+                }
+              },
+              "healthchecks": {
+                "type": "object",
+                "required": ["source"],
+                "additionalProperties": false,
+                "properties": {
+                  "source": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+                  "check_name": { "type": "string", "minLength": 1, "maxLength": 256 },
+                  "check_tags": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 32,
+                    "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+                  },
+                  "check_uuid": { "type": "string", "minLength": 1, "maxLength": 256 },
+                  "status_filter": { "type": "string", "enum": ["up", "down", "grace", "paused", "new"] }
+                },
+                "anyOf": [
+                  { "required": ["check_name"] },
+                  { "required": ["check_uuid"] },
+                  { "required": ["check_tags"] }
+                ]
+              },
+              "beszel": {
+                "type": "object",
+                "required": ["source", "system_name"],
+                "additionalProperties": false,
+                "properties": {
+                  "source": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+                  "system_name": { "type": "string", "minLength": 1, "maxLength": 256 }
+                }
+              },
+              "ntfy": {
+                "type": "object",
+                "required": ["source", "topic"],
+                "additionalProperties": false,
+                "properties": {
+                  "source": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+                  "topic": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "redact": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "exact": { "type": "string", "maxLength": 4096 },
+          "regex": { "type": "string", "maxLength": 4096 }
+        },
+        "anyOf": [
+          { "required": ["exact"] },
+          { "required": ["regex"] }
+        ]
+      }
+    }
+  }
+}

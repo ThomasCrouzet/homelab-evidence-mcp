@@ -1,0 +1,153 @@
+---
+name: Release
+
+"on":
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: vérifier, construire et publier
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v6
+
+      - name: Configurer Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Valider le tag
+        shell: bash
+        run: |
+          number='(0|[1-9][0-9]*)'
+          non_numeric='[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*'
+          prerelease="(${number}|${non_numeric})"
+          build='[0-9A-Za-z-]+'
+          semver="^v${number}\.${number}\.${number}"
+          semver+="(-${prerelease}(\.${prerelease})*)?"
+          semver+="(\+${build}(\.${build})*)?$"
+          if [[ ! "$GITHUB_REF_NAME" =~ $semver ]]; then
+            echo "Tag de version invalide : $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+      - name: Vérifier
+        run: |
+          gofmt_output="$(gofmt -l .)"
+          test -z "$gofmt_output"
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+          go mod verify
+          go vet ./...
+          go test ./... -race -count=1
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          args: --timeout=5m
+
+      - name: Vulnérabilités Go
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+      - name: Recherche de secrets
+        uses: gitleaks/gitleaks-action@v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Matrice de compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          ver="${GITHUB_REF_NAME#v}"
+          version_path="github.com/ThomasCrouzet/homelab-evidence-mcp"
+          version_path+="/internal/version.Version"
+          mkdir -p dist
+          for pair in linux/amd64 linux/arm64 darwin/arm64 windows/amd64; do
+            os="${pair%/*}"
+            arch="${pair#*/}"
+            ext=""
+            if [ "$os" = "windows" ]; then ext=".exe"; fi
+            out="dist/homelab-evidence-mcp_${os}_${arch}${ext}"
+            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath \
+              -ldflags="-s -w -X ${version_path}=${ver}" \
+              -o "$out" ./cmd/homelab-evidence-mcp
+          done
+          ls -la dist
+
+      - name: Licences des composants tiers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp LICENSE dist/LICENSE.txt
+          module_template='{{with .Module}}{{if not .Main}}{{.Path}}{{"\t"}}'
+          module_template+='{{.Version}}{{"\t"}}{{.Dir}}{{end}}{{end}}'
+          module_list="$(mktemp)"
+          trap 'rm -f "$module_list"' EXIT
+          go list -deps -f "$module_template" \
+            ./cmd/homelab-evidence-mcp |
+            sed '/^[[:space:]]*$/d' | sort -u > "$module_list"
+          if [ ! -s "$module_list" ]; then
+            echo "Graphe des modules incorporés vide" >&2
+            exit 1
+          fi
+          {
+            echo "LICENCES DES COMPOSANTS TIERS"
+            echo
+            while IFS=$'\t' read -r module version dir; do
+              if [ -z "$module" ]; then
+                continue
+              fi
+              if [ -z "$dir" ]; then
+                echo "Répertoire de module introuvable pour" \
+                  "$module $version" >&2
+                exit 1
+              fi
+              echo "================================================"
+              echo "$module $version"
+              echo "================================================"
+              found=0
+              while IFS= read -r license; do
+                found=1
+                echo
+                echo "--- $(basename "$license") ---"
+                cat "$license"
+              done < <(
+                find "$dir" -maxdepth 1 -type f \
+                  \( -iname 'LICENSE*' -o -iname 'COPYING*' \
+                  -o -iname 'NOTICE*' \) \
+                  -print | sort
+              )
+              if [ "$found" -eq 0 ]; then
+                echo "Licence introuvable pour $module $version" >&2
+                exit 1
+              fi
+              echo
+            done < "$module_list"
+          } > dist/THIRD_PARTY_LICENSES.txt
+
+      - name: Sommes de contrôle
+        shell: bash
+        run: |
+          cd dist || exit 1
+          sha256sum homelab-evidence-mcp_* LICENSE.txt \
+            THIRD_PARTY_LICENSES.txt \
+            > SHA256SUMS
+
+      - name: Publier la version
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
