@@ -1,4 +1,4 @@
-// Package correlation construit des chronologies déterministes sans causalité.
+// Package correlation builds deterministic timelines without claiming causality.
 package correlation
 
 import (
@@ -9,7 +9,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/evidence"
 )
 
-// BuildTimeline trie les preuves et produit un résumé strictement factuel.
+// BuildTimeline sorts evidence and produces a strictly factual summary.
 func BuildTimeline(serviceID string, start, end time.Time, items []evidence.Item, sources []evidence.SourceOutcome, maxItems int) evidence.Bundle {
 	now := time.Now().UTC()
 	cp := append([]evidence.Item(nil), items...)
@@ -37,14 +37,14 @@ func BuildTimeline(serviceID string, start, end time.Time, items []evidence.Item
 			failed++
 			warnings = append(warnings, fmt.Sprintf("source %s (%s): %s", s.SourceName, s.Kind, s.Status))
 		case "absent", "skipped":
-			// Ce statut ne représente pas un échec.
+			// This status does not count as a failure.
 		}
 	}
 	if timelineTruncated {
 		warnings = append(warnings, fmt.Sprintf("timeline truncated to %d items", maxItems))
 	}
 
-	// Signaler les preuves critiques ou en erreur devenues anciennes.
+	// Flag critical or error evidence that has become stale.
 	for _, it := range cp {
 		if it.Freshness == evidence.FreshnessStale && (it.Severity == evidence.SeverityError || it.Severity == evidence.SeverityCritical) {
 			warnings = append(warnings, fmt.Sprintf("stale %s evidence from %s (observed %s)", it.Severity, it.Source, it.ObservedAt.Format(time.RFC3339)))

@@ -1,4 +1,4 @@
-// Package loki implémente l’adaptateur Loki query_range en lecture seule.
+// Package loki implements the read-only Loki query_range adapter.
 package loki
 
 import (
@@ -20,7 +20,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 )
 
-// Clés de labels autorisées dans les attributs.
+// Allowed label keys in attributes.
 var allowedLabels = map[string]struct{}{
 	"job":       {},
 	"namespace": {},
@@ -34,7 +34,7 @@ var allowedLabels = map[string]struct{}{
 	"compose":   {},
 }
 
-// Client interroge Loki avec un sélecteur prédéfini.
+// Client queries Loki with a predefined selector.
 type Client struct {
 	HTTP         *httpx.LockedClient
 	DestName     string
@@ -44,20 +44,20 @@ type Client struct {
 	MaxLineBytes int
 }
 
-// QueryOptions borne une recherche de journaux.
+// QueryOptions bounds a log search.
 type QueryOptions struct {
 	ServiceID string
-	Selector  string // prédéfini dans le registre
+	Selector  string // predefined in the registry
 	Start     time.Time
 	End       time.Time
 	Limit     int
-	// Text ajoute un filtre de sous-chaîne facultatif.
+	// Text adds an optional substring filter.
 	Text string
-	// Regex ajoute une expression régulière facultative, compilable et bornée.
+	// Regex adds an optional regular expression filter, compilable and bounded.
 	Regex string
 }
 
-// Search exécute query_range et renvoie les lignes sous forme de preuves.
+// Search runs query_range and returns lines as evidence items.
 func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item, bool, error) {
 	now := c.now()
 	if opt.Selector == "" {
@@ -89,7 +89,7 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 	vals.Set("direction", "forward")
 
 	path := "/loki/api/v1/query_range?" + vals.Encode()
-	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	// LockedClient.Get closes the body before returning the response.
 	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
 	if err != nil {
 		return nil, false, err
@@ -98,7 +98,7 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 		return nil, false, fmt.Errorf("loki rate limited (429)")
 	}
 	if resp.StatusCode != http.StatusOK {
-		// Ne pas renvoyer le corps, qui peut contenir la requête interne.
+		// Do not return the body, which may contain the internal query.
 		return nil, false, fmt.Errorf("loki HTTP %d", resp.StatusCode)
 	}
 
@@ -136,10 +136,10 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 				continue
 			}
 			line := pair[1]
-			// Le contenu hostile reste une donnée : nettoyer puis expurger.
+			// Hostile content remains data: sanitize then redact.
 			line = redaction.SanitizeControl(line)
 			cleaned, rn := c.redact(line)
-			// Marquer les textes ressemblant à des instructions sans les exécuter.
+			// Mark instruction-like text without executing it.
 			cleaned = redaction.NeutralizeInstructionLike(cleaned)
 			cleaned, lineTruncated := redaction.TruncateBytes(cleaned, maxLineBytes)
 
@@ -173,7 +173,7 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 			})
 		}
 	}
-	// Produire un ordre déterministe.
+	// Produce a deterministic order.
 	sort.SliceStable(items, func(i, j int) bool {
 		if !items[i].ObservedAt.Equal(items[j].ObservedAt) {
 			return items[i].ObservedAt.Before(items[j].ObservedAt)
@@ -205,7 +205,7 @@ func buildQuery(selector, text, rx string) (string, error) {
 			return "", fmt.Errorf("search text must be single-line")
 		}
 		if strings.ContainsAny(text, "\"\\") {
-			// Échapper une chaîne LogQL entre guillemets doubles.
+			// Escape a double-quoted LogQL string.
 			text = escapeLogQL(text)
 		}
 		if len(text) > 200 {
@@ -223,7 +223,7 @@ func buildQuery(selector, text, rx string) (string, error) {
 		if _, err := regexp.Compile(rx); err != nil {
 			return "", fmt.Errorf("invalid search regex")
 		}
-		// Refuser par précaution les expressions anormalement complexes.
+		// Reject abnormally complex expressions as a precaution.
 		if strings.Count(rx, "+")+strings.Count(rx, "*") > 8 {
 			return "", fmt.Errorf("search regex too complex")
 		}
@@ -272,7 +272,7 @@ func parseNano(s string) (time.Time, bool) {
 	if err != nil {
 		return time.Time{}, false
 	}
-	// Loki utilise des nanosecondes.
+	// Loki uses nanoseconds.
 	sec := n / 1e9
 	nsec := n % 1e9
 	if sec < 0 {

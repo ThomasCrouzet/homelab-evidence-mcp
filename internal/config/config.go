@@ -1,4 +1,4 @@
-// Package config charge et valide la configuration YAML au démarrage.
+// Package config loads and validates YAML configuration at startup.
 package config
 
 import (
@@ -33,7 +33,7 @@ const (
 	maxRedactRules      = 128
 )
 
-// Config représente la configuration d’exécution entièrement validée.
+// Config represents fully validated runtime configuration.
 type Config struct {
 	Version  int
 	Limits   Limits
@@ -43,7 +43,7 @@ type Config struct {
 	Redact   []RedactRule
 }
 
-// Limits regroupe les budgets globaux verrouillés au démarrage.
+// Limits groups global budgets locked at startup.
 type Limits struct {
 	DefaultWindow         time.Duration
 	MaxIncidentWindow     time.Duration
@@ -62,32 +62,32 @@ type Limits struct {
 	WarnEmptyBindings     bool
 }
 
-// Audit configure le journal d’audit facultatif ; stderr reçoit toujours les événements.
+// Audit configures the optional audit log; stderr always receives events.
 type Audit struct {
 	File     string
 	MaxBytes int64
 	MaxFiles int
 }
 
-// Source représente une instance nommée d’adaptateur.
+// Source represents a named adapter instance.
 type Source struct {
 	Kind        string // gatus | docker | loki | healthchecks | beszel | ntfy
 	BaseURL     string
 	TokenEnv    string
 	TokenFile   string
-	TokenHeader string // facultatif ; X-Api-Key pour Healthchecks, Authorization sinon
-	// Headers contient uniquement des en-têtes statiques sans secret.
+	TokenHeader string // optional; X-Api-Key for Healthchecks, Authorization otherwise
+	// Headers holds only static non-secret headers.
 	Headers map[string]string
 }
 
-// Service représente une entrée canonique du registre.
+// Service represents a canonical registry entry.
 type Service struct {
 	ID          string
 	DisplayName string
 	Sources     ServiceSources
 }
 
-// ServiceSources associe les identités facultatives propres aux adaptateurs.
+// ServiceSources associates optional adapter-specific identities.
 type ServiceSources struct {
 	Gatus        *GatusRef
 	Docker       *DockerRef
@@ -97,53 +97,53 @@ type ServiceSources struct {
 	Ntfy         *NtfyRef
 }
 
-// GatusRef relie un service à une clé d’endpoint Gatus.
+// GatusRef links a service to a Gatus endpoint key.
 type GatusRef struct {
 	Source      string
 	EndpointKey string
 }
 
-// DockerRef relie un service à un nom de conteneur Docker.
+// DockerRef links a service to a Docker container name.
 type DockerRef struct {
 	Source        string
 	ContainerName string
 }
 
-// LokiRef relie un service à un sélecteur LogQL prédéfini.
+// LokiRef links a service to a predefined LogQL selector.
 type LokiRef struct {
 	Source   string
 	Selector string
 }
 
-// HealthchecksRef relie un service à des filtres Healthchecks.
+// HealthchecksRef links a service to Healthchecks filters.
 type HealthchecksRef struct {
 	Source    string
 	CheckName string
 	CheckTags []string
 	CheckUUID string
-	// StatusFilter filtre facultativement le statut ; une valeur vide accepte tout.
+	// StatusFilter optionally filters by status; an empty value accepts all.
 	StatusFilter string
 }
 
-// BeszelRef relie un service à un système Beszel.
+// BeszelRef links a service to a Beszel system.
 type BeszelRef struct {
 	Source     string
 	SystemName string
 }
 
-// NtfyRef relie un service à un sujet ntfy défini dans la configuration.
+// NtfyRef links a service to an ntfy topic defined in configuration.
 type NtfyRef struct {
 	Source string
 	Topic  string
 }
 
-// RedactRule représente une règle d’expurgation.
+// RedactRule represents a redaction rule.
 type RedactRule struct {
 	Exact string
 	Regex string
 }
 
-// Structures brutes du fichier, avant validation.
+// Raw file structures, before validation.
 type fileConfig struct {
 	Version  int                   `yaml:"version"`
 	Limits   fileLimits            `yaml:"limits"`
@@ -239,7 +239,7 @@ type fileRedact struct {
 	Regex string `yaml:"regex"`
 }
 
-// ValidationError localise un problème de configuration.
+// ValidationError locates a configuration problem.
 type ValidationError struct {
 	Path    string
 	Message string
@@ -249,7 +249,7 @@ func (e ValidationError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Path, e.Message)
 }
 
-// ValidationErrors regroupe plusieurs problèmes.
+// ValidationErrors aggregates multiple problems.
 type ValidationErrors []ValidationError
 
 func (e ValidationErrors) Error() string {
@@ -270,12 +270,12 @@ var (
 	envNameRe    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	headerNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$")
 	yamlScalarRe = regexp.MustCompile(`!![[:alnum:]_-]+\s+('[^']*'|"[^"]*")`)
-	// Un sélecteur Loki accepte des labels puis des filtres simples |= ou |~.
+	// A Loki selector accepts labels then simple |= or |~ filters.
 	lokiSelectorRe = regexp.MustCompile(`^\{[a-zA-Z_][a-zA-Z0-9_]*="[^"]*"(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*="[^"]*")*\}(?:\s*\|\s*[=~]\s*"[^"]*")*$`)
 )
 
-// LoadFile lit et valide un fichier YAML.
-// Le fichier ne doit être accessible ni au groupe ni aux autres utilisateurs.
+// LoadFile reads and validates a YAML file.
+// The file must not be group- or world-accessible.
 func LoadFile(path string) (*Config, error) {
 	if path == "" {
 		return nil, errors.New("config path is required")
@@ -305,7 +305,7 @@ func LoadFile(path string) (*Config, error) {
 	return Parse(raw)
 }
 
-// Parse valide un contenu YAML et construit Config.
+// Parse validates YAML content and builds Config.
 func Parse(raw []byte) (*Config, error) {
 	if len(raw) == 0 {
 		return nil, ValidationErrors{{Path: "version", Message: "empty configuration"}}
@@ -313,7 +313,7 @@ func Parse(raw []byte) (*Config, error) {
 	if len(raw) > maxConfigBytes {
 		return nil, ValidationErrors{{Path: ".", Message: fmt.Sprintf("configuration exceeds %d bytes", maxConfigBytes)}}
 	}
-	// Refuser les syntaxes manifestement exécutables ou inclusives.
+	// Reject clearly executable or include syntax.
 	s := string(raw)
 	for _, bad := range []string{"{{", "}}", "!!python", "!!js", "${", "`$(", "include:", "!include"} {
 		if strings.Contains(s, bad) {
@@ -928,7 +928,7 @@ func sanitizeYAMLErr(err error) string {
 	return msg
 }
 
-// ResolveToken renvoie le jeton d’une source, ou une chaîne vide.
+// ResolveToken returns a source's token, or an empty string.
 func ResolveToken(src Source) (string, error) {
 	if src.TokenEnv != "" {
 		v := strings.TrimSpace(os.Getenv(src.TokenEnv))
@@ -943,8 +943,8 @@ func ResolveToken(src Source) (string, error) {
 	return "", nil
 }
 
-// AuthHeaders construit les en-têtes statiques et l’authentification facultative.
-// Les valeurs d’authentification proviennent uniquement de l’environnement ou d’un fichier.
+// AuthHeaders builds static headers and optional authentication.
+// Authentication values come only from the environment or a file.
 func AuthHeaders(src Source, token string) map[string]string {
 	out := map[string]string{}
 	for k, v := range src.Headers {
@@ -975,7 +975,7 @@ func AuthHeaders(src Source, token string) map[string]string {
 	return out
 }
 
-// HasAnyBinding indique si un service possède au moins une source.
+// HasAnyBinding reports whether a service has at least one source.
 func HasAnyBinding(s Service) bool {
 	ss := s.Sources
 	return ss.Gatus != nil || ss.Docker != nil || ss.Loki != nil ||

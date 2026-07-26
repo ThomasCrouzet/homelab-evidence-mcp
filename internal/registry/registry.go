@@ -1,4 +1,4 @@
-// Package registry conserve les identités canoniques des services.
+// Package registry holds canonical service identities.
 package registry
 
 import (
@@ -9,7 +9,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/config"
 )
 
-// Coverage indique les familles de sources reliées à un service.
+// Coverage indicates which source families are bound to a service.
 type Coverage struct {
 	Gatus        bool `json:"gatus"`
 	Docker       bool `json:"docker"`
@@ -19,20 +19,20 @@ type Coverage struct {
 	Ntfy         bool `json:"ntfy"`
 }
 
-// ServiceView est la vue publique d’une entrée du registre.
+// ServiceView is the public view of a registry entry.
 type ServiceView struct {
 	ID          string   `json:"id"`
 	DisplayName string   `json:"display_name"`
 	Coverage    Coverage `json:"coverage"`
 }
 
-// Registry est une table immuable construite depuis la configuration.
+// Registry is an immutable table built from configuration.
 type Registry struct {
 	byID  map[string]config.Service
 	order []string
 }
 
-// New construit un registre depuis une configuration validée.
+// New builds a registry from a validated configuration.
 func New(cfg *config.Config) *Registry {
 	r := &Registry{
 		byID: make(map[string]config.Service, len(cfg.Services)),
@@ -50,7 +50,7 @@ func (r *Registry) get(id string) (config.Service, bool) {
 	return s, ok
 }
 
-// List renvoie une page bornée de services.
+// List returns a bounded page of services.
 func (r *Registry) List(prefix string, offset, limit int) ([]ServiceView, int) {
 	if limit <= 0 {
 		limit = 50
@@ -100,10 +100,10 @@ func (r *Registry) view(id string) ServiceView {
 	}
 }
 
-// Len renvoie le nombre de services.
+// Len returns the number of services.
 func (r *Registry) Len() int { return len(r.order) }
 
-// Require renvoie le service ou une erreur.
+// Require returns the service or an error.
 func (r *Registry) Require(id string) (config.Service, error) {
 	s, ok := r.get(id)
 	if !ok {

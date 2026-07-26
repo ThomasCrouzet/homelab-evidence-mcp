@@ -10,21 +10,21 @@ permissions:
 
 jobs:
   release:
-    name: vérifier, construire et publier
+    name: verify, build, and publish
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Récupérer le dépôt
+      - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Configurer Go
+      - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version: '1.25.x'
           check-latest: true
           cache-dependency-path: go.sum
 
-      - name: Valider le tag
+      - name: Validate tag
         shell: bash
         run: |
           number='(0|[1-9][0-9]*)'
@@ -35,11 +35,11 @@ jobs:
           semver+="(-${prerelease}(\.${prerelease})*)?"
           semver+="(\+${build}(\.${build})*)?$"
           if [[ ! "$GITHUB_REF_NAME" =~ $semver ]]; then
-            echo "Tag de version invalide : $GITHUB_REF_NAME" >&2
+            echo "Invalid version tag: $GITHUB_REF_NAME" >&2
             exit 1
           fi
 
-      - name: Vérifier
+      - name: Verify
         run: |
           gofmt_output="$(gofmt -l .)"
           test -z "$gofmt_output"
@@ -55,17 +55,17 @@ jobs:
           version: v2.12.2
           args: --timeout=5m
 
-      - name: Vulnérabilités Go
+      - name: Go vulnerabilities
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
           "$(go env GOPATH)/bin/govulncheck" ./...
 
-      - name: Recherche de secrets
+      - name: Secret scan
         uses: gitleaks/gitleaks-action@v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Matrice de compilation
+      - name: Build matrix
         shell: bash
         run: |
           set -euo pipefail
@@ -85,7 +85,7 @@ jobs:
           done
           ls -la dist
 
-      - name: Licences des composants tiers
+      - name: Third-party licenses
         shell: bash
         run: |
           set -euo pipefail
@@ -98,18 +98,18 @@ jobs:
             ./cmd/homelab-evidence-mcp |
             sed '/^[[:space:]]*$/d' | sort -u > "$module_list"
           if [ ! -s "$module_list" ]; then
-            echo "Graphe des modules incorporés vide" >&2
+            echo "Empty embedded module graph" >&2
             exit 1
           fi
           {
-            echo "LICENCES DES COMPOSANTS TIERS"
+            echo "THIRD-PARTY COMPONENT LICENSES"
             echo
             while IFS=$'\t' read -r module version dir; do
               if [ -z "$module" ]; then
                 continue
               fi
               if [ -z "$dir" ]; then
-                echo "Répertoire de module introuvable pour" \
+                echo "Module directory not found for" \
                   "$module $version" >&2
                 exit 1
               fi
@@ -129,14 +129,14 @@ jobs:
                   -print | sort
               )
               if [ "$found" -eq 0 ]; then
-                echo "Licence introuvable pour $module $version" >&2
+                echo "License not found for $module $version" >&2
                 exit 1
               fi
               echo
             done < "$module_list"
           } > dist/THIRD_PARTY_LICENSES.txt
 
-      - name: Sommes de contrôle
+      - name: Checksums
         shell: bash
         run: |
           cd dist || exit 1
@@ -144,7 +144,7 @@ jobs:
             THIRD_PARTY_LICENSES.txt \
             > SHA256SUMS
 
-      - name: Publier la version
+      - name: Publish release
         uses: softprops/action-gh-release@v3
         with:
           files: |

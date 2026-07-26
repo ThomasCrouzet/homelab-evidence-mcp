@@ -1,142 +1,139 @@
-# Politique de sécurité
+# Security policy
 
-## Versions prises en charge
+## Supported versions
 
-| Version | Prise en charge |
+| Version | Supported |
 |---|---|
-| 0.1.x | oui |
+| 0.1.x | yes |
 
-## Signaler une vulnérabilité
+## Reporting a vulnerability
 
-Ouvrir un avis de sécurité privé sur le dépôt GitHub ou écrire à l’adresse du
-mainteneur indiquée sur son profil. Ne pas ouvrir d’issue publique pour une
-fuite de secret ou une vulnérabilité non corrigée.
+Open a private security advisory on the GitHub repository or write to the
+maintainer address listed on their profile. Do not open a public issue for a
+secret leak or an unpatched vulnerability.
 
-## Modèle de menace
+## Threat model
 
-### Actifs protégés
+### Protected assets
 
-- inventaire des services et signaux de santé ;
-- extraits de journaux susceptibles de contenir des secrets d’accès ou des
-  données personnelles ;
-- jetons d’API Healthchecks ;
-- métadonnées Docker filtrées ;
-- caches temporaires conservés dans le processus.
+- service inventory and health signals;
+- log excerpts that may contain access secrets or personal data;
+- Healthchecks API tokens;
+- filtered Docker metadata;
+- temporary caches held in process.
 
-### Frontières de confiance
+### Trust boundaries
 
-| Entrée ou sortie | Niveau de confiance |
+| Input or output | Trust level |
 |---|---|
-| configuration YAML et environnement au démarrage | entrée de l’opérateur, considérée fiable |
-| arguments des outils MCP | non fiables |
-| réponses HTTP des sources | non fiables |
-| texte des journaux et notifications | donnée hostile |
-| stdout | protocole JSON-RPC uniquement |
-| stderr et fichier d’audit | données opérationnelles expurgées |
+| YAML configuration and environment at startup | operator input, considered trusted |
+| MCP tool arguments | untrusted |
+| HTTP responses from sources | untrusted |
+| log and notification text | hostile data |
+| stdout | JSON-RPC protocol only |
+| stderr and audit file | redacted operational data |
 
-### Lecture seule structurelle
+### Structural read-only
 
-- Aucun outil de démarrage, arrêt, redémarrage, exécution, écriture ou suppression.
-- Le client HTTP interne expose uniquement `GET`.
-- Les redirections sont refusées.
-- Les destinations sont enregistrées depuis la configuration au démarrage.
-- Les préfixes de chemin de `base_url` sont préservés.
-- Les chemins absolus, traversées de répertoire et changements d’hôte sont refusés.
-- Les sélecteurs Loki et sujets ntfy proviennent exclusivement de la configuration.
-- Les réponses Docker excluent `Config.Env`, les montages bruts et les labels non autorisés.
-- Les réponses Healthchecks excluent UUID, URL de ping, de pause, de mise à jour et de badge.
-- La vérification TLS reste active ; aucune option publique ne permet de la désactiver.
-- Les budgets limitent le nombre d’appels, la concurrence et les volumes de réponse.
-- Le socket Unix Docker direct n’est pas pris en charge.
+- No start, stop, restart, exec, write, or delete tools.
+- The internal HTTP client exposes only `GET`.
+- Redirects are refused.
+- Destinations are registered from configuration at startup.
+- Path prefixes of `base_url` are preserved.
+- Absolute paths, directory traversal, and host changes are refused.
+- Loki selectors and ntfy topics come exclusively from configuration.
+- Docker responses exclude `Config.Env`, raw mounts, and unauthorized labels.
+- Healthchecks responses exclude UUID, ping, pause, update, and badge URLs.
+- TLS verification stays enabled; no public option disables it.
+- Budgets limit call count, concurrency, and response volume.
+- The direct Docker Unix socket is not supported.
 
-### SSRF et résolution réseau
+### SSRF and network resolution
 
-Une requête ne peut cibler qu’un nom de destination enregistré au démarrage.
-Les schémas sont limités à `http` et `https`, les redirections sont refusées et
-les arguments MCP ne peuvent pas fournir d’URL.
+A request may only target a destination name registered at startup. Schemes
+are limited to `http` and `https`, redirects are refused, and MCP arguments
+cannot supply a URL.
 
-Les adresses privées, CGNAT et Tailscale sont autorisées lorsqu’elles figurent
-explicitement dans la configuration : elles constituent des destinations
-normales pour un homelab.
+Private, CGNAT, and Tailscale addresses are allowed when they appear
+explicitly in configuration: they are normal destinations for a homelab.
 
-Le nom d’hôte est verrouillé, mais sa résolution DNS reste effectuée par le
-système au moment de la connexion. Un DNS compromis peut donc modifier
-l’adresse obtenue. Utiliser des noms internes stables, un DNS maîtrisé ou des
-adresses IP fixes pour les destinations sensibles.
+The hostname is locked, but its DNS resolution is still performed by the system
+at connection time. A compromised DNS can therefore change the resolved
+address. Use stable internal names, a controlled DNS, or fixed IP addresses for
+sensitive destinations.
 
 ### Secrets
 
-- Les jetons proviennent de `token_env` ou d’un `token_file` régulier en mode
-  `0600` sous Unix. Sous Windows, appliquer une ACL limitée au compte
-  utilisateur ; les bits POSIX n’y sont pas interprétés.
-- `token_header` choisit l’en-tête d’authentification ; les en-têtes statiques
-  dont le nom évoque un secret d’accès sont refusés.
-- Les chaînes de requête, fragments et informations utilisateur sont refusés dans `base_url`.
-- Les erreurs et capacités n’affichent ni jeton, ni URL, ni nom d’hôte de
-  destination ; elles utilisent le nom logique de la source.
-- L’expurgation intégrée couvre notamment mots de passe, bearer tokens,
-  cookies, clés courantes, adresses électroniques et en-têtes de clés privées.
-- L’expurgation et les bornes s’appliquent aussi aux identifiants et attributs
-  textuels issus des sources, pas uniquement aux résumés.
-- Les clés du cache HTTP utilisent une empreinte HMAC propre au processus pour
-  toutes les valeurs d’en-tête ; aucun secret ni condensat réutilisable n’y
-  est stocké en clair.
-- Les chemins et chaînes de requête sont eux aussi remplacés par une empreinte
-  HMAC dans les clés du cache.
-- Le cache HTTP ne conserve aucun en-tête de réponse, notamment `Set-Cookie`.
-- La configuration YAML doit elle aussi être limitée au propriétaire.
-- Le journal d’audit est créé en mode `0600` sous Unix. Sous Windows,
-  l’opérateur doit protéger son chemin avec la même ACL utilisateur.
+- Tokens come from `token_env` or a regular `token_file` in mode `0600` on
+  Unix. On Windows, apply a user-only ACL; POSIX bits are not interpreted there.
+- `token_header` chooses the authentication header; static headers whose name
+  suggests an access secret are refused.
+- Query strings, fragments, and userinfo are refused in `base_url`.
+- Errors and capabilities show neither tokens, URLs, nor destination hostnames;
+  they use the logical source name.
+- Built-in redaction covers passwords, bearer tokens, cookies, common keys,
+  email addresses, and private-key headers, among others.
+- Redaction and bounds also apply to identifiers and textual attributes from
+  sources, not only to summaries.
+- HTTP cache keys use a process-local HMAC fingerprint for all header values;
+  no secret or reusable digest is stored in clear text.
+- Paths and query strings are also replaced by an HMAC fingerprint in cache
+  keys.
+- The HTTP cache retains no response headers, including `Set-Cookie`.
+- The YAML configuration itself must also be owner-restricted.
+- The audit log is created in mode `0600` on Unix. On Windows, the operator
+  must protect its path with the same user ACL.
 
-### Texte hostile
+### Hostile text
 
-Les lignes Loki et notifications ntfy sont nettoyées, expurgées, bornées et
-préfixées par `[UNTRUSTED_LOG_DATA]` lorsqu’elles ressemblent à une instruction.
-Le contenu d’origine reste une preuve à traiter comme donnée non fiable.
+Loki lines and ntfy notifications are cleaned, redacted, bounded, and prefixed
+with `[UNTRUSTED_LOG_DATA]` when they look like an instruction. The original
+content remains evidence to treat as untrusted data.
 
-### Cardinalité et déni de service
+### Cardinality and denial of service
 
-- taille maximale de la configuration et des corps HTTP ;
-- cardinalité de la configuration bornée pour les sources, services, en-têtes
-  et règles d’expurgation ;
-- limites sur les lignes, preuves, fenêtres et délais ;
-- limites globales par minute et en concurrence ;
-- huit requêtes source simultanées au maximum, y compris lors d’un fan-out ;
-- cache de réponses source borné à 128 entrées, 32 Mio et une durée de vie ;
-- cache de preuves borné à 1 000 entrées et une durée de vie, avec textes
-  individuels limités à 16 Kio ;
-- réponses partielles explicites lorsqu’une source échoue ;
-- limites réappliquées côté client même si une source distante les ignore.
+- maximum configuration and HTTP body size;
+- bounded configuration cardinality for sources, services, headers, and
+  redaction rules;
+- limits on lines, evidence items, windows, and timeouts;
+- global per-minute and concurrency limits;
+- at most eight concurrent source requests, including during fan-out;
+- source response cache bounded to 128 entries, 32 MiB, and a TTL;
+- evidence cache bounded to 1,000 entries and a TTL, with individual texts
+  limited to 16 KiB;
+- explicit partial responses when a source fails;
+- limits reapplied client-side even if a remote source ignores them.
 
-Le cache de réponses source peut être désactivé avec
-`limits.source_cache_ttl: 0`. Une durée faible réduit le risque d’afficher un
-instantané devenu obsolète. Sur un hit, `observed_at` conserve la collecte
-originale et la fraîcheur continue de refléter l’âge réel de la donnée.
+The source response cache can be disabled with `limits.source_cache_ttl: 0`.
+A short TTL reduces the risk of showing a snapshot that has become stale. On a
+hit, `observed_at` keeps the original collection time and freshness continues
+to reflect the real age of the data.
 
-### Résultats trompeurs
+### Misleading results
 
-- L’absence de preuve n’est jamais présentée comme une preuve de bon fonctionnement.
-- L’échec d’une source ne supprime pas les résultats des autres.
-- Les contradictions sont conservées dans la chronologie.
-- Les erreurs réseau ou de décodage ne deviennent jamais une liste vide réussie.
-- Gatus choisit le dernier état par horodatage, pas par position.
-- L’API de liste Healthchecks ne permet pas d’affirmer un incident passé ou un rétablissement.
-- Un état Healthchecks courant est daté à la collecte ; `last_ping` reste un attribut séparé.
+- Absence of evidence is never presented as proof of healthy operation.
+- Failure of one source does not remove results from the others.
+- Contradictions are kept in the timeline.
+- Network or decode errors never become a successful empty list.
+- Gatus picks the latest state by timestamp, not by position.
+- The Healthchecks list API cannot assert a past incident or a recovery.
+- A current Healthchecks state is dated at collection time; `last_ping` remains
+  a separate attribute.
 
-### Risques résiduels
+### Residual risks
 
-- Une configuration compromise peut désigner des services contrôlés par un attaquant.
-- Le DNS système reste une dépendance de confiance.
-- Un proxy Docker en lecture seule doit être correctement restreint par l’opérateur.
-- L’expurgation est une défense en profondeur, pas un système DLP.
-- Une dérive d’horloge peut désordonner les événements de plusieurs hôtes.
+- A compromised configuration can point to attacker-controlled services.
+- System DNS remains a trust dependency.
+- A read-only Docker proxy must be correctly restricted by the operator.
+- Redaction is defense in depth, not a DLP system.
+- Clock skew can disorder events across multiple hosts.
 
-## Checklist opérateur
+## Operator checklist
 
-1. Utiliser un proxy Docker limité à `GET /containers/json`.
-2. Utiliser une clé Healthchecks strictement en lecture seule.
-3. Stocker configuration et jetons hors du dépôt en mode `0600` sous Unix,
-   ou avec une ACL utilisateur équivalente sous Windows.
-4. Exécuter le binaire avec un compte peu privilégié.
-5. Préférer HTTPS avec une PKI interne valide.
-6. Adapter les règles `redact` aux formats locaux de secrets.
+1. Use a Docker proxy limited to `GET /containers/json`.
+2. Use a strictly read-only Healthchecks key.
+3. Store configuration and tokens outside the repository in mode `0600` on
+   Unix, or with an equivalent user ACL on Windows.
+4. Run the binary with a low-privilege account.
+5. Prefer HTTPS with a valid internal PKI.
+6. Adapt `redact` rules to local secret formats.

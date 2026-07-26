@@ -85,7 +85,7 @@ func TestStatus_NullListIsAnAdapterError(t *testing.T) {
 	_ = hc.RegisterDestination("bz", ts.URL)
 	cli := &Client{HTTP: hc, DestName: "bz"}
 	if _, err := cli.Status(context.Background(), "media", "missing"); err == nil {
-		t.Fatal("une liste null ne doit pas devenir une absence valide")
+		t.Fatal("a null list must not become a valid not-found result")
 	}
 }
 
@@ -161,9 +161,9 @@ func TestStatus_RedactsAllTextAttributes(t *testing.T) {
 	}
 	raw, _ := json.Marshal(item)
 	if strings.Contains(string(raw), "supersecret") {
-		t.Fatalf("attribut non expurgé : %s", raw)
+		t.Fatalf("attribute not redacted: %s", raw)
 	}
 	if item.RedactionsApplied == 0 {
-		t.Fatal("aucune expurgation signalée")
+		t.Fatal("no redaction reported")
 	}
 }

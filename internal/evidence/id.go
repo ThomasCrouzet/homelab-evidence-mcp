@@ -9,7 +9,7 @@ import (
 
 var idCounter atomic.Uint64
 
-// NewOpaqueID renvoie un identifiant opaque local au processus.
+// NewOpaqueID returns a process-local opaque identifier.
 func NewOpaqueID(prefix string) string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])

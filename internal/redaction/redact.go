@@ -1,4 +1,4 @@
-// Package redaction applique les règles d’expurgation intégrées et configurées.
+// Package redaction applies built-in and configured redaction rules.
 package redaction
 
 import (
@@ -11,19 +11,19 @@ import (
 
 const replacement = "[REDACTED]"
 
-// Engine conserve les règles d’expurgation compilées.
+// Engine holds compiled redaction rules.
 type Engine struct {
 	exact   []string
 	regexps []*regexp.Regexp
 }
 
-// Rule représente une règle issue de la configuration.
+// Rule represents a rule from configuration.
 type Rule struct {
 	Exact string
 	Regex string
 }
 
-// New construit un moteur et refuse toute expression régulière invalide.
+// New builds an engine and rejects any invalid regular expression.
 func New(rules []Rule) (*Engine, error) {
 	e := &Engine{}
 	for i, r := range rules {
@@ -38,7 +38,7 @@ func New(rules []Rule) (*Engine, error) {
 			e.regexps = append(e.regexps, re)
 		}
 	}
-	// Les motifs intégrés restent actifs ; ils ne remplacent pas un système DLP.
+	// Built-in patterns stay active; they are not a substitute for a DLP system.
 	builtins := []string{
 		`(?i)"(password|passwd|pwd|secret|token|api[_-]?key|authorization|cookie|set-cookie)"\s*:\s*"[^"]*"`,
 		`(?i)(((proxy-)?authorization)\s*[:=]\s*)?(bearer|basic)\s+[a-z0-9\-._~+/]+=*`,
@@ -60,7 +60,7 @@ func New(rules []Rule) (*Engine, error) {
 	return e, nil
 }
 
-// Apply expurge s et renvoie le texte ainsi que le nombre de remplacements.
+// Apply redacts s and returns the text plus the number of replacements.
 func (e *Engine) Apply(s string) (string, int) {
 	if e == nil || s == "" {
 		return s, 0
@@ -88,7 +88,7 @@ func (e *Engine) Apply(s string) (string, int) {
 	return SanitizeControl(out), n
 }
 
-// ApplyAndTruncate nettoie, expurge puis borne un texte dans cet ordre.
+// ApplyAndTruncate sanitizes, redacts, then bounds text in that order.
 func ApplyAndTruncate(e *Engine, s string, max int) (string, int, bool) {
 	s = SanitizeControl(s)
 	redactions := 0
@@ -99,7 +99,7 @@ func ApplyAndTruncate(e *Engine, s string, max int) (string, int, bool) {
 	return s, redactions, truncated
 }
 
-// SanitizeControl retire les caractères de contrôle sauf tabulation et fin de ligne.
+// SanitizeControl strips control characters except tab and newlines.
 func SanitizeControl(s string) string {
 	if s == "" {
 		return s
@@ -120,7 +120,7 @@ func SanitizeControl(s string) string {
 	return b.String()
 }
 
-// Truncate limite le nombre de runes sans couper un caractère UTF-8.
+// Truncate limits the rune count without splitting a UTF-8 character.
 func Truncate(s string, max int) (string, bool) {
 	if max <= 0 {
 		return "", true
@@ -135,7 +135,7 @@ func Truncate(s string, max int) (string, bool) {
 	return string(runes[:max-3]) + "...", true
 }
 
-// TruncateBytes limite la taille UTF-8 sans couper un caractère.
+// TruncateBytes limits UTF-8 size without splitting a character.
 func TruncateBytes(s string, max int) (string, bool) {
 	if max <= 0 {
 		return "", true
@@ -162,12 +162,12 @@ func TruncateBytes(s string, max int) (string, bool) {
 	return s[:end] + suffix, true
 }
 
-// UntrustedDataMarker préfixe un texte ressemblant à une instruction.
-// Le contenu reste disponible comme donnée d’analyse non fiable.
+// UntrustedDataMarker prefixes text that looks like an instruction.
+// The content remains available as untrusted analysis data.
 const UntrustedDataMarker = "[UNTRUSTED_LOG_DATA]"
 
-// NeutralizeInstructionLike marque les textes ressemblant à une injection
-// d’instructions sans supprimer leur valeur d’analyse.
+// NeutralizeInstructionLike marks text that looks like an instruction
+// injection without removing its forensic value.
 func NeutralizeInstructionLike(s string) string {
 	if s == "" {
 		return s

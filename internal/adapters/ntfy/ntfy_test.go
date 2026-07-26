@@ -35,7 +35,7 @@ func TestHistory_NDJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	if truncated {
-		t.Fatal("historique tronqué de manière inattendue")
+		t.Fatal("history unexpectedly truncated")
 	}
 	if len(items) != 1 {
 		t.Fatalf("items=%d", len(items))
@@ -47,7 +47,7 @@ func TestHistory_NDJSON(t *testing.T) {
 		t.Fatal(items[0].Severity)
 	}
 	if items[0].WindowStart == nil || items[0].WindowEnd == nil {
-		t.Fatal("fenêtre absente")
+		t.Fatal("window missing")
 	}
 }
 
@@ -65,7 +65,7 @@ func TestHistory_Array(t *testing.T) {
 		t.Fatalf("%v %+v", err, items)
 	}
 	if truncated {
-		t.Fatal("historique tronqué de manière inattendue")
+		t.Fatal("history unexpectedly truncated")
 	}
 }
 
@@ -91,12 +91,12 @@ func TestHistory_InstructionLikeMarked(t *testing.T) {
 		t.Fatal(err)
 	}
 	if truncated {
-		t.Fatal("historique tronqué de manière inattendue")
+		t.Fatal("history unexpectedly truncated")
 	}
 	if len(items) != 1 {
 		t.Fatalf("items=%d", len(items))
 	}
-	// Le résumé est le canal de texte libre renvoyé au client.
+	// The summary is the free-text channel returned to the client.
 	if !strings.Contains(items[0].Summary, redaction.UntrustedDataMarker) {
 		t.Fatalf("expected untrusted marker in summary, got %q", items[0].Summary)
 	}
@@ -136,7 +136,7 @@ func TestHistory_RejectsNullMessages(t *testing.T) {
 				context.Background(), "media", "alerts",
 				t0.Add(-time.Hour), t0.Add(time.Hour), 10,
 			); err == nil {
-				t.Fatal("un message null ne doit pas devenir une notification vide")
+				t.Fatal("a null message must not become an empty notification")
 			}
 		})
 	}
@@ -162,7 +162,7 @@ func TestHistory_SortsBeforeApplyingLimit(t *testing.T) {
 		t.Fatalf("items=%+v", items)
 	}
 	if !truncated {
-		t.Fatal("la limite appliquée doit être signalée")
+		t.Fatal("applied limit must be reported")
 	}
 }
 
@@ -217,7 +217,7 @@ func TestHistory_MissingTimeUsesCollectionWithoutInventingHistory(t *testing.T) 
 		t.Fatal(err)
 	}
 	if len(items) != 0 {
-		t.Fatalf("notification sans date inventée dans le passé : %+v", items)
+		t.Fatalf("dateless notification invented into the past: %+v", items)
 	}
 }
 
@@ -232,10 +232,10 @@ func TestItemFrom_BoundsHostileMarker(t *testing.T) {
 		t.Fatal(item.Attributes)
 	}
 	if !strings.Contains(item.Summary, redaction.UntrustedDataMarker) {
-		t.Fatalf("marqueur absent : %q", item.Summary)
+		t.Fatalf("marker missing: %q", item.Summary)
 	}
 	if len([]rune(item.Summary)) > 32 || !item.Truncated {
-		t.Fatalf("borne non respectée : %+v", item)
+		t.Fatalf("bound not respected: %+v", item)
 	}
 }
 
@@ -247,6 +247,6 @@ func TestItemFrom_SummaryTruncationIsReported(t *testing.T) {
 		t0, t0, 512,
 	)
 	if len([]rune(item.Summary)) != 200 || !item.Truncated {
-		t.Fatalf("troncature de résumé non signalée : %+v", item)
+		t.Fatalf("summary truncation not reported: %+v", item)
 	}
 }

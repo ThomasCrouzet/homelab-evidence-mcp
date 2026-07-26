@@ -1,10 +1,10 @@
-# Configuration d’un client MCP
+# MCP client configuration
 
-`homelab-evidence-mcp` s’exécute comme processus enfant en transport **stdio**.
-Le client doit fournir le chemin du binaire, le fichier de configuration et les
-variables d’environnement nécessaires.
+`homelab-evidence-mcp` runs as a child process over **stdio** transport. The
+client must provide the binary path, configuration file, and required
+environment variables.
 
-## Configuration JSON générique
+## Generic JSON configuration
 
 ```json
 {
@@ -20,32 +20,32 @@ variables d’environnement nécessaires.
 }
 ```
 
-Certains clients utilisent une liste plutôt qu’un objet nommé :
+Some clients use a list rather than a named object:
 
 ```json
 {
   "name": "homelab-evidence",
   "command": "/usr/local/bin/homelab-evidence-mcp",
-  "args": ["--config", "/chemin/config.yaml"],
+  "args": ["--config", "/path/config.yaml"],
   "env": {
     "HEALTHCHECKS_API_TOKEN": "readonly-key"
   }
 }
 ```
 
-Adapter uniquement l’enveloppe attendue par le client. La commande, les
-arguments et l’environnement restent identiques.
+Adapt only the envelope expected by the client. The command, arguments, and
+environment remain the same.
 
-## Vérification
+## Verification
 
 ```bash
-chmod 600 /chemin/config.yaml
-homelab-evidence-mcp --config /chemin/config.yaml --validate
+chmod 600 /path/config.yaml
+homelab-evidence-mcp --config /path/config.yaml --validate
 homelab-evidence-mcp --version
 ```
 
-Sous Windows, remplacer `chmod 600` par une ACL n’accordant l’accès qu’au
-compte qui lance le client MCP.
+On Windows, replace `chmod 600` with an ACL granting access only to the account
+that launches the MCP client.
 
-Après démarrage, la sortie standard est exclusivement réservée à JSON-RPC. Ne
-pas rediriger les journaux vers stdout ; ils sont écrits sur stderr.
+After startup, standard output is reserved exclusively for JSON-RPC. Do not
+redirect logs to stdout; they are written to stderr.

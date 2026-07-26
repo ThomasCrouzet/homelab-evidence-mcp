@@ -84,7 +84,7 @@ func TestFailedInWindow_DownAndGrace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Seuls les états actuels down, grace et paused prouvent un problème.
+	// Only current down, grace, and paused states prove a problem.
 	if len(items) != 3 {
 		t.Fatalf("got %d items %#v", len(items), items)
 	}
@@ -128,7 +128,7 @@ func TestBareArrayResponse(t *testing.T) {
 func TestMissingChecksArrayIsAnError(t *testing.T) {
 	cli := setup(t, 200, map[string]any{})
 	if _, err := cli.Status(context.Background(), "s", Filter{Name: "a"}); err == nil {
-		t.Fatal("un objet incomplet ne doit pas devenir une liste vide")
+		t.Fatal("an incomplete object must not become an empty list")
 	}
 }
 
@@ -148,7 +148,7 @@ func TestStatus_RedactsAllTextAttributes(t *testing.T) {
 	raw, _ := json.Marshal(items)
 	for _, secret := range []string{"supersecret", "anothersecret", "thirdsecret"} {
 		if strings.Contains(string(raw), secret) {
-			t.Fatalf("attribut non expurgé : %s", raw)
+			t.Fatalf("attribute not redacted: %s", raw)
 		}
 	}
 	if len(items) != 1 || items[0].RedactionsApplied == 0 {

@@ -1,4 +1,4 @@
-// Package docker implémente l’adaptateur Docker Engine limité à GET.
+// Package docker implements the GET-only Docker Engine adapter.
 package docker
 
 import (
@@ -15,7 +15,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 )
 
-// Client liste les conteneurs avec GET /containers/json.
+// Client lists containers via GET /containers/json.
 type Client struct {
 	HTTP     *httpx.LockedClient
 	DestName string
@@ -24,7 +24,7 @@ type Client struct {
 	Now      func() time.Time
 }
 
-// containerSummary contient uniquement les champs Docker utilisés.
+// containerSummary holds only the Docker fields used.
 type containerSummary struct {
 	Names   []string          `json:"Names"`
 	Image   string            `json:"Image"`
@@ -34,7 +34,7 @@ type containerSummary struct {
 	Created int64             `json:"Created"`
 }
 
-// Status renvoie l’état filtré de containerName.
+// Status returns the filtered state for containerName.
 func (c *Client) Status(ctx context.Context, serviceID, containerName string) (evidence.Item, error) {
 	retrievedAt := c.now()
 	list, observedAt, err := c.list(ctx, retrievedAt)
@@ -66,7 +66,7 @@ func (c *Client) Status(ctx context.Context, serviceID, containerName string) (e
 	return c.itemFrom(serviceID, ct, observedAt, retrievedAt), nil
 }
 
-// Evidence renvoie l’état courant ; l’API de liste ne fournit aucun historique.
+// Evidence returns the current state; the list API provides no history.
 func (c *Client) Evidence(ctx context.Context, serviceID, containerName string) ([]evidence.Item, error) {
 	item, err := c.Status(ctx, serviceID, containerName)
 	if err != nil {
@@ -76,9 +76,9 @@ func (c *Client) Evidence(ctx context.Context, serviceID, containerName string) 
 }
 
 func (c *Client) list(ctx context.Context, fallback time.Time) ([]containerSummary, time.Time, error) {
-	// all=true inclut les conteneurs arrêtés ; le filtrage par nom reste local.
+	// all=true includes stopped containers; name filtering stays local.
 	path := "/containers/json?" + url.Values{"all": {"true"}}.Encode()
-	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	// LockedClient.Get closes the body before returning the response.
 	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
 	if err != nil {
 		return nil, time.Time{}, err
@@ -88,7 +88,7 @@ func (c *Client) list(ctx context.Context, fallback time.Time) ([]containerSumma
 	}
 	var list []containerSummary
 	if err := json.Unmarshal(body, &list); err != nil {
-		// Une erreur de décodage ne doit jamais devenir une liste vide réussie.
+		// A decode error must never become a successful empty list.
 		return nil, time.Time{}, fmt.Errorf("docker decode: invalid JSON")
 	}
 	if list == nil {
@@ -154,13 +154,13 @@ func (c *Client) itemFrom(serviceID string, ct containerSummary, observedAt, ret
 		"status":         statusClean,
 		"image":          imageClean,
 		"found":          true,
-		// L’API de liste n’expose pas le dernier changement ; observed_at est la collecte.
+		// The list API does not expose last state change; observed_at is collection time.
 		"snapshot": true,
 	}
 	if health != "" {
 		attrs["health"] = health
 	}
-	// Ne jamais renvoyer tous les labels, seulement les clés explicitement autorisées.
+	// Never return all labels, only explicitly allowlisted keys.
 	if v := safeLabel(ct.Labels, "com.docker.compose.service"); v != "" {
 		clean, n, cut := redaction.ApplyAndTruncate(c.Redact, v, 128)
 		redactions += n
@@ -174,8 +174,8 @@ func (c *Client) itemFrom(serviceID string, ct containerSummary, observedAt, ret
 		attrs["compose_project"] = clean
 	}
 
-	// Created représente la création du conteneur et non son dernier changement.
-	// Conserver cette date comme attribut et dater l’instantané à la collecte.
+	// Created is container creation time, not last state change.
+	// Keep that date as an attribute and timestamp the snapshot at collection.
 	if ct.Created > 0 {
 		attrs["created_at"] = time.Unix(ct.Created, 0).UTC().Format(time.RFC3339)
 	}

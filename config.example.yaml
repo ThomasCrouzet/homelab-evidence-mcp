@@ -1,8 +1,8 @@
-# Exemple de configuration pour homelab-evidence-mcp.
-# Copier ce fichier hors du dépôt puis le fournir avec --config.
-# Ne jamais placer de vrais jetons, e-mails ou noms privés dans Git.
-# Schéma JSON pour l’éditeur : config.schema.json.
-# Validation sans démarrer MCP : homelab-evidence-mcp --config chemin --validate
+# Example configuration for homelab-evidence-mcp.
+# Copy this file outside the repository, then pass it with --config.
+# Never put real tokens, emails, or private names in Git.
+# JSON schema for the editor: config.schema.json.
+# Validate without starting MCP: homelab-evidence-mcp --config path --validate
 
 ---
 version: 1
@@ -19,16 +19,16 @@ limits:
   max_body_bytes: 2097152
   evidence_cache_ttl: 5m
   evidence_cache_max: 256
-  # Cache court des réponses GET identiques (0 le désactive).
-  # Sur un hit, observed_at conserve la collecte originale ; cached concerne
-  # uniquement get_evidence. Garder une valeur faible pour les instantanés.
+  # Short cache of identical GET responses (0 disables it).
+  # On a hit, observed_at keeps the original collection time; cached applies
+  # only to get_evidence. Keep a low value for snapshots.
   source_cache_ttl: 15s
   max_tool_calls_per_minute: 120
   max_concurrent_tools: 8
   warn_empty_bindings: true
 
-# Fichier d’audit JSONL rotatif facultatif.
-# stderr reçoit toujours les événements.
+# Optional rotating JSONL audit file.
+# stderr always receives events.
 # audit:
 #   file: /var/log/homelab-evidence-mcp/audit.jsonl
 #   max_bytes: 10485760
@@ -38,33 +38,33 @@ sources:
   gatus:
     kind: gatus
     base_url: https://gatus.example.internal
-    # Les préfixes de chemin sont préservés.
-    # Exemple : https://proxy.example/gatus.
-    # En-têtes statiques facultatifs, sans secret :
+    # Path prefixes are preserved.
+    # Example: https://proxy.example/gatus.
+    # Optional static headers, without secrets:
     # headers:
     #   X-Scope-OrgID: lab
 
   loki:
     kind: loki
     base_url: https://loki.example.internal
-    # Bearer facultatif depuis l’environnement, jamais depuis YAML :
+    # Optional Bearer from the environment, never from YAML:
     # token_env: LOKI_TOKEN
     # token_header: Authorization
 
   docker-main:
     kind: docker
-    # Utiliser un proxy de socket Docker limité aux routes GET.
-    # Le socket unix:///var/run/docker.sock n’est pas pris en charge.
+    # Use a Docker socket proxy limited to GET routes.
+    # The unix:///var/run/docker.sock socket is not supported.
     base_url: http://docker-proxy.example.internal:2375
 
   healthchecks:
     kind: healthchecks
     base_url: https://healthchecks.example.internal
-    # Clé en lecture seule via l’environnement ou un token_file privé.
+    # Read-only key via the environment or a private token_file.
     token_env: HEALTHCHECKS_API_TOKEN
     # token_file: /run/secrets/healthchecks_api_token
 
-# Règles d’expurgation facultatives ; les règles intégrées restent actives.
+# Optional redaction rules; built-in rules stay active.
 redact:
   - exact: "example-local-token-value"
   - regex: '(?i)sessionid=[A-Za-z0-9]+'

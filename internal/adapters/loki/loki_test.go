@@ -96,7 +96,7 @@ func TestSearch_MultiStreamOrderAndRedaction(t *testing.T) {
 		t.Fatal(items[0].Attributes)
 	}
 	if len([]rune(items[0].Attributes["label_host"].(string))) != 128 || !items[0].Truncated {
-		t.Fatalf("troncature de label non signalée : %+v", items[0])
+		t.Fatalf("label truncation not reported: %+v", items[0])
 	}
 }
 
@@ -125,7 +125,7 @@ func TestSearch_InstructionLikeMarked(t *testing.T) {
 		t.Fatal(items[0].Attributes["line"])
 	}
 	if len(items[0].Attributes["line"].(string)) > cli.MaxLineBytes || !items[0].Truncated {
-		t.Fatalf("borne hostile non respectée : %+v", items[0])
+		t.Fatalf("hostile bound not respected: %+v", items[0])
 	}
 }
 
@@ -151,7 +151,7 @@ func TestSearch_NonSuccessStatusDoesNotEchoSourceText(t *testing.T) {
 		Start: time.Now().Add(-time.Hour), End: time.Now(), Limit: 10,
 	})
 	if err == nil || strings.Contains(err.Error(), "source-secret") {
-		t.Fatalf("erreur=%v", err)
+		t.Fatalf("error=%v", err)
 	}
 }
 
@@ -281,7 +281,7 @@ func TestBuildQuery_RejectsControlCharacters(t *testing.T) {
 		{rx: "ok\x00bad"},
 	} {
 		if _, err := buildQuery(`{app="x"}`, input.text, input.rx); err == nil {
-			t.Fatalf("entrée acceptée : %+v", input)
+			t.Fatalf("input accepted: %+v", input)
 		}
 	}
 }

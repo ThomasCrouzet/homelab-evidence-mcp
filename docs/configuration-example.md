@@ -1,28 +1,28 @@
-# Exemple d’intégration générique
+# Generic integration example
 
-Cet exemple utilise uniquement des noms, domaines et identifiants fictifs.
+This example uses only fictional names, domains, and identifiers.
 
-## Topologie
+## Topology
 
-| Rôle | Accès |
+| Role | Access |
 |---|---|
-| Hôte du client MCP | lance `homelab-evidence-mcp` en processus stdio |
-| Hôte de supervision | expose Gatus, Loki et Healthchecks |
-| Hôtes Docker | exposent un proxy de socket limité en lecture |
+| MCP client host | runs `homelab-evidence-mcp` as a stdio process |
+| Monitoring host | exposes Gatus, Loki, and Healthchecks |
+| Docker hosts | expose a read-limited socket proxy |
 
-## Services pilotes
+## Pilot services
 
-| `service_id` | Clé Gatus | Conteneur | Sélecteur Loki | Healthchecks |
+| `service_id` | Gatus key | Container | Loki selector | Healthchecks |
 |---|---|---|---|---|
 | `reverse-proxy` | `infra_proxy` | `caddy` | `{container="caddy"}` | tag `proxy` |
 | `media` | `media_app` | `media` | `{container="media"}` | tag `media` |
-| `git-forge` | `forge_web` | `gitea` | `{container="gitea"}` | facultatif |
-| `monitoring` | `monitoring_grafana` | `grafana` | `{container="grafana"}` | nom `monitoring-heartbeat` |
+| `git-forge` | `forge_web` | `gitea` | `{container="gitea"}` | optional |
+| `monitoring` | `monitoring_grafana` | `grafana` | `{container="grafana"}` | name `monitoring-heartbeat` |
 
-Commencer par quelques services limite le bruit et facilite la vérification des
-correspondances.
+Starting with a few services limits noise and makes it easier to verify
+bindings.
 
-## Configuration minimale
+## Minimal configuration
 
 ```yaml
 version: 1
@@ -50,18 +50,18 @@ services:
       healthchecks: { source: healthchecks, check_tags: [media] }
 ```
 
-Stocker le fichier réel hors du dépôt avec le mode `0600` sous Unix, ou une ACL
-limitée au compte utilisateur sous Windows.
+Store the real file outside the repository with mode `0600` on Unix, or a
+user-only ACL on Windows.
 
-## Vérification progressive
+## Progressive verification
 
-1. Créer uniquement des secrets d’accès en lecture seule.
-2. Restreindre le proxy Docker aux routes `GET` nécessaires.
-3. Valider la configuration avec `--validate`.
-4. Comparer `service_status` aux interfaces des sources.
-5. Tester l’expurgation avec un faux secret.
-6. Simuler un incident sans interrompre la production.
-7. Étendre la couverture seulement après validation des services pilotes.
+1. Create only read-only access secrets.
+2. Restrict the Docker proxy to the required `GET` routes.
+3. Validate the configuration with `--validate`.
+4. Compare `service_status` to the source UIs.
+5. Test redaction with a fake secret.
+6. Simulate an incident without interrupting production.
+7. Expand coverage only after pilot services are validated.
 
-Le binaire reste un processus enfant stdio ; il n’a pas besoin d’être exposé
-comme service réseau permanent.
+The binary remains a stdio child process; it does not need to be exposed as a
+permanent network service.

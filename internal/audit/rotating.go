@@ -8,8 +8,8 @@ import (
 	"sync"
 )
 
-// RotatingFile borne la taille et effectue une rotation numérotée.
-// Les appelants ne doivent jamais lui transmettre de secret.
+// RotatingFile bounds size and performs numbered rotation.
+// Callers must never pass secrets to it.
 type RotatingFile struct {
 	mu       sync.Mutex
 	path     string
@@ -19,7 +19,7 @@ type RotatingFile struct {
 	f        *os.File
 }
 
-// OpenRotating ouvre ou crée path en ajout avec rotation.
+// OpenRotating opens or creates path for append with rotation.
 func OpenRotating(path string, maxBytes int64, maxFiles int) (*RotatingFile, error) {
 	if path == "" {
 		return nil, fmt.Errorf("audit file path required")
@@ -45,7 +45,7 @@ func OpenRotating(path string, maxBytes int64, maxFiles int) (*RotatingFile, err
 	return &RotatingFile{path: path, maxBytes: maxBytes, maxFiles: maxFiles, size: st.Size(), f: f}, nil
 }
 
-// Write implémente io.Writer.
+// Write implements io.Writer.
 func (r *RotatingFile) Write(p []byte) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -62,7 +62,7 @@ func (r *RotatingFile) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// Close ferme le fichier sous-jacent.
+// Close closes the underlying file.
 func (r *RotatingFile) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -82,7 +82,7 @@ func (r *RotatingFile) rotateLocked() error {
 			return err
 		}
 	}
-	// Décaler les anciens fichiers avant de recréer le fichier principal.
+	// Shift older files before recreating the main file.
 	for i := r.maxFiles - 1; i >= 1; i-- {
 		from := r.path
 		if i > 1 {
@@ -147,7 +147,7 @@ func openRegularAuditFile(path string, appendMode bool) (*os.File, error) {
 	return f, nil
 }
 
-// MultiWriter duplique l’écriture vers toutes les sorties.
+// MultiWriter duplicates writes to all outputs.
 func MultiWriter(writers ...io.Writer) io.Writer {
 	return io.MultiWriter(writers...)
 }

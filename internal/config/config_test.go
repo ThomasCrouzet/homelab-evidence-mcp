@@ -159,10 +159,10 @@ sources:
 `)
 	_, err := Parse(raw)
 	if err == nil {
-		t.Fatal("une erreur de type était attendue")
+		t.Fatal("expected a type error")
 	}
 	if strings.Contains(err.Error(), secret) {
-		t.Fatalf("valeur exposée : %v", err)
+		t.Fatalf("value leaked: %v", err)
 	}
 }
 
@@ -300,7 +300,7 @@ services:
 	}
 	withControl := strings.ReplaceAll(string(good), `{app="x",host="y"} |= "error"`, "{app=\"x\u007fy\"}")
 	if _, err := Parse([]byte(withControl)); err == nil {
-		t.Fatal("un caractère de contrôle ne doit pas être accepté")
+		t.Fatal("control character must not be accepted")
 	}
 }
 
@@ -519,7 +519,7 @@ sources:
     base_url: http://127.0.0.1:9
 services: []
 `)
-	// Le mode 0644 doit être refusé.
+	// Mode 0644 must be rejected.
 	loose := filepath.Join(dir, "loose.yaml")
 	if err := os.WriteFile(loose, raw, 0o600); err != nil {
 		t.Fatal(err)
@@ -532,7 +532,7 @@ services: []
 		t.Fatalf("expected permission error, got %v", err)
 	}
 
-	// Le mode 0600 doit être accepté.
+	// Mode 0600 must be accepted.
 	tight := filepath.Join(dir, "tight.yaml")
 	if err := os.WriteFile(tight, raw, 0o600); err != nil {
 		t.Fatal(err)

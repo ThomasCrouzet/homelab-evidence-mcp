@@ -1,4 +1,4 @@
-// Command demo exécute des appels MCP de bout en bout sur des serveurs HTTP fictifs.
+// Command demo runs end-to-end MCP calls against mock HTTP servers.
 package main
 
 import (
@@ -61,7 +61,7 @@ func main() {
 	}))
 	defer dock.Close()
 
-	// Le premier scénario Loki contient un faux secret et une instruction hostile.
+	// The first Loki scenario contains a fake secret and a hostile instruction.
 	loki := httptest.NewServer(wrap("loki", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status": "success",
@@ -78,7 +78,7 @@ func main() {
 	}))
 	defer loki.Close()
 
-	// Un serveur indisponible distinct démontre ensuite les résultats partiels.
+	// A separate unavailable server then demonstrates partial results.
 	lokiDown := httptest.NewServer(wrap("loki-down", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(503)
 	}))
@@ -166,7 +166,7 @@ func main() {
 	fmt.Println("\n--- failed_crons ---")
 	fmt.Println(truncate(call("failed_crons", map[string]any{"duration": "24h"}), 1000))
 
-	// Reconstruire l’application avec Loki indisponible.
+	// Rebuild the application with Loki unavailable.
 	cfg2Path := writeCfg(gatus.URL, dock.URL, lokiDown.URL, hc.URL)
 	cfg2, err := config.LoadFile(cfg2Path)
 	must(err)
@@ -188,7 +188,7 @@ func main() {
 }
 
 func callDirectIncident(app *mcpserver.App) (*mcp.CallToolResult, any, error) {
-	// Ouvrir une nouvelle session en mémoire pour appeler les outils exportés.
+	// Open a new in-memory session to call the exported tools.
 	server := app.Server()
 	st, ct := mcp.NewInMemoryTransports()
 	ctx := context.Background()

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/ThomasCrouzet/homelab-evidence-mcp/config.schema.json",
-  "title": "Configuration de homelab-evidence-mcp",
-  "description": "Aide pour l’éditeur. La validation du binaire est plus stricte. Toujours exécuter : homelab-evidence-mcp --config chemin --validate",
+  "title": "homelab-evidence-mcp configuration",
+  "description": "Editor help. Binary validation is stricter. Always run: homelab-evidence-mcp --config path --validate",
   "type": "object",
   "required": ["version", "sources"],
   "additionalProperties": false,
@@ -12,7 +12,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "default_window": { "type": "string", "description": "Durée Go, par exemple 1h" },
+        "default_window": { "type": "string", "description": "Go duration, for example 1h" },
         "max_incident_window": { "type": "string" },
         "max_cron_window": { "type": "string" },
         "max_log_lines": { "type": "integer", "minimum": 1, "maximum": 500 },
@@ -20,12 +20,12 @@
         "per_source_timeout": { "type": "string" },
         "total_timeout": { "type": "string" },
         "max_log_line_bytes": { "type": "integer", "minimum": 1, "maximum": 16384 },
-        "max_body_bytes": { "type": "integer", "minimum": 1, "maximum": 8388608, "description": "Taille maximale d’un corps HTTP, limitée à 8 Mio" },
-        "evidence_cache_ttl": { "type": "string", "description": "Durée de vie du cache local utilisé par get_evidence" },
+        "max_body_bytes": { "type": "integer", "minimum": 1, "maximum": 8388608, "description": "Maximum HTTP body size, limited to 8 MiB" },
+        "evidence_cache_ttl": { "type": "string", "description": "TTL of the local cache used by get_evidence" },
         "evidence_cache_max": { "type": "integer", "minimum": 1, "maximum": 1000 },
         "source_cache_ttl": {
           "type": "string",
-          "description": "Cache court des réponses GET identiques. Valeur par défaut : 15s ; 0 le désactive. La fraîcheur des preuves reste fondée sur les horodatages de source ou de collecte."
+          "description": "Short cache of identical GET responses. Default: 15s; 0 disables it. Evidence freshness remains based on source or collection timestamps."
         },
         "max_tool_calls_per_minute": { "type": "integer", "minimum": 1, "maximum": 1000 },
         "max_concurrent_tools": { "type": "integer", "minimum": 1, "maximum": 64 },
@@ -36,7 +36,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "file": { "type": "string", "maxLength": 4096, "description": "Chemin facultatif du journal d’audit JSONL rotatif, en mode 0600 sous Unix ou avec une ACL utilisateur sous Windows" },
+        "file": { "type": "string", "maxLength": 4096, "description": "Optional path for the rotating JSONL audit log, mode 0600 on Unix or a user ACL on Windows" },
         "max_bytes": { "type": "integer", "minimum": 1, "maximum": 104857600 },
         "max_files": { "type": "integer", "minimum": 1, "maximum": 20 }
       }
@@ -60,21 +60,21 @@
             "maxLength": 4096,
             "format": "uri",
             "pattern": "^https?://[^\\s/?#]+(?:/[^\\s?#]*)?$",
-            "description": "URL http(s) absolue. Les préfixes de chemin sont préservés. Informations utilisateur, chaînes de requête et fragments sont refusés."
+            "description": "Absolute http(s) URL. Path prefixes are preserved. Userinfo, query strings, and fragments are refused."
           },
           "token_env": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
-          "token_file": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Fichier régulier limité à 4 Kio, en mode 0600 sous Unix ou avec une ACL utilisateur sous Windows" },
+          "token_file": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Regular file limited to 4 KiB, mode 0600 on Unix or a user ACL on Windows" },
           "token_header": {
             "type": "string",
             "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$",
-            "description": "X-Api-Key par défaut pour Healthchecks, Authorization pour les autres sources"
+            "description": "X-Api-Key by default for Healthchecks, Authorization for other sources"
           },
           "headers": {
             "type": "object",
             "maxProperties": 64,
             "additionalProperties": { "type": "string", "maxLength": 4096 },
             "propertyNames": { "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$" },
-            "description": "En-têtes statiques sans secret. Le binaire refuse les noms associés à l’authentification et les en-têtes réservés."
+            "description": "Static headers without secrets. The binary refuses authentication-related names and reserved headers."
           }
         },
         "allOf": [
@@ -91,7 +91,7 @@
             "not": {
               "required": ["token_env", "token_file"]
             },
-            "description": "Définir un seul champ parmi token_env et token_file"
+            "description": "Set only one of token_env and token_file"
           },
           {
             "if": { "required": ["token_header"] },
@@ -147,7 +147,7 @@
                     "type": "string",
                     "minLength": 3,
                     "maxLength": 512,
-                    "description": "Sélecteur LogQL simple avec filtres |= ou |~ facultatifs. Le binaire valide strictement la syntaxe."
+                    "description": "Simple LogQL selector with optional |= or |~ filters. The binary strictly validates syntax."
                   }
                 }
               },

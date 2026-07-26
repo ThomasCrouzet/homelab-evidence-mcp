@@ -1,4 +1,4 @@
-// Command homelab-evidence-mcp lance le serveur MCP stdio en lecture seule.
+// Command homelab-evidence-mcp starts the read-only MCP stdio server.
 package main
 
 import (
@@ -23,7 +23,7 @@ func main() {
 	os.Exit(code)
 }
 
-// run est le point d’entrée testable avec stdout et stderr injectables.
+// run is the testable entry point with injectable stdout and stderr.
 func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("homelab-evidence-mcp", flag.ContinueOnError)
 	fs.SetOutput(stderr)
