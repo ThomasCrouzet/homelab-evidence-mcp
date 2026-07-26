@@ -7,13 +7,13 @@ import (
 
 const maxCacheItems = 1000
 
-// Cache conserve temporairement un nombre borné de preuves dans le processus.
+// Cache temporarily holds a bounded number of evidence items in-process.
 type Cache struct {
 	mu    sync.Mutex
 	ttl   time.Duration
 	max   int
 	items map[string]cacheEntry
-	order []string // ordre d’insertion utilisé pour l’éviction
+	order []string // insertion order used for eviction
 }
 
 type cacheEntry struct {
@@ -21,7 +21,7 @@ type cacheEntry struct {
 	expiresAt time.Time
 }
 
-// NewCache crée un cache ; max <= 0 désactive le stockage.
+// NewCache creates a cache; max <= 0 disables storage.
 func NewCache(ttl time.Duration, max int) *Cache {
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
@@ -36,7 +36,7 @@ func NewCache(ttl time.Duration, max int) *Cache {
 	}
 }
 
-// Put stocke une preuve selon son identifiant.
+// Put stores an evidence item by its id.
 func (c *Cache) Put(item Item) {
 	if c == nil || c.max <= 0 || item.ID == "" {
 		return
@@ -55,14 +55,14 @@ func (c *Cache) Put(item Item) {
 	}
 }
 
-// PutAll stocke plusieurs preuves.
+// PutAll stores multiple evidence items.
 func (c *Cache) PutAll(items []Item) {
 	for _, it := range items {
 		c.Put(it)
 	}
 }
 
-// Get renvoie une preuve non expirée.
+// Get returns a non-expired evidence item.
 func (c *Cache) Get(id string) (Item, bool) {
 	if c == nil || id == "" {
 		return Item{}, false
@@ -85,7 +85,7 @@ func (c *Cache) expireLocked(now time.Time) {
 			delete(c.items, id)
 		}
 	}
-	// Compacter l’ordre après expiration.
+	// Compact order after expiration.
 	n := 0
 	for _, id := range c.order {
 		if _, ok := c.items[id]; ok {

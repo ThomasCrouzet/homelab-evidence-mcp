@@ -1,6 +1,6 @@
-// Package ntfy implémente l’historique d’un sujet ntfy en lecture seule.
-// La route compatible renvoie du NDJSON ou un tableau JSON.
-// Les sujets proviennent uniquement de la configuration.
+// Package ntfy implements read-only history for an ntfy topic.
+// The compatible route returns NDJSON or a JSON array.
+// Topics come only from configuration.
 package ntfy
 
 import (
@@ -21,7 +21,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 )
 
-// Client consulte l’historique d’un sujet prédéfini.
+// Client queries history for a predefined topic.
 type Client struct {
 	HTTP         *httpx.LockedClient
 	DestName     string
@@ -41,7 +41,7 @@ type message struct {
 	Tags     []string `json:"tags"`
 }
 
-// History renvoie les notifications entre start et end, bornées par limit.
+// History returns notifications between start and end, bounded by limit.
 func (c *Client) History(ctx context.Context, serviceID, topic string, start, end time.Time, limit int) ([]evidence.Item, bool, error) {
 	now := c.now()
 	if topic == "" {
@@ -53,12 +53,12 @@ func (c *Client) History(ctx context.Context, serviceID, topic string, start, en
 	if !start.Before(end) {
 		return nil, false, fmt.Errorf("invalid time window")
 	}
-	// poll=1 renvoie les messages conservés sans ouvrir de flux.
+	// poll=1 returns retained messages without opening a stream.
 	q := url.Values{}
 	q.Set("poll", "1")
 	q.Set("since", strconv.FormatInt(start.Unix(), 10))
 	path := "/" + url.PathEscape(topic) + "/json?" + q.Encode()
-	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	// LockedClient.Get closes the body before returning the response.
 	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
 	if err != nil {
 		return nil, false, err
@@ -120,7 +120,7 @@ func decodeMessages(body []byte) ([]message, error) {
 	if len(body) == 0 {
 		return nil, nil
 	}
-	// Tableau JSON.
+	// JSON array.
 	if body[0] == '[' {
 		var decoded []*message
 		if err := json.Unmarshal(body, &decoded); err != nil {
@@ -135,10 +135,10 @@ func decodeMessages(body []byte) ([]message, error) {
 		}
 		return arr, nil
 	}
-	// Flux NDJSON.
+	// NDJSON stream.
 	var out []message
 	sc := bufio.NewScanner(bytes.NewReader(body))
-	// Augmenter la limite du scanner tout en restant borné par le corps HTTP.
+	// Raise the scanner limit while remaining bounded by the HTTP body.
 	buf := make([]byte, 0, 64*1024)
 	sc.Buffer(buf, 1024*1024)
 	for sc.Scan() {
@@ -165,7 +165,7 @@ func (c *Client) itemFrom(serviceID, topic string, m message, ts, now time.Time,
 	}
 	text = redaction.SanitizeControl(text)
 	cleaned, rn := c.redact(text)
-	// Les notifications libres sont des données non fiables, comme les lignes Loki.
+	// Free-form notifications are untrusted data, like Loki lines.
 	cleaned = redaction.NeutralizeInstructionLike(cleaned)
 	cleaned, trunc := redaction.TruncateBytes(cleaned, maxLineBytes)
 	sev := evidence.SeverityInfo

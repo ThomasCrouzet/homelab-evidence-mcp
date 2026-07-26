@@ -1,4 +1,4 @@
-// Package mcpserver expose les outils MCP sur stdio.
+// Package mcpserver exposes MCP tools over stdio.
 package mcpserver
 
 import (
@@ -31,7 +31,7 @@ const (
 	maxConcurrentSourceRequests = 8
 )
 
-// App regroupe les dépendances d’exécution.
+// App holds runtime dependencies.
 type App struct {
 	Cfg      *config.Config
 	Registry *registry.Registry
@@ -52,7 +52,7 @@ type App struct {
 	sourceSem chan struct{}
 }
 
-// NewApp construit les adaptateurs et résout les jetons.
+// NewApp builds adapters and resolves tokens.
 func NewApp(cfg *config.Config, log *slog.Logger, aud *audit.Logger) (*App, error) {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -131,7 +131,7 @@ func NewApp(cfg *config.Config, log *slog.Logger, aud *audit.Logger) (*App, erro
 	return app, nil
 }
 
-// Server construit le serveur MCP et enregistre les outils.
+// Server builds the MCP server and registers tools.
 func (a *App) Server() *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: serverName, Version: version.Version}, nil)
 	mcp.AddTool(s, &mcp.Tool{
@@ -172,13 +172,13 @@ func (a *App) Server() *mcp.Server {
 	return s
 }
 
-// RunStdio sert MCP sur stdin/stdout ; les journaux restent sur stderr.
+// RunStdio serves MCP on stdin/stdout; logs stay on stderr.
 func RunStdio(ctx context.Context, app *App) error {
 	server := app.Server()
 	return server.Run(ctx, &mcp.StdioTransport{})
 }
 
-// toolBudget limite les appels simultanés et par minute.
+// toolBudget limits concurrent and per-minute tool calls.
 type toolBudget struct {
 	mu     sync.Mutex
 	perMin int

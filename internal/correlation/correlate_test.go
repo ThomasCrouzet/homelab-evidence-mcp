@@ -63,13 +63,13 @@ func TestBuildTimeline_SourceTruncation(t *testing.T) {
 	}}
 	b := BuildTimeline("s", base, base.Add(time.Hour), nil, sources, 10)
 	if !b.Truncated {
-		t.Fatal("la troncature de la source doit remonter au bundle")
+		t.Fatal("source truncation must surface on the bundle")
 	}
 	if !strings.Contains(strings.Join(b.Warnings, "\n"), "source loki (loki): truncated") {
 		t.Fatalf("warnings=%v", b.Warnings)
 	}
 	if strings.Contains(strings.Join(b.Warnings, "\n"), "timeline truncated") {
-		t.Fatalf("avertissement de chronologie trompeur : %v", b.Warnings)
+		t.Fatalf("misleading timeline warning: %v", b.Warnings)
 	}
 }
 

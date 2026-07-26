@@ -131,7 +131,7 @@ func TestSanitizeErr_UsesRedaction(t *testing.T) {
 	if !strings.Contains(msg, "[REDACTED]") {
 		t.Fatalf("expected redaction marker: %s", msg)
 	}
-	// Le chemin sans moteur doit aussi expurger les secrets caractéristiques.
+	// The path without an engine must also redact characteristic secrets.
 	msg2 := sanitizeErr(errString("request failed token=aaaaaaaaaaaaaaaaaaaa"), nil)
 	if strings.Contains(msg2, "aaaaaaaaaaaaaaaaaaaa") {
 		t.Fatalf("token leaked: %s", msg2)
@@ -141,7 +141,7 @@ func TestSanitizeErr_UsesRedaction(t *testing.T) {
 	}
 	msg3 := sanitizeErr(errString(strings.Repeat("é", 301)), nil)
 	if !utf8.ValidString(msg3) || utf8.RuneCountInString(msg3) != 300 {
-		t.Fatalf("troncature UTF-8 invalide : %q", msg3)
+		t.Fatalf("invalid UTF-8 truncation: %q", msg3)
 	}
 }
 

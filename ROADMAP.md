@@ -1,28 +1,28 @@
-# Feuille de route
+# Roadmap
 
-Ce document décrit des orientations, pas des engagements ni des dates.
+This document describes directions, not commitments or dates.
 
 ## Version 0.1
 
-- six familles de sources en lecture seule ;
-- registre de services canonique ;
-- sept outils MCP en transport stdio ;
-- modèle de preuve et chronologie déterministes ;
-- validation stricte, expurgation, caches et budgets ;
-- publication de binaires multi-plateformes.
+- six read-only source families;
+- canonical service registry;
+- seven MCP tools over stdio transport;
+- deterministic evidence model and timeline;
+- strict validation, redaction, caches, and budgets;
+- multi-platform binary publishing.
 
-## Évolutions possibles
+## Possible evolutions
 
-- séries temporelles Beszel lorsqu’une API historique stable sera disponible ;
-- autres systèmes de notification compatibles avec le même modèle de preuve ;
-- paquets Homebrew ou Nix si une demande réelle apparaît ;
-- traces OpenTelemetry facultatives limitées aux durées, sans contenu métier.
+- Beszel time series when a stable historical API becomes available;
+- other notification systems compatible with the same evidence model;
+- Homebrew or Nix packages if real demand appears;
+- optional OpenTelemetry traces limited to durations, without business content.
 
-## Non-objectifs permanents
+## Permanent non-goals
 
-- modifier Docker, les hôtes, le DNS ou les notifications ;
-- devenir un proxy de requêtes d’observabilité généraliste ;
-- produire une analyse de cause racine ;
-- distribuer des secrets d’accès ou une topologie privée ;
-- accepter le socket Unix Docker direct ;
-- exposer une option désactivant la vérification TLS.
+- mutate Docker, hosts, DNS, or notifications;
+- become a general-purpose observability request proxy;
+- produce root-cause analysis;
+- distribute access secrets or a private topology;
+- accept the direct Docker Unix socket;
+- expose an option that disables TLS verification.

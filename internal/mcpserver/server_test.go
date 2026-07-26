@@ -151,7 +151,7 @@ func fixtureServers(t *testing.T, downLoki bool) (gatusURL, dockerURL, lokiURL, 
 
 func nano(tm time.Time) string {
 	return strings.TrimSpace(strings.ReplaceAll(
-		// Formater en entier représentant des nanosecondes.
+		// Format as an integer representing nanoseconds.
 		func() string {
 			return jsonNumber(tm.UnixNano())
 		}(), " ", ""))
@@ -263,7 +263,7 @@ func TestToolsViaMCPSession(t *testing.T) {
 		t.Fatal("ping url leak")
 	}
 	if !strings.Contains(inc, "UNTRUSTED_LOG_DATA") && !strings.Contains(inc, "timeout") {
-		// Vérifier la présence d’au moins une preuve.
+		// Require at least some evidence.
 		if !strings.Contains(inc, "factual_summary") {
 			t.Fatal(inc)
 		}
@@ -283,7 +283,7 @@ func TestToolsViaMCPSession(t *testing.T) {
 		t.Fatal(crons)
 	}
 
-	// Extraire un identifiant de preuve pour get_evidence.
+	// Extract an evidence id for get_evidence.
 	var stObj struct {
 		Items []struct {
 			ID string `json:"id"`
@@ -315,18 +315,18 @@ func TestPartialResultsWhenLokiDown(t *testing.T) {
 	b, _ := json.Marshal(out)
 	s := string(b)
 	if !strings.Contains(s, `"status":"error"`) && !strings.Contains(s, `"status":"timeout"`) {
-		// Loki doit apparaître en erreur.
+		// Loki should appear as an error.
 		if !strings.Contains(s, "loki") {
 			t.Fatal(s)
 		}
 	}
-	// Les autres sources doivent encore contribuer.
+	// Other sources should still contribute.
 	if !strings.Contains(s, "gatus") && !strings.Contains(s, "docker") {
 		t.Fatal(s)
 	}
-	// Le résumé factuel doit rester présent.
+	// The factual summary should still be present.
 	if !strings.Contains(s, "factual_summary") && !strings.Contains(s, "FactualSummary") {
-		// Le JSON utilise factual_summary.
+		// JSON uses factual_summary.
 		var m map[string]any
 		_ = json.Unmarshal(b, &m)
 		if m["factual_summary"] == nil {

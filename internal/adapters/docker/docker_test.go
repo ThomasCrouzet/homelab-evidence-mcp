@@ -134,7 +134,7 @@ func TestInvalidJSONNotEmptyList(t *testing.T) {
 func TestNullNotEmptyList(t *testing.T) {
 	cli := setup(t, nil, 200)
 	if _, err := cli.Status(context.Background(), "s", "x"); err == nil {
-		t.Fatal("une liste null ne doit pas devenir une absence valide")
+		t.Fatal("a null list must not become a valid not-found result")
 	}
 }
 
@@ -152,10 +152,10 @@ func TestStatus_RedactsAllTextAttributes(t *testing.T) {
 	}
 	raw, _ := json.Marshal(item)
 	if strings.Contains(string(raw), "supersecret") || strings.Contains(string(raw), "anothersecret") {
-		t.Fatalf("attribut non expurgé : %s", raw)
+		t.Fatalf("attribute not redacted: %s", raw)
 	}
 	if item.RedactionsApplied == 0 {
-		t.Fatal("aucune expurgation signalée")
+		t.Fatal("no redaction reported")
 	}
 }
 
@@ -191,12 +191,12 @@ func TestStatus_CachePreservesSnapshotTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	if calls != 1 {
-		t.Fatalf("appels amont=%d, cache non utilisé", calls)
+		t.Fatalf("upstream calls=%d, cache not used", calls)
 	}
 	if !item.ObservedAt.Before(item.RetrievedAt) {
-		t.Fatalf("horodatages incohérents : observed=%s retrieved=%s", item.ObservedAt, item.RetrievedAt)
+		t.Fatalf("inconsistent timestamps: observed=%s retrieved=%s", item.ObservedAt, item.RetrievedAt)
 	}
 	if item.Freshness != evidence.FreshnessStale {
-		t.Fatalf("fraîcheur=%s, attendue=%s", item.Freshness, evidence.FreshnessStale)
+		t.Fatalf("freshness=%s, want=%s", item.Freshness, evidence.FreshnessStale)
 	}
 }

@@ -20,7 +20,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/config"
 )
 
-// fullFixtureApp construit une App dont les six adaptateurs couvrent le service media.
+// fullFixtureApp builds an App whose six adapters cover the media service.
 func fullFixtureApp(t *testing.T) *App {
 	t.Helper()
 	t.Setenv("HC_DEMO_TOKEN", "demo-readonly-token-not-real")
@@ -178,18 +178,18 @@ func TestCollectBeszel_ViaServiceStatus(t *testing.T) {
 		t.Fatalf("beszel missing from service_status: %s", s)
 	}
 	if !strings.Contains(s, "media-host") && !strings.Contains(s, "metric") {
-		// Les attributs peuvent contenir le nom du système.
+		// Attributes may include the system name.
 		if !strings.Contains(s, `"kind":"beszel"`) && !strings.Contains(s, "SourceBeszel") {
-			// Le résultat de source doit indiquer Beszel en succès.
+			// The source outcome should report Beszel as ok.
 			if !strings.Contains(s, `"kind":"beszel"`) {
-				// Le JSON utilise beszel comme type de SourceOutcome.
+				// JSON uses beszel as the SourceOutcome kind.
 				if !strings.Contains(s, "beszel") {
 					t.Fatal(s)
 				}
 			}
 		}
 	}
-	// Beszel doit être en succès et fournir des éléments.
+	// Beszel should succeed and provide items.
 	var parsed struct {
 		Items   []map[string]any `json:"items"`
 		Sources []struct {
@@ -285,14 +285,14 @@ func TestIncidentContext_ExcludesCurrentSnapshotsFromHistoricalWindow(t *testing
 	}
 	for _, item := range parsed.Items {
 		if item.Source == "docker" || item.Source == "beszel" || item.Source == "healthchecks" {
-			t.Fatalf("instantané actuel présent dans une fenêtre historique : %s", b)
+			t.Fatalf("current snapshot present in historical window: %s", b)
 		}
 	}
 }
 
 func TestFailedCrons_GlobalAllHC(t *testing.T) {
 	app := fullFixtureApp(t)
-	// Sans service_id, interroger tous les clients Healthchecks.
+	// Without service_id, query all Healthchecks clients.
 	_, out, err := app.toolFailedCrons(context.Background(), nil, failedCronsIn{
 		Duration: "24h",
 	})
@@ -304,7 +304,7 @@ func TestFailedCrons_GlobalAllHC(t *testing.T) {
 	if strings.Contains(s, "LEAKME") {
 		t.Fatal("ping url leaked")
 	}
-	// Le chemin global doit contenir media-cron et other-cron.
+	// The global path should include media-cron and other-cron.
 	if !strings.Contains(s, "media-cron") {
 		t.Fatalf("media-cron missing: %s", s)
 	}
@@ -354,7 +354,7 @@ func TestTools_ReadOnlyAnnotations(t *testing.T) {
 		if !tl.Annotations.ReadOnlyHint {
 			t.Fatalf("tool %s ReadOnlyHint=false", tl.Name)
 		}
-		// Aucun nom évoquant une mutation ne doit apparaître.
+		// No mutation-sounding name should appear.
 		n := strings.ToLower(tl.Name)
 		for _, bad := range []string{"restart", "delete", "write", "exec", "stop", "start", "patch"} {
 			if strings.Contains(n, bad) {

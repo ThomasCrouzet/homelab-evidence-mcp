@@ -1,18 +1,17 @@
-# Contribuer
+# Contributing
 
-Merci de votre intérêt pour le projet.
+Thanks for your interest in the project.
 
-## Règles
+## Rules
 
-- Le code, les commentaires, les commits et la documentation sont rédigés en français.
-- Les noms de variables, fonctions, types et fichiers restent en anglais.
-- Ne pas ajouter de ligne d’attribution ou de promotion aux messages de commit.
-- Ne pas réduire la couverture, supprimer des tests ni ajouter un `nolint` de convenance.
-- Ne pas introduire de mutation : démarrage, arrêt, redémarrage, exécution,
-  écriture ou suppression.
-- Toute nouvelle dépendance doit être justifiée dans la pull request.
+- Code, comments, commits, and documentation are written in English.
+- Variable, function, type, and file names stay in English.
+- Do not add attribution or promotional lines to commit messages.
+- Do not reduce coverage, remove tests, or add convenience `nolint` directives.
+- Do not introduce mutation: start, stop, restart, exec, write, or delete.
+- Any new dependency must be justified in the pull request.
 
-## Installation
+## Setup
 
 ```bash
 git clone https://github.com/ThomasCrouzet/homelab-evidence-mcp.git
@@ -22,29 +21,27 @@ go test -race ./...
 go run ./demo
 ```
 
-Go 1.25 ou version ultérieure est requis.
+Go 1.25 or later is required.
 
 ## Style
 
-- Appliquer `gofmt`.
-- Produire des erreurs exploitables sans inclure de secrets.
-- Préférer de petits paquets sous `internal/`.
-- Conserver tous les accès HTTP d’adaptateur derrière `internal/httpx`.
+- Apply `gofmt`.
+- Produce actionable errors without including secrets.
+- Prefer small packages under `internal/`.
+- Keep all adapter HTTP access behind `internal/httpx`.
 
 ## Tests
 
-Toute modification d’adaptateur doit inclure des tests de contrat avec
-`httptest`. Aucun test standard ne doit dépendre d’un homelab réel. Ajouter des
-cas hostiles lors d’une modification touchant l’expurgation, le SSRF ou les
-journaux.
+Any adapter change must include contract tests with `httptest`. No standard test
+should depend on a real homelab. Add hostile cases when changing redaction,
+SSRF handling, or logs.
 
 ## Pull requests
 
-1. Limiter chaque pull request à un changement cohérent.
-2. Inclure les tests adaptés.
-3. Mettre à jour la documentation si les outils, la configuration ou le
-   modèle de sécurité changent.
-4. Employer des messages de commit courts et impératifs.
+1. Limit each pull request to one coherent change.
+2. Include appropriate tests.
+3. Update documentation if tools, configuration, or the security model change.
+4. Use short, imperative commit messages.
 
-Pour une vulnérabilité non corrigée, suivre [SECURITY.md](SECURITY.md) au lieu
-d’ouvrir une issue publique.
+For an unpatched vulnerability, follow [SECURITY.md](SECURITY.md) instead of
+opening a public issue.

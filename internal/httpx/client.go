@@ -1,4 +1,4 @@
-// Package httpx fournit aux adaptateurs un client HTTP verrouillé sur GET.
+// Package httpx provides adapters with a GET-only locked HTTP client.
 package httpx
 
 import (
@@ -28,12 +28,12 @@ const (
 	cacheTimeHeader = "X-Homelab-Evidence-Cache-Time"
 )
 
-// destination représente une URL de base verrouillée au démarrage.
+// destination represents a base URL locked at startup.
 type destination struct {
 	BaseURL *url.URL
 }
 
-// CacheStats décrit l’usage du cache local de réponses GET.
+// CacheStats describes local GET response cache usage.
 type CacheStats struct {
 	Hits   uint64 `json:"hits"`
 	Misses uint64 `json:"misses"`
@@ -49,7 +49,7 @@ type cacheEntry struct {
 	expiresAt   time.Time
 }
 
-// LockedClient appelle uniquement en GET des destinations préenregistrées.
+// LockedClient only issues GET requests to pre-registered destinations.
 type LockedClient struct {
 	mu           sync.RWMutex
 	destinations map[string]*destination
@@ -64,16 +64,16 @@ type LockedClient struct {
 	misses       atomic.Uint64
 }
 
-// Options configure le client.
+// Options configures the client.
 type Options struct {
 	Timeout   time.Duration
 	MaxBody   int64
 	UserAgent string
-	// CacheTTL fixe la durée du cache des GET identiques ; zéro le désactive.
+	// CacheTTL sets how long identical GETs are cached; zero disables caching.
 	CacheTTL time.Duration
 }
 
-// NewLockedClient construit un client avec TLS vérifié et redirections refusées.
+// NewLockedClient builds a client with verified TLS and redirects refused.
 func NewLockedClient(opts Options) *LockedClient {
 	if opts.Timeout <= 0 {
 		opts.Timeout = 10 * time.Second
@@ -85,7 +85,7 @@ func NewLockedClient(opts Options) *LockedClient {
 		opts.UserAgent = "homelab-evidence-mcp/0.1"
 	}
 	transport := &http.Transport{
-		Proxy: nil, // ne jamais appliquer HTTP_PROXY au trafic des adaptateurs
+		Proxy: nil, // never apply HTTP_PROXY to adapter traffic
 		DialContext: (&net.Dialer{
 			Timeout:   5 * time.Second,
 			KeepAlive: 30 * time.Second,
@@ -103,8 +103,8 @@ func NewLockedClient(opts Options) *LockedClient {
 		cache:        make(map[string]cacheEntry),
 	}
 	if _, err := rand.Read(lc.cacheKey[:]); err != nil {
-		// Sans clé aléatoire, désactiver le cache au lieu de créer une empreinte
-		// d’authentification affaiblie.
+		// Without a random key, disable the cache rather than create a weak
+		// authentication fingerprint.
 		lc.cacheTTL = 0
 	}
 	lc.client = &http.Client{
@@ -123,8 +123,8 @@ var (
 	errHostMismatch      = errors.New("resolved request host is outside locked destination")
 )
 
-// RegisterDestination verrouille une URL nommée au démarrage.
-// Les préfixes de chemin sont préservés lors de la composition des routes.
+// RegisterDestination locks a named URL at startup.
+// Path prefixes are preserved when composing routes.
 func (c *LockedClient) RegisterDestination(name, rawURL string) error {
 	if name == "" {
 		return errors.New("destination name is required")
@@ -148,7 +148,7 @@ func (c *LockedClient) RegisterDestination(name, rawURL string) error {
 	if len([]rune(rawURL)) > 4096 || invalidPath(u.Path) {
 		return fmt.Errorf("destination %q: invalid or oversized base path", name)
 	}
-	// Préserver le préfixe et retirer les slashs finaux pour une composition stable.
+	// Preserve the prefix and strip trailing slashes for stable composition.
 	basePath := strings.TrimRight(u.Path, "/")
 	base := &url.URL{
 		Scheme: u.Scheme,
@@ -164,8 +164,8 @@ func (c *LockedClient) RegisterDestination(name, rawURL string) error {
 	return nil
 }
 
-// joinURLPath concatène un préfixe verrouillé et un chemin relatif.
-// rel commence par / ; un préfixe vide le laisse inchangé.
+// joinURLPath concatenates a locked prefix and a relative path.
+// rel starts with /; an empty prefix leaves it unchanged.
 func joinURLPath(basePath, rel string) string {
 	basePath = strings.TrimRight(basePath, "/")
 	if !strings.HasPrefix(rel, "/") {
@@ -194,7 +194,7 @@ func invalidPath(path string) bool {
 	return false
 }
 
-// Stats renvoie les compteurs du cache.
+// Stats returns cache counters.
 func (c *LockedClient) Stats() CacheStats {
 	c.mu.Lock()
 	now := time.Now()
@@ -217,8 +217,8 @@ func (c *LockedClient) Stats() CacheStats {
 	}
 }
 
-// Get effectue un GET sur une destination et un chemin relatif enregistrés.
-// path doit commencer par / et peut contenir une chaîne de requête.
+// Get performs a GET against a registered destination and relative path.
+// path must start with / and may include a query string.
 func (c *LockedClient) Get(ctx context.Context, destName, path string, headers map[string]string) (*http.Response, []byte, error) {
 	if ctx == nil {
 		return nil, nil, errors.New("nil context")
@@ -249,7 +249,7 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 	if strings.HasPrefix(rel.Path, "//") || invalidPath(rel.Path) {
 		return nil, nil, errors.New("invalid relative path")
 	}
-	// Composition manuelle : ResolveReference retire le préfixe pour un chemin en /.
+	// Manual composition: ResolveReference strips the prefix for a path starting with /.
 	full := &url.URL{
 		Scheme:   dest.BaseURL.Scheme,
 		Host:     dest.BaseURL.Host,
@@ -299,7 +299,7 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 		return nil, nil, sanitizeNetErr(err, destName)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	// Un serveur distant ne doit pas pouvoir usurper les métadonnées du cache.
+	// A remote server must not be able to spoof cache metadata.
 	resp.Header.Del(cacheTimeHeader)
 
 	limited := io.LimitReader(resp.Body, c.maxBody+1)
@@ -321,8 +321,8 @@ func headerFingerprint(h map[string]string, key []byte) string {
 	if len(h) == 0 {
 		return ""
 	}
-	// Les valeurs d’authentification utilisent une empreinte HMAC locale au
-	// processus, ce qui distingue les secrets sans les stocker.
+	// Authentication values use a process-local HMAC fingerprint, which
+	// distinguishes secrets without storing them.
 	parts := make([]string, 0, len(h))
 	for k, v := range h {
 		lk := strings.ToLower(strings.TrimSpace(k))
@@ -375,7 +375,7 @@ func (c *LockedClient) cachePut(key string, status int, body []byte, collectedAt
 		c.cacheBytes -= int64(len(previous.body))
 		delete(c.cache, key)
 	}
-	// Borner simultanément le nombre d’entrées et leur taille cumulée.
+	// Bound both entry count and cumulative size at the same time.
 	for len(c.cache) >= maxCacheEntries || c.cacheBytes+bodyBytes > maxCacheBytes {
 		for k, e := range c.cache {
 			c.cacheBytes -= int64(len(e.body))
@@ -394,8 +394,8 @@ func (c *LockedClient) cachePut(key string, status int, body []byte, collectedAt
 	c.cacheBytes += bodyBytes
 }
 
-// CollectionTime renvoie la date de collecte originale d’une réponse en cache.
-// Pour une réponse réseau directe, fallback est conservé.
+// CollectionTime returns the original collection time of a cached response.
+// For a direct network response, fallback is preserved.
 func CollectionTime(resp *http.Response, fallback time.Time) time.Time {
 	fallback = fallback.UTC()
 	if resp == nil {

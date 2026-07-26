@@ -26,7 +26,7 @@ func TestFilterCurrentSnapshots(t *testing.T) {
 	}
 	for _, item := range got {
 		if item.WindowStart == nil || item.WindowEnd == nil {
-			t.Fatalf("fenêtre absente : %+v", item)
+			t.Fatalf("window missing: %+v", item)
 		}
 	}
 }
@@ -71,11 +71,11 @@ func TestWithSourceTimeoutLimitsConcurrency(t *testing.T) {
 	close(outcomes)
 
 	if got := maximum.Load(); got > 2 {
-		t.Fatalf("concurrence maximale=%d, attendu <= 2", got)
+		t.Fatalf("max concurrency=%d, want <= 2", got)
 	}
 	for outcome := range outcomes {
 		if outcome.Status != "ok" {
-			t.Fatalf("résultat inattendu : %+v", outcome)
+			t.Fatalf("unexpected outcome: %+v", outcome)
 		}
 	}
 }

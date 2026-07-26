@@ -31,11 +31,11 @@ func TestApply_RedactsCompleteAuthorizationCredentials(t *testing.T) {
 	in := "Authorization: Bearer bearercredential123 Proxy-Authorization=Basic dXNlcjpwYXNz"
 	out, n := e.Apply(in)
 	if n != 2 {
-		t.Fatalf("remplacements=%d sortie=%q", n, out)
+		t.Fatalf("replacements=%d out=%q", n, out)
 	}
 	for _, secret := range []string{"bearercredential123", "dXNlcjpwYXNz", "Bearer", "Basic"} {
 		if strings.Contains(out, secret) {
-			t.Fatalf("identifiant exposé : %q", out)
+			t.Fatalf("credential exposed: %q", out)
 		}
 	}
 }
@@ -48,10 +48,10 @@ func TestApply_RedactsJSONCredentials(t *testing.T) {
 	in := `{"authorization":"Bearer jsoncredential123","password":"jsonpassword"}`
 	out, n := e.Apply(in)
 	if n != 2 {
-		t.Fatalf("remplacements=%d sortie=%q", n, out)
+		t.Fatalf("replacements=%d out=%q", n, out)
 	}
 	if strings.Contains(out, "jsoncredential123") || strings.Contains(out, "jsonpassword") {
-		t.Fatalf("secret JSON exposé : %q", out)
+		t.Fatalf("JSON secret exposed: %q", out)
 	}
 }
 
@@ -106,7 +106,7 @@ func TestApplyAndTruncate_RedactsBeforeCutting(t *testing.T) {
 	}
 	got, redactions, truncated := ApplyAndTruncate(eng, "password=supersecret suffix", 10)
 	if strings.Contains(got, "supersecret") {
-		t.Fatalf("secret partiellement exposé : %q", got)
+		t.Fatalf("secret partially exposed: %q", got)
 	}
 	if redactions != 1 || !truncated {
 		t.Fatalf("redactions=%d truncated=%v", redactions, truncated)
@@ -139,7 +139,7 @@ func TestNeutralizeInstructionLike(t *testing.T) {
 	if !strings.Contains(out, in) {
 		t.Fatalf("forensic text lost: %q", out)
 	}
-	// L’opération doit être idempotente.
+	// The operation must be idempotent.
 	if again := NeutralizeInstructionLike(out); again != out {
 		t.Fatalf("not idempotent: %q vs %q", again, out)
 	}

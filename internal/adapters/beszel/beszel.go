@@ -1,5 +1,5 @@
-// Package beszel implémente l’adaptateur de statut Beszel en lecture seule.
-// Les routes compatibles renvoient un tableau ou une enveloppe JSON.
+// Package beszel implements the read-only Beszel status adapter.
+// Compatible routes return a JSON array or wrapper.
 package beszel
 
 import (
@@ -15,7 +15,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 )
 
-// Client interroge une API compatible Beszel uniquement en GET.
+// Client queries a Beszel-compatible API using GET only.
 type Client struct {
 	HTTP     *httpx.LockedClient
 	DestName string
@@ -30,14 +30,14 @@ type systemRow struct {
 	Host   string   `json:"host"`
 	CPU    *float64 `json:"cpu"`
 	Mem    *float64 `json:"mem"`
-	// Champs alternatifs observés dans certaines variantes.
+	// Alternate fields observed in some variants.
 	System string `json:"system"`
 	Info   struct {
 		Hostname string `json:"h"`
 	} `json:"info"`
 }
 
-// Status renvoie un instantané de systemName.
+// Status returns a snapshot for systemName.
 func (c *Client) Status(ctx context.Context, serviceID, systemName string) (evidence.Item, error) {
 	retrievedAt := c.now()
 	list, observedAt, err := c.fetchSystems(ctx, retrievedAt)
@@ -66,7 +66,7 @@ func (c *Client) Status(ctx context.Context, serviceID, systemName string) (evid
 	return c.itemFrom(serviceID, row, observedAt, retrievedAt), nil
 }
 
-// Evidence enveloppe Status dans une liste.
+// Evidence wraps Status in a list.
 func (c *Client) Evidence(ctx context.Context, serviceID, systemName string) ([]evidence.Item, error) {
 	it, err := c.Status(ctx, serviceID, systemName)
 	if err != nil {
@@ -79,7 +79,7 @@ func (c *Client) fetchSystems(ctx context.Context, fallback time.Time) ([]system
 	paths := []string{"/api/systems", "/api/beszel/systems", "/api/systems/"}
 	var lastErr error
 	for _, p := range paths {
-		// LockedClient.Get ferme le corps avant de retourner la réponse.
+		// LockedClient.Get closes the body before returning the response.
 		resp, body, err := c.HTTP.Get(ctx, c.DestName, p, c.Headers) //nolint:bodyclose
 		if err != nil {
 			lastErr = err

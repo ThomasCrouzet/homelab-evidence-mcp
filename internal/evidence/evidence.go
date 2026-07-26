@@ -1,4 +1,4 @@
-// Package evidence définit le modèle de preuve partagé par les adaptateurs.
+// Package evidence defines the evidence model shared by adapters.
 package evidence
 
 import (
@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Kind est le vocabulaire fermé des types de preuve.
+// Kind is the closed vocabulary of evidence types.
 type Kind string
 
 const (
@@ -18,7 +18,7 @@ const (
 	KindNotification  Kind = "notification"
 )
 
-// Severity est un vocabulaire fermé sans interprétation causale.
+// Severity is a closed vocabulary without causal interpretation.
 type Severity string
 
 const (
@@ -29,7 +29,7 @@ const (
 	SeverityUnknown  Severity = "unknown"
 )
 
-// Freshness décrit l’ancienneté d’une preuve à la collecte.
+// Freshness describes how old an evidence item is at collection time.
 type Freshness string
 
 const (
@@ -41,7 +41,7 @@ const (
 	FreshnessMissing Freshness = "missing"
 )
 
-// SourceKind identifie une famille d’adaptateurs.
+// SourceKind identifies an adapter family.
 type SourceKind string
 
 const (
@@ -53,7 +53,7 @@ const (
 	SourceNtfy         SourceKind = "ntfy"
 )
 
-// Item représente une preuve bornée, attribuée et explicitement tronquée.
+// Item represents bounded, attributed, and explicitly truncated evidence.
 type Item struct {
 	ID                string         `json:"id"`
 	ServiceID         string         `json:"service_id,omitempty"`
@@ -72,7 +72,7 @@ type Item struct {
 	Freshness         Freshness      `json:"freshness"`
 }
 
-// SourceOutcome décrit le résultat de consultation d’une source.
+// SourceOutcome describes the result of querying a source.
 type SourceOutcome struct {
 	SourceName string     `json:"source_name"`
 	Kind       SourceKind `json:"kind"`
@@ -83,7 +83,7 @@ type SourceOutcome struct {
 	DurationMS int64      `json:"duration_ms"`
 }
 
-// Bundle enveloppe une réponse multi-source.
+// Bundle wraps a multi-source response.
 type Bundle struct {
 	ServiceID      string          `json:"service_id,omitempty"`
 	RequestedStart time.Time       `json:"requested_start,omitempty"`
@@ -98,7 +98,7 @@ type Bundle struct {
 	RetrievedAt    time.Time       `json:"retrieved_at"`
 }
 
-// SortItems trie les preuves par date, source, identité source puis identifiant.
+// SortItems sorts evidence by time, source, source identity, then id.
 func SortItems(items []Item) {
 	sort.SliceStable(items, func(i, j int) bool {
 		a, b := items[i], items[j]
@@ -115,7 +115,7 @@ func SortItems(items []Item) {
 	})
 }
 
-// SortOutcomes trie les résultats par type puis par nom.
+// SortOutcomes sorts outcomes by kind then name.
 func SortOutcomes(outcomes []SourceOutcome) {
 	sort.SliceStable(outcomes, func(i, j int) bool {
 		if outcomes[i].Kind != outcomes[j].Kind {
@@ -125,7 +125,7 @@ func SortOutcomes(outcomes []SourceOutcome) {
 	})
 }
 
-// ComputeFreshness classe l’ancienneté par rapport à now.
+// ComputeFreshness classifies age relative to now.
 func ComputeFreshness(observed, now time.Time) Freshness {
 	if observed.IsZero() {
 		return FreshnessUnknown

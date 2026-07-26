@@ -95,7 +95,7 @@ func TestStatus_RejectsNullList(t *testing.T) {
 		_, _ = w.Write([]byte(`null`))
 	})
 	if _, err := cli.Status(context.Background(), "x", "missing"); err == nil {
-		t.Fatal("une liste null ne doit pas devenir une absence valide")
+		t.Fatal("a null list must not become a valid not-found result")
 	}
 }
 
@@ -132,10 +132,10 @@ func TestEvidenceInWindow(t *testing.T) {
 		t.Fatalf("got %d", len(items))
 	}
 	if truncated {
-		t.Fatal("historique tronqué de manière inattendue")
+		t.Fatal("history unexpectedly truncated")
 	}
 	if items[0].WindowStart == nil || items[0].WindowEnd == nil {
-		t.Fatal("fenêtre absente")
+		t.Fatal("window missing")
 	}
 }
 
@@ -186,9 +186,9 @@ func TestStatus_RedactsAllTextAttributes(t *testing.T) {
 	}
 	raw, _ := json.Marshal(item)
 	if strings.Contains(string(raw), "supersecret") || strings.Contains(string(raw), "anothersecret") {
-		t.Fatalf("attribut non expurgé : %s", raw)
+		t.Fatalf("attribute not redacted: %s", raw)
 	}
 	if item.RedactionsApplied == 0 {
-		t.Fatal("aucune expurgation signalée")
+		t.Fatal("no redaction reported")
 	}
 }

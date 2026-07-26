@@ -8,13 +8,13 @@ build:
 	mkdir -p bin
 	go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/homelab-evidence-mcp
 
-# Suite locale complète avec détection des courses.
+# Full local suite with race detection.
 test: race
 
 race:
 	go test ./... -race -count=1
 
-# Tests rapides sans détection des courses.
+# Fast tests without race detection.
 test-quick:
 	go test ./... -count=1
 
@@ -31,12 +31,12 @@ fmt:
 lint: vet
 	@unformatted="$$(gofmt -l .)"; \
 	if [ -n "$$unformatted" ]; then \
-		echo "Fichiers non formatés :"; echo "$$unformatted"; exit 1; \
+		echo "Unformatted files:"; echo "$$unformatted"; exit 1; \
 	fi
 	@if command -v golangci-lint >/dev/null 2>&1; then \
 		golangci-lint run --timeout=5m ./...; \
 	else \
-		echo "golangci-lint absent ; contrôle limité à vet et gofmt"; \
+		echo "golangci-lint not found; limited to vet and gofmt"; \
 	fi
 
 fuzz:

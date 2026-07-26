@@ -1,4 +1,4 @@
-// Package audit écrit des événements structurés sur stderr ou dans un fichier.
+// Package audit writes structured events to stderr or a file.
 package audit
 
 import (
@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Event représente une entrée d’audit sans secret ni corps de journal brut.
+// Event represents an audit entry without secrets or raw log bodies.
 type Event struct {
 	Time       time.Time `json:"time"`
 	Action     string    `json:"action"`
@@ -20,13 +20,13 @@ type Event struct {
 	Detail     string    `json:"detail,omitempty"`
 }
 
-// Logger sérialise les écritures concurrentes.
+// Logger serializes concurrent writes.
 type Logger struct {
 	mu  sync.Mutex
 	out io.Writer
 }
 
-// New crée un journal JSONL vers w, ou stderr par défaut.
+// New creates a JSONL log to w, or stderr by default.
 func New(w io.Writer) *Logger {
 	if w == nil {
 		w = os.Stderr
@@ -34,7 +34,7 @@ func New(w io.Writer) *Logger {
 	return &Logger{out: w}
 }
 
-// Log écrit un événement.
+// Log writes an event.
 func (l *Logger) Log(e Event) {
 	if l == nil {
 		return

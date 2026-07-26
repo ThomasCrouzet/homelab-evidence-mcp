@@ -67,6 +67,6 @@ func TestOpenRotating_RejectsSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	if st.Mode().Perm() != 0o644 {
-		t.Fatalf("la cible du lien a été modifiée : mode=%o", st.Mode().Perm())
+		t.Fatalf("symlink target was modified: mode=%o", st.Mode().Perm())
 	}
 }

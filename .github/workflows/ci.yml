@@ -17,14 +17,17 @@ permissions:
 
 jobs:
   ci:
-    name: formatage / analyse / tests / compilation
+    name: format / lint / tests / build
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - name: Récupérer le dépôt
+      - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # Full history so gitleaks can resolve parent ranges on PRs.
+          fetch-depth: 0
 
-      - name: Configurer Go
+      - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version: '1.25.x'
@@ -35,12 +38,12 @@ jobs:
         run: |
           unformatted="$(gofmt -l .)"
           if [ -n "$unformatted" ]; then
-            echo "Fichiers non formatés :"
+            echo "Unformatted files:"
             echo "$unformatted"
             exit 1
           fi
 
-      - name: Hygiène du dépôt public
+      - name: Public repository hygiene
         shell: bash
         run: |
           status=0
@@ -48,12 +51,12 @@ jobs:
           tailscale_dns='[[:alnum:].-]+\.ts\.net'
           if git grep -nIE "$tailscale_ip" -- . ':(exclude).git' ||
             git grep -nIE "$tailscale_dns" -- . ':(exclude).git'; then
-            echo "Adresse ou domaine Tailscale privé potentiel" >&2
+            echo "Potential private Tailscale address or domain" >&2
             status=1
           fi
           exit "$status"
 
-      - name: Cohérence des dépendances
+      - name: Dependency consistency
         run: |
           go mod tidy
           git diff --exit-code -- go.mod go.sum
@@ -68,34 +71,34 @@ jobs:
           version: v2.12.2
           args: --timeout=5m
 
-      - name: Détection de courses
+      - name: Race detection
         run: go test ./... -race -count=1
 
-      - name: Couverture
+      - name: Coverage
         run: |
           go test ./... -coverprofile=coverage.out -count=1
           go tool cover -func=coverage.out | tail -20
 
-      - name: Fuzzing court
+      - name: Short fuzzing
         run: |
           go test ./internal/config -fuzz=FuzzParse -fuzztime=8s
           go test ./internal/redaction -fuzz=FuzzApply -fuzztime=5s
           go test ./internal/adapters/loki -fuzz=FuzzParseNano -fuzztime=5s
 
-      - name: Démonstration
+      - name: Demo
         run: go run ./demo
 
-      - name: Vulnérabilités Go
+      - name: Go vulnerabilities
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
           "$(go env GOPATH)/bin/govulncheck" ./...
 
-      - name: Recherche de secrets
+      - name: Secret scan
         uses: gitleaks/gitleaks-action@v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Matrice de compilation
+      - name: Build matrix
         shell: bash
         run: |
           set -euo pipefail
@@ -108,7 +111,7 @@ jobs:
             ext=""
             if [ "$os" = "windows" ]; then ext=".exe"; fi
             out="dist/homelab-evidence-mcp_${os}_${arch}${ext}"
-            echo "Construction de $out"
+            echo "Building $out"
             GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath \
               -ldflags="-s -w -X ${version_path}=0.1.0" \
               -o "$out" ./cmd/homelab-evidence-mcp

@@ -1,36 +1,36 @@
 # homelab-evidence-mcp
 
 [![CI](https://github.com/ThomasCrouzet/homelab-evidence-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/ThomasCrouzet/homelab-evidence-mcp/actions/workflows/ci.yml)
-[![Licence : MIT](https://img.shields.io/badge/Licence-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Serveur MCP local en transport **stdio** qui réunit les preuves d’incident d’un
-homelab. Il tient dans un binaire Go statique et ne propose aucune mutation.
+Local MCP server over **stdio** transport that gathers incident evidence from a
+homelab. It ships as a static Go binary and offers no mutation operations.
 
-## Pourquoi
+## Why
 
-Lorsqu’un service tombe, les signaux sont dispersés :
+When a service fails, the signals are scattered:
 
-- Gatus signale une erreur ;
-- Docker montre un conteneur en redémarrage ;
-- Loki contient un timeout quelques instants plus tôt ;
-- Healthchecks indique une tâche planifiée en échec.
+- Gatus reports an error;
+- Docker shows a container restarting;
+- Loki contains a timeout a few moments earlier;
+- Healthchecks shows a scheduled job failing.
 
-Les outils spécialisés exposent correctement leur propre source, mais ne
-partagent ni identité de service, ni format de preuve, ni chronologie commune.
-Ce projet fournit cette couche de corrélation sans inventer de causalité.
+Specialized tools correctly expose their own source, but they share neither a
+service identity, nor a common evidence format, nor a shared timeline. This
+project provides that correlation layer without inventing causality.
 
-## Principes
+## Principles
 
-1. **Registre canonique** : un `service_id` explicite relie les identités Gatus,
-   Docker, Loki, Healthchecks, Beszel et ntfy.
-2. **Modèle de preuve commun** : chaque élément est borné, horodaté, attribué,
-   expurgé et marqué lorsqu’il est tronqué.
-3. **Corrélation déterministe** : la chronologie présente des faits ; elle ne
-   prétend pas établir une cause racine.
-4. **Lecture seule structurelle** : seules des requêtes HTTP `GET` vers des
-   destinations verrouillées au démarrage sont possibles.
+1. **Canonical registry**: an explicit `service_id` links Gatus, Docker, Loki,
+   Healthchecks, Beszel, and ntfy identities.
+2. **Common evidence model**: every item is bounded, timestamped, attributed,
+   redacted, and marked when truncated.
+3. **Deterministic correlation**: the timeline presents facts; it does not claim
+   to establish a root cause.
+4. **Structural read-only**: only HTTP `GET` requests to destinations locked at
+   startup are allowed.
 
-Exemple abrégé :
+Short example:
 
 ```text
 02:12 Loki  upstream timeout [REDACTED]
@@ -41,50 +41,49 @@ Exemple abrégé :
 Timeline is ordered by observed_at; correlation does not establish root cause.
 ```
 
-Ce serveur n’est ni un tableau de bord, ni un proxy HTTP générique, ni un plan
-de contrôle. Il ne redémarre aucun conteneur et ne produit aucune analyse de
-cause racine.
+This server is neither a dashboard, nor a generic HTTP proxy, nor a control
+plane. It restarts no container and produces no root-cause analysis.
 
 ## Installation
 
-Prérequis : Go 1.25 ou version ultérieure.
+Prerequisite: Go 1.25 or later.
 
 ```bash
 go install github.com/ThomasCrouzet/homelab-evidence-mcp/cmd/homelab-evidence-mcp@latest
 ```
 
-Pour construire depuis le dépôt :
+To build from the repository:
 
 ```bash
 make build
 ./bin/homelab-evidence-mcp --version
 ```
 
-## Démarrage rapide
+## Quick start
 
-1. Copier `config.example.yaml` vers un emplacement privé.
-2. Restreindre le fichier au propriétaire : `chmod 600 /chemin/config.yaml`
-   sous Unix, ou une ACL limitée au compte utilisateur sous Windows.
-3. Renseigner les URL internes et quelques services pilotes.
-4. Exporter les jetons requis, par exemple `HEALTHCHECKS_API_TOKEN`.
-5. Valider la configuration avant le branchement au client MCP.
+1. Copy `config.example.yaml` to a private location.
+2. Restrict the file to the owner: `chmod 600 /path/config.yaml` on Unix, or a
+   user-only ACL on Windows.
+3. Fill in internal URLs and a few pilot services.
+4. Export required tokens, for example `HEALTHCHECKS_API_TOKEN`.
+5. Validate the configuration before wiring it into the MCP client.
 
 ```bash
-homelab-evidence-mcp --config /chemin/config.yaml --validate
+homelab-evidence-mcp --config /path/config.yaml --validate
 ```
 
-La validation charge les jetons, vérifie les destinations et échoue sur toute
-clé YAML inconnue. Les chaînes de requête et fragments sont interdits dans
-`base_url` ; l’authentification passe par `token_env` ou `token_file`.
+Validation loads tokens, checks destinations, and fails on any unknown YAML
+key. Query strings and fragments are forbidden in `base_url`; authentication
+uses `token_env` or `token_file`.
 
-Enregistrement auprès d’un client MCP :
+Registration with an MCP client:
 
 ```json
 {
   "mcpServers": {
     "homelab-evidence": {
-      "command": "/chemin/homelab-evidence-mcp",
-      "args": ["--config", "/chemin/config.yaml"],
+      "command": "/path/homelab-evidence-mcp",
+      "args": ["--config", "/path/config.yaml"],
       "env": {
         "HEALTHCHECKS_API_TOKEN": "readonly-key"
       }
@@ -93,98 +92,97 @@ Enregistrement auprès d’un client MCP :
 }
 ```
 
-La sortie standard est réservée au protocole JSON-RPC. Les journaux et
-événements d’audit sont écrits sur la sortie d’erreur. Voir
-[la configuration des clients MCP](docs/mcp-hosts.md) et
-[l’exemple d’intégration](docs/configuration-example.md).
+Standard output is reserved for the JSON-RPC protocol. Logs and audit events
+are written to standard error. See
+[MCP client configuration](docs/mcp-hosts.md) and the
+[integration example](docs/configuration-example.md).
 
-## Sources prises en charge
+## Supported sources
 
-| Source | Surface utilisée | Garanties principales |
+| Source | Surface used | Main guarantees |
 |---|---|---|
-| Gatus | `GET /api/v1/endpoints/statuses` | dernier résultat choisi par horodatage |
-| Docker Engine | `GET /containers/json?all=true` | champs filtrés, jamais `Config.Env` |
-| Loki | `GET /loki/api/v1/query_range` | sélecteur fixé dans la configuration |
-| Healthchecks | `GET /api/v3/checks/` | clé en lecture seule, aucune URL de ping |
-| Beszel | `GET /api/systems` et variantes compatibles | instantané hôte facultatif |
-| ntfy | `GET /{topic}/json?poll=1` | sujet fixé dans la configuration |
+| Gatus | `GET /api/v1/endpoints/statuses` | latest result chosen by timestamp |
+| Docker Engine | `GET /containers/json?all=true` | filtered fields, never `Config.Env` |
+| Loki | `GET /loki/api/v1/query_range` | selector fixed in configuration |
+| Healthchecks | `GET /api/v3/checks/` | read-only key, no ping URL |
+| Beszel | `GET /api/systems` and compatible variants | optional host snapshot |
+| ntfy | `GET /{topic}/json?poll=1` | topic fixed in configuration |
 
-Les destinations acceptent uniquement `http` et `https`. Pour Docker, utiliser
-un proxy de socket limité en lecture ; le socket Unix direct n’est pas pris en
-charge. `HTTP_PROXY` et `HTTPS_PROXY` sont ignorés.
+Destinations accept only `http` and `https`. For Docker, use a read-limited
+socket proxy; the direct Unix socket is not supported. `HTTP_PROXY` and
+`HTTPS_PROXY` are ignored.
 
-Un préfixe de chemin est autorisé dans `base_url` :
-`https://proxy.example/gatus` est correctement combiné avec les routes Gatus.
+A path prefix is allowed in `base_url`:
+`https://proxy.example/gatus` is correctly combined with Gatus routes.
 
-Le cache de réponses source (`limits.source_cache_ttl`, `15s` par défaut,
-`0` pour désactiver) mémorise brièvement les requêtes identiques. Les valeurs
-d’authentification ne sont jamais stockées en clair dans ses clés ; une
-empreinte HMAC propre au processus distingue les secrets d’accès. Sur un hit,
-`observed_at` conserve la date de la collecte originale et `retrieved_at`
-indique la relecture courante ; la fraîcheur reflète donc l’âge réel de
-l’instantané.
+The source response cache (`limits.source_cache_ttl`, default `15s`, `0` to
+disable) briefly memorizes identical requests. Authentication values are never
+stored in clear text in its keys; a process-local HMAC fingerprint distinguishes
+access secrets. On a hit, `observed_at` keeps the original collection time and
+`retrieved_at` marks the current read; freshness therefore reflects the real age
+of the snapshot.
 
-## Outils MCP
+## MCP tools
 
-| Outil | Usage |
+| Tool | Usage |
 |---|---|
-| `evidence_capabilities` | version, sources actives, limites et statistiques |
-| `list_services` | services canoniques et couverture |
-| `service_status` | instantané Gatus, Docker, Healthchecks et Beszel |
-| `incident_context` | chronologie multi-source bornée |
-| `search_logs` | recherche Loki sur le sélecteur configuré |
-| `failed_crons` | contrôles actuellement `down`, `grace` ou `paused` |
-| `get_evidence` | relecture temporaire d’une preuve par identifiant opaque |
+| `evidence_capabilities` | version, active sources, limits, and statistics |
+| `list_services` | canonical services and coverage |
+| `service_status` | Gatus, Docker, Healthchecks, and Beszel snapshot |
+| `incident_context` | bounded multi-source timeline |
+| `search_logs` | Loki search on the configured selector |
+| `failed_crons` | checks currently `down`, `grace`, or `paused` |
+| `get_evidence` | temporary re-read of evidence by opaque identifier |
 
-Tous les outils sont annotés en lecture seule. Les limites globales bornent les
-fenêtres, les corps HTTP, le nombre de preuves et la concurrence.
+All tools are annotated as read-only. Global limits bound windows, HTTP bodies,
+evidence counts, and concurrency.
 
-## Modèle de preuve
+## Evidence model
 
-Chaque preuve contient notamment sa source, son horodatage d’observation, son
-horodatage de collecte, sa sévérité, son état de fraîcheur, son éventuelle
-troncature et le nombre d’expurgations appliquées. Les réponses indiquent
-également les sources réussies, absentes, ignorées, en erreur ou expirées.
+Each evidence item includes its source, observation timestamp, collection
+timestamp, severity, freshness state, any truncation, and the number of
+redactions applied. Responses also report sources that succeeded, were absent,
+skipped, errored, or timed out.
 
-Voir [le modèle de preuve](docs/evidence-model.md) et
-[les contrats d’API testés](docs/api-compatibility.md).
+See the [evidence model](docs/evidence-model.md) and
+[tested API contracts](docs/api-compatibility.md).
 
-## Sécurité
+## Security
 
-Les garanties et risques résiduels sont détaillés dans
-[SECURITY.md](SECURITY.md). Points essentiels :
+Guarantees and residual risks are detailed in [SECURITY.md](SECURITY.md).
+Key points:
 
-- destinations verrouillées au démarrage ;
-- redirections HTTP refusées ;
-- aucune URL ni sélecteur de flux fourni par un appel MCP ;
-- contenu des journaux traité comme donnée hostile ;
-- expurgation intégrée et règles locales facultatives ;
-- configuration et fichiers de jeton limités au mode `0600` sous Unix, ou à
-  une ACL utilisateur sous Windows.
+- destinations locked at startup;
+- HTTP redirects refused;
+- no URL or stream selector supplied by an MCP call;
+- log content treated as hostile data;
+- built-in redaction and optional local rules;
+- configuration and token files limited to mode `0600` on Unix, or a user ACL
+  on Windows.
 
-## Démonstration locale
+## Local demo
 
 ```bash
 go run ./demo
 ```
 
-La démonstration lance des serveurs HTTP de test, ouvre une session MCP en
-mémoire, vérifie les résultats partiels, l’expurgation et l’absence totale de
-requêtes autres que `GET`. Aucun homelab réel n’est requis.
+The demo starts test HTTP servers, opens an in-memory MCP session, verifies
+partial results, redaction, and the complete absence of non-`GET` requests. No
+real homelab is required.
 
-## Développement
+## Development
 
 ```bash
-make test          # tests avec détection de courses
-make test-quick    # tests rapides
-make lint          # formatage, go vet et golangci-lint si disponible
+make test          # tests with race detection
+make test-quick    # fast tests
+make lint          # formatting, go vet, and golangci-lint if available
 make coverage
 make build
 ```
 
-Le projet construit des binaires Linux, macOS et Windows en CI. Les cibles
-principales restent les systèmes Linux et macOS sans interface graphique.
+The project builds Linux, macOS, and Windows binaries in CI. Primary targets
+remain headless Linux and macOS systems.
 
-## Licence
+## License
 
-MIT. Voir [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

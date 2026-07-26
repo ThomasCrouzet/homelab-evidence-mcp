@@ -70,7 +70,7 @@ func (a *App) withBudget(fn func() (*mcp.CallToolResult, any, error)) (*mcp.Call
 func (a *App) toolCapabilities(ctx context.Context, _ *mcp.CallToolRequest, _ emptyIn) (*mcp.CallToolResult, any, error) {
 	return a.withBudget(func() (*mcp.CallToolResult, any, error) {
 		_ = ctx
-		// Trier pour produire un JSON stable malgré l’ordre aléatoire des maps.
+		// Sort for stable JSON despite non-deterministic map order.
 		type adapterRow struct {
 			Name string `json:"name"`
 			Kind string `json:"kind"`
@@ -500,8 +500,8 @@ func errResult(err error) *mcp.CallToolResult {
 	}
 }
 
-// sanitizeErr expurge les erreurs avec les règles intégrées toujours actives.
-// Sans moteur fourni, un moteur local empêche tout retour de secret brut.
+// sanitizeErr redacts errors with built-in rules always active.
+// When no engine is provided, a local engine prevents returning raw secrets.
 func sanitizeErr(err error, eng *redaction.Engine) string {
 	if err == nil {
 		return ""
@@ -519,7 +519,7 @@ func sanitizeErr(err error, eng *redaction.Engine) string {
 	return msg
 }
 
-// builtinSanitize sert lorsqu’aucun moteur de l’application n’est disponible.
+// builtinSanitize is used when no application engine is available.
 var builtinSanitize = mustBuiltinRedact()
 
 func mustBuiltinRedact() *redaction.Engine {

@@ -1,4 +1,4 @@
-// Package gatus implémente l’adaptateur Gatus en lecture seule.
+// Package gatus implements the read-only Gatus adapter.
 package gatus
 
 import (
@@ -15,7 +15,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 )
 
-// Client interroge la route de statut Gatus et ses variantes compatibles.
+// Client queries the Gatus status route and compatible variants.
 type Client struct {
 	HTTP     *httpx.LockedClient
 	DestName string
@@ -24,7 +24,7 @@ type Client struct {
 	Now      func() time.Time
 }
 
-// endpointStatus contient uniquement les champs Gatus utilisés.
+// endpointStatus holds only the Gatus fields used.
 type endpointStatus struct {
 	Name    string           `json:"name"`
 	Group   string           `json:"group"`
@@ -40,7 +40,7 @@ type endpointResult struct {
 	Errors    []string `json:"errors"`
 }
 
-// Status récupère la dernière observation de endpointKey.
+// Status fetches the latest observation for endpointKey.
 func (c *Client) Status(ctx context.Context, serviceID, endpointKey string) (evidence.Item, error) {
 	retrievedAt := c.now()
 	list, snapshotAt, err := c.fetchAll(ctx, retrievedAt)
@@ -69,7 +69,7 @@ func (c *Client) Status(ctx context.Context, serviceID, endpointKey string) (evi
 	return c.itemFromEndpoint(serviceID, ep, snapshotAt, retrievedAt), nil
 }
 
-// EvidenceInWindow renvoie les résultats compris entre start et end.
+// EvidenceInWindow returns results between start and end.
 func (c *Client) EvidenceInWindow(ctx context.Context, serviceID, endpointKey string, start, end time.Time, max int) ([]evidence.Item, bool, error) {
 	retrievedAt := c.now()
 	list, _, err := c.fetchAll(ctx, retrievedAt)
@@ -84,7 +84,7 @@ func (c *Client) EvidenceInWindow(ctx context.Context, serviceID, endpointKey st
 		max = 20
 	}
 	var items []evidence.Item
-	// Gatus peut renvoyer un historique non trié ; ordonner par horodatage.
+	// Gatus may return unsorted history; order by timestamp.
 	type pair struct {
 		r  endpointResult
 		ts time.Time
@@ -117,11 +117,11 @@ func (c *Client) EvidenceInWindow(ctx context.Context, serviceID, endpointKey st
 }
 
 func (c *Client) fetchAll(ctx context.Context, fallback time.Time) ([]endpointStatus, time.Time, error) {
-	// Essayer la route principale puis la variante uniquement après un 404.
+	// Try the primary route, then the variant only after a 404.
 	paths := []string{"/api/v1/endpoints/statuses", "/api/v1/endpoints/statuses/"}
 	var lastErr error
 	for _, p := range paths {
-		// LockedClient.Get ferme le corps avant de retourner la réponse.
+		// LockedClient.Get closes the body before returning the response.
 		resp, body, err := c.HTTP.Get(ctx, c.DestName, p, c.Headers) //nolint:bodyclose
 		if err != nil {
 			lastErr = err
@@ -155,7 +155,7 @@ func findEndpoint(list []endpointStatus, key string) (endpointStatus, bool) {
 		if ep.Key == key {
 			return ep, true
 		}
-		// Accepter aussi le nom ou la composition groupe_nom utilisée par certaines versions.
+		// Also accept the name or group_name composition used by some versions.
 		if ep.Name == key {
 			return ep, true
 		}
@@ -198,8 +198,8 @@ func (c *Client) itemFromEndpoint(serviceID string, ep endpointStatus, snapshotA
 			Freshness:         evidence.FreshnessUnknown,
 		}
 	}
-	// Choisir le dernier horodatage valide, sans dépendre de l’ordre du tableau.
-	// Sans date valide, conserver le premier résultat à la date de collecte.
+	// Pick the latest valid timestamp, without relying on array order.
+	// Without a valid date, keep the first result at collection time.
 	best := ep.Results[0]
 	bestTS := snapshotAt
 	foundValid := false

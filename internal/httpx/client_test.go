@@ -26,7 +26,7 @@ func TestGet_OK(t *testing.T) {
 	if err := c.RegisterDestination("main", ts.URL); err != nil {
 		t.Fatal(err)
 	}
-	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	// LockedClient.Get closes the body before returning the response.
 	resp, body, err := c.Get(context.Background(), "main", "/api/x", nil) //nolint:bodyclose
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +42,7 @@ func TestGet_OK(t *testing.T) {
 func TestGet_RejectsAbsolutePath(t *testing.T) {
 	c := NewLockedClient(Options{})
 	_ = c.RegisterDestination("main", "https://example.internal")
-	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	// LockedClient.Get closes the body before returning the response.
 	_, _, err := c.Get(context.Background(), "main", "https://evil.example/x", nil) //nolint:bodyclose
 	if err == nil {
 		t.Fatal("expected error")
@@ -51,7 +51,7 @@ func TestGet_RejectsAbsolutePath(t *testing.T) {
 
 func TestGet_UnknownDest(t *testing.T) {
 	c := NewLockedClient(Options{})
-	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	// LockedClient.Get closes the body before returning the response.
 	_, _, err := c.Get(context.Background(), "nope", "/x", nil) //nolint:bodyclose
 	if err == nil {
 		t.Fatal("expected error")
@@ -150,7 +150,7 @@ func TestRegisterDestination_RejectsUnsafeBasePath(t *testing.T) {
 	} {
 		c := NewLockedClient(Options{})
 		if err := c.RegisterDestination("x", raw); err == nil {
-			t.Fatalf("destination acceptée : %q", raw)
+			t.Fatalf("destination accepted: %q", raw)
 		}
 	}
 }
@@ -161,7 +161,7 @@ func TestGet_RejectsPathTraversal(t *testing.T) {
 	for _, path := range []string{
 		"/../admin", "/safe/../admin", "/safe/%2e/admin", "//evil.example/x",
 	} {
-		// LockedClient.Get ferme le corps avant de retourner la réponse.
+		// LockedClient.Get closes the body before returning the response.
 		//nolint:bodyclose
 		if _, _, err := c.Get(context.Background(), "main", path, nil); err == nil {
 			t.Fatalf("expected rejection for %q", path)
@@ -174,7 +174,7 @@ func TestGet_RejectsOversizedPath(t *testing.T) {
 	if _, _, err := c.Get( //nolint:bodyclose
 		context.Background(), "main", "/"+strings.Repeat("x", 8192), nil,
 	); err == nil || !strings.Contains(err.Error(), "8192") {
-		t.Fatalf("erreur=%v", err)
+		t.Fatalf("error=%v", err)
 	}
 }
 
@@ -193,7 +193,7 @@ func TestGet_CacheHit(t *testing.T) {
 	}
 	fallback := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 	if got := CollectionTime(firstResp, fallback); !got.Equal(fallback) {
-		t.Fatalf("une réponse directe ne doit pas porter de date de cache : %s", got)
+		t.Fatalf("direct response must not carry a cache time: %s", got)
 	}
 	beforeHit := time.Now().UTC().Add(-time.Second)
 	cachedResp, _, err := c.Get(context.Background(), "main", "/x", nil) //nolint:bodyclose
@@ -202,7 +202,7 @@ func TestGet_CacheHit(t *testing.T) {
 	}
 	collectedAt := CollectionTime(cachedResp, fallback)
 	if collectedAt.Equal(fallback) || collectedAt.Before(beforeHit) || collectedAt.After(time.Now().UTC()) {
-		t.Fatalf("date de cache invalide : %s", collectedAt)
+		t.Fatalf("invalid cache time: %s", collectedAt)
 	}
 	if n != 1 {
 		t.Fatalf("expected 1 upstream call, got %d", n)
@@ -222,7 +222,7 @@ func TestStats_ExcludesExpiredEntries(t *testing.T) {
 	if err := c.RegisterDestination("main", ts.URL); err != nil {
 		t.Fatal(err)
 	}
-	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	// LockedClient.Get closes the body before returning the response.
 	//nolint:bodyclose
 	if _, _, err := c.Get(context.Background(), "main", "/x", nil); err != nil {
 		t.Fatal(err)
@@ -234,10 +234,10 @@ func TestStats_ExcludesExpiredEntries(t *testing.T) {
 	}
 	c.mu.Unlock()
 	if got := c.Stats().Size; got != 0 {
-		t.Fatalf("entrées expirées comptées : %d", got)
+		t.Fatalf("expired entries counted: %d", got)
 	}
 	if got := c.Stats().Bytes; got != 0 {
-		t.Fatalf("octets expirés comptés : %d", got)
+		t.Fatalf("expired bytes counted: %d", got)
 	}
 }
 
@@ -249,7 +249,7 @@ func TestCachePut_BoundsCumulativeBytes(t *testing.T) {
 	c.cachePut("second", http.StatusOK, second, time.Now())
 	stats := c.Stats()
 	if stats.Bytes > maxCacheBytes || stats.Size != 1 {
-		t.Fatalf("cache non borné : %+v", stats)
+		t.Fatalf("cache not bounded: %+v", stats)
 	}
 }
 
@@ -264,7 +264,7 @@ func TestGet_PreservesBasePathPrefix(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	// Simuler un montage derrière un proxy inverse.
+	// Simulate a mount behind a reverse proxy.
 	base := strings.TrimRight(ts.URL, "/") + "/gatus"
 	c := NewLockedClient(Options{Timeout: 2 * time.Second})
 	if err := c.RegisterDestination("gatus", base); err != nil {
@@ -316,7 +316,7 @@ func TestHeaderFingerprint_RedactsSecretValues(t *testing.T) {
 	if strings.Contains(fp, "Bearer ") {
 		t.Fatalf("fingerprint embeds bearer material: %q", fp)
 	}
-	// Toutes les valeurs sont masquées : token_header accepte des noms arbitraires.
+	// All values are masked: token_header accepts arbitrary names.
 	if strings.Contains(fp, "lab-tenant") || strings.Contains(fp, "application/json") {
 		t.Fatalf("fingerprint embeds cleartext header value: %q", fp)
 	}
@@ -354,13 +354,13 @@ func TestGet_CacheKeyDoesNotLeakCustomTokenHeader(t *testing.T) {
 	c := NewLockedClient(Options{Timeout: time.Second, CacheTTL: time.Minute})
 	_ = c.RegisterDestination("main", ts.URL)
 	hdrs := map[string]string{"X-Auth-Token": secret}
-	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	// LockedClient.Get closes the body before returning the response.
 	//nolint:bodyclose
 	if _, _, err := c.Get(context.Background(), "main", "/cached", hdrs); err != nil {
 		t.Fatal(err)
 	}
-	// Le même chemin et les mêmes en-têtes doivent réutiliser le cache.
-	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	// The same path and headers must reuse the cache.
+	// LockedClient.Get closes the body before returning the response.
 	//nolint:bodyclose
 	if _, _, err := c.Get(context.Background(), "main", "/cached", hdrs); err != nil {
 		t.Fatal(err)
@@ -368,7 +368,7 @@ func TestGet_CacheKeyDoesNotLeakCustomTokenHeader(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("expected cache hit (1 upstream), got %d", n)
 	}
-	// Vérifier qu’aucune clé locale du cache ne contient le secret en clair.
+	// Verify no local cache key contains the secret in cleartext.
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for k := range c.cache {
