@@ -298,7 +298,7 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 	if err != nil {
 		return nil, nil, sanitizeNetErr(err, destName)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	// Un serveur distant ne doit pas pouvoir usurper les métadonnées du cache.
 	resp.Header.Del(cacheTimeHeader)
 

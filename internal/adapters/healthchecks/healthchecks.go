@@ -112,7 +112,8 @@ func (c *Client) list(ctx context.Context, fallback time.Time) ([]check, time.Ti
 	}
 	// La Management API v3 expose la liste sur GET /api/v3/checks/.
 	path := "/api/v3/checks/"
-	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers)
+	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
 	if err != nil {
 		return nil, time.Time{}, err
 	}
@@ -175,7 +176,7 @@ func tagsMatch(tagStr string, want []string) bool {
 
 func (c *Client) itemFrom(serviceID string, ch check, observedAt, retrievedAt time.Time) evidence.Item {
 	st := strings.ToLower(strings.TrimSpace(ch.Status))
-	sev := evidence.SeverityInfo
+	var sev evidence.Severity
 	rawSummary := fmt.Sprintf("healthchecks %q status=%s", ch.Name, st)
 	switch st {
 	case "up":

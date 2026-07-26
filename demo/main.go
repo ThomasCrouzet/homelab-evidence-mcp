@@ -114,7 +114,7 @@ func main() {
 	client := mcp.NewClient(&mcp.Implementation{Name: "demo", Version: "0.1.0"}, nil)
 	session, err := client.Connect(ctx, ct, nil)
 	must(err)
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	fmt.Println("=== DEMO: homelab-evidence-mcp v0.1 ===")
 	fmt.Println("initialize: ok (in-memory MCP session)")
@@ -198,7 +198,7 @@ func callDirectIncident(app *mcpserver.App) (*mcp.CallToolResult, any, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "demo2", Version: "0.1.0"}, nil)
 	session, err := client.Connect(ctx, ct, nil)
 	must(err)
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name: "incident_context",
 		Arguments: map[string]any{

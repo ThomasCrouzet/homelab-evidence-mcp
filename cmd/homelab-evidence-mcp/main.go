@@ -35,21 +35,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "error: unexpected positional arguments")
+		_, _ = fmt.Fprintln(stderr, "error: unexpected positional arguments")
 		return 2
 	}
 	if *showVersion {
-		fmt.Fprintln(stdout, version.Version)
+		_, _ = fmt.Fprintln(stdout, version.Version)
 		return 0
 	}
 	if *configPath == "" {
-		fmt.Fprintln(stderr, "error: --config is required")
+		_, _ = fmt.Fprintln(stderr, "error: --config is required")
 		return 2
 	}
 
 	level, ok := parseLevel(*logLevel)
 	if !ok {
-		fmt.Fprintln(stderr, "error: --log-level must be debug, info, warn, or error")
+		_, _ = fmt.Fprintln(stderr, "error: --log-level must be debug, info, warn, or error")
 		return 2
 	}
 	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: level}))
@@ -60,7 +60,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	var auditOut io.Writer = stderr
+	auditOut := io.Writer(stderr)
 	var closer io.Closer
 	if cfg.Audit.File != "" {
 		rf, err := audit.OpenRotating(cfg.Audit.File, cfg.Audit.MaxBytes, cfg.Audit.MaxFiles)
@@ -84,7 +84,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	if *validateOnly {
 		log.Info("config ok", "version", version.Version, "services", app.Registry.Len(), "sources", len(cfg.Sources))
-		fmt.Fprintln(stdout, "config ok")
+		_, _ = fmt.Fprintln(stdout, "config ok")
 		return 0
 	}
 

@@ -13,9 +13,8 @@ func TestCache_TTLAndEvict(t *testing.T) {
 	if len(c.items) > 2 {
 		t.Fatal(len(c.items))
 	}
-	if _, ok := c.Get("a"); ok {
-		// L’élément peut avoir été évincé.
-	}
+	// L’élément peut avoir été évincé par la limite de capacité.
+	_, _ = c.Get("a")
 	got, ok := c.Get("c")
 	if !ok || got.Freshness != FreshnessCached {
 		t.Fatalf("%v %v", ok, got)

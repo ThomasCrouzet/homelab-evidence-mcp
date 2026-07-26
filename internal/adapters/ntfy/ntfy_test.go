@@ -22,8 +22,8 @@ func TestHistory_NDJSON(t *testing.T) {
 		if !strings.Contains(r.URL.Path, "/alerts/json") {
 			t.Errorf("path %s", r.URL.Path)
 		}
-		fmt.Fprintf(w, `{"id":"1","time":%d,"event":"message","topic":"alerts","message":"disk full password=supersecret","priority":4}`+"\n", t0.Unix())
-		fmt.Fprintf(w, `{"id":"2","time":%d,"event":"keepalive","topic":"alerts"}`+"\n", t0.Unix())
+		_, _ = fmt.Fprintf(w, `{"id":"1","time":%d,"event":"message","topic":"alerts","message":"disk full password=supersecret","priority":4}`+"\n", t0.Unix())
+		_, _ = fmt.Fprintf(w, `{"id":"2","time":%d,"event":"keepalive","topic":"alerts"}`+"\n", t0.Unix())
 	}))
 	defer ts.Close()
 	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
@@ -54,7 +54,7 @@ func TestHistory_NDJSON(t *testing.T) {
 func TestHistory_Array(t *testing.T) {
 	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, `[{"id":"a","time":%d,"event":"message","message":"ok","priority":1}]`, t0.Unix())
+		_, _ = fmt.Fprintf(w, `[{"id":"a","time":%d,"event":"message","message":"ok","priority":1}]`, t0.Unix())
 	}))
 	defer ts.Close()
 	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
@@ -108,7 +108,7 @@ func TestHistory_InstructionLikeMarked(t *testing.T) {
 func TestHistory_RejectsMalformedNDJSON(t *testing.T) {
 	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, `{"id":"1","time":%d,"event":"message","message":"ok"}`+"\n", t0.Unix())
+		_, _ = fmt.Fprintf(w, `{"id":"1","time":%d,"event":"message","message":"ok"}`+"\n", t0.Unix())
 		_, _ = w.Write([]byte("{not-json}\n"))
 	}))
 	defer ts.Close()
@@ -145,7 +145,7 @@ func TestHistory_RejectsNullMessages(t *testing.T) {
 func TestHistory_SortsBeforeApplyingLimit(t *testing.T) {
 	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, `[
+		_, _ = fmt.Fprintf(w, `[
 			{"id":"later","time":%d,"event":"message","message":"later"},
 			{"id":"earlier","time":%d,"event":"message","message":"earlier"}
 		]`, t0.Add(time.Minute).Unix(), t0.Unix())
@@ -169,7 +169,7 @@ func TestHistory_SortsBeforeApplyingLimit(t *testing.T) {
 func TestHistory_RedactsSourceID(t *testing.T) {
 	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, `{"id":"password=supersecret","time":%d,"event":"message","message":"ok"}`+"\n", t0.Unix())
+		_, _ = fmt.Fprintf(w, `{"id":"password=supersecret","time":%d,"event":"message","message":"ok"}`+"\n", t0.Unix())
 	}))
 	defer ts.Close()
 	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})

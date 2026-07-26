@@ -76,7 +76,7 @@ func fullFixtureApp(t *testing.T) *App {
 
 	beszel := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/systems" && r.URL.Path != "/api/systems/" && r.URL.Path != "/api/beszel/systems" {
-			// Répondre 200 sur la première route essayée.
+			t.Errorf("beszel path %s", r.URL.Path)
 		}
 		_ = json.NewEncoder(w).Encode([]map[string]any{
 			{"name": "media-host", "status": "up", "cpu": 42.0, "mem": 60.0},
@@ -88,7 +88,7 @@ func fullFixtureApp(t *testing.T) *App {
 		if !strings.Contains(r.URL.Path, "/media-alerts/json") {
 			t.Errorf("ntfy path %s", r.URL.Path)
 		}
-		fmt.Fprintf(w, `{"id":"1","time":%d,"event":"message","topic":"media-alerts","message":"disk warn","priority":3}`+"\n", t0.Unix())
+		_, _ = fmt.Fprintf(w, `{"id":"1","time":%d,"event":"message","topic":"media-alerts","message":"disk warn","priority":3}`+"\n", t0.Unix())
 	}))
 	t.Cleanup(ntfy.Close)
 
@@ -338,7 +338,7 @@ func TestTools_ReadOnlyAnnotations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client connect: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	tools, err := session.ListTools(ctx, nil)
 	if err != nil {

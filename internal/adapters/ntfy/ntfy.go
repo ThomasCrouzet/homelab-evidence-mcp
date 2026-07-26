@@ -58,7 +58,8 @@ func (c *Client) History(ctx context.Context, serviceID, topic string, start, en
 	q.Set("poll", "1")
 	q.Set("since", strconv.FormatInt(start.Unix(), 10))
 	path := "/" + url.PathEscape(topic) + "/json?" + q.Encode()
-	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers)
+	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
 	if err != nil {
 		return nil, false, err
 	}

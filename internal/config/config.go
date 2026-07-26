@@ -284,7 +284,7 @@ func LoadFile(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	st, err := f.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
@@ -421,7 +421,7 @@ func Parse(raw []byte) (*Config, error) {
 				continue
 			}
 		}
-		redact = append(redact, RedactRule{Exact: fr.Exact, Regex: fr.Regex})
+		redact = append(redact, RedactRule(fr))
 	}
 
 	if len(errs) > 0 {
@@ -1000,7 +1000,7 @@ func readSecretFile(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	st, err := f.Stat()
 	if err != nil {
 		return "", err

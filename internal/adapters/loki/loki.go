@@ -89,7 +89,8 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 	vals.Set("direction", "forward")
 
 	path := "/loki/api/v1/query_range?" + vals.Encode()
-	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers)
+	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
 	if err != nil {
 		return nil, false, err
 	}

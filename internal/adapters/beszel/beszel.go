@@ -79,7 +79,8 @@ func (c *Client) fetchSystems(ctx context.Context, fallback time.Time) ([]system
 	paths := []string{"/api/systems", "/api/beszel/systems", "/api/systems/"}
 	var lastErr error
 	for _, p := range paths {
-		resp, body, err := c.HTTP.Get(ctx, c.DestName, p, c.Headers)
+		// LockedClient.Get ferme le corps avant de retourner la réponse.
+		resp, body, err := c.HTTP.Get(ctx, c.DestName, p, c.Headers) //nolint:bodyclose
 		if err != nil {
 			lastErr = err
 			continue
@@ -155,7 +156,7 @@ func (c *Client) itemFrom(serviceID string, row systemRow, observedAt, retrieved
 		name = row.Info.Hostname
 	}
 	st := strings.ToLower(strings.TrimSpace(row.Status))
-	sev := evidence.SeverityInfo
+	var sev evidence.Severity
 	rawSummary := fmt.Sprintf("beszel system %s status=%s", name, st)
 	switch st {
 	case "", "up", "online", "ok":

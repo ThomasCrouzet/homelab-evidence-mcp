@@ -78,7 +78,8 @@ func (c *Client) Evidence(ctx context.Context, serviceID, containerName string) 
 func (c *Client) list(ctx context.Context, fallback time.Time) ([]containerSummary, time.Time, error) {
 	// all=true inclut les conteneurs arrêtés ; le filtrage par nom reste local.
 	path := "/containers/json?" + url.Values{"all": {"true"}}.Encode()
-	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers)
+	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
 	if err != nil {
 		return nil, time.Time{}, err
 	}
@@ -116,7 +117,7 @@ func normalizeName(n string) string {
 
 func (c *Client) itemFrom(serviceID string, ct containerSummary, observedAt, retrievedAt time.Time) evidence.Item {
 	state := strings.ToLower(strings.TrimSpace(ct.State))
-	sev := evidence.SeverityInfo
+	var sev evidence.Severity
 	rawSummary := fmt.Sprintf("docker container %s state=%s", primaryName(ct), state)
 	switch state {
 	case "running":

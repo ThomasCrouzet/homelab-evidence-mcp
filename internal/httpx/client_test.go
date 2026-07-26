@@ -26,7 +26,8 @@ func TestGet_OK(t *testing.T) {
 	if err := c.RegisterDestination("main", ts.URL); err != nil {
 		t.Fatal(err)
 	}
-	resp, body, err := c.Get(context.Background(), "main", "/api/x", nil)
+	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	resp, body, err := c.Get(context.Background(), "main", "/api/x", nil) //nolint:bodyclose
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +42,8 @@ func TestGet_OK(t *testing.T) {
 func TestGet_RejectsAbsolutePath(t *testing.T) {
 	c := NewLockedClient(Options{})
 	_ = c.RegisterDestination("main", "https://example.internal")
-	_, _, err := c.Get(context.Background(), "main", "https://evil.example/x", nil)
+	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	_, _, err := c.Get(context.Background(), "main", "https://evil.example/x", nil) //nolint:bodyclose
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -49,7 +51,8 @@ func TestGet_RejectsAbsolutePath(t *testing.T) {
 
 func TestGet_UnknownDest(t *testing.T) {
 	c := NewLockedClient(Options{})
-	_, _, err := c.Get(context.Background(), "nope", "/x", nil)
+	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	_, _, err := c.Get(context.Background(), "nope", "/x", nil) //nolint:bodyclose
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -69,7 +72,7 @@ func TestGet_RedirectDisabled(t *testing.T) {
 	if err := c.RegisterDestination("main", ts.URL); err != nil {
 		t.Fatal(err)
 	}
-	_, body, err := c.Get(context.Background(), "main", "/start", nil)
+	_, body, err := c.Get(context.Background(), "main", "/start", nil) //nolint:bodyclose
 	if err == nil {
 		t.Fatalf("expected redirect error, body=%s", body)
 	}
@@ -86,7 +89,7 @@ func TestGet_NetworkErrorDoesNotExposeHost(t *testing.T) {
 	if err := c.RegisterDestination("main", rawURL); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := c.Get(context.Background(), "main", "/x", nil)
+	_, _, err := c.Get(context.Background(), "main", "/x", nil) //nolint:bodyclose
 	if err == nil {
 		t.Fatal("expected network error")
 	}
@@ -103,7 +106,7 @@ func TestGet_BodyLimit(t *testing.T) {
 	defer ts.Close()
 	c := NewLockedClient(Options{Timeout: time.Second, MaxBody: 100})
 	_ = c.RegisterDestination("main", ts.URL)
-	_, body, err := c.Get(context.Background(), "main", "/", nil)
+	_, body, err := c.Get(context.Background(), "main", "/", nil) //nolint:bodyclose
 	if err == nil {
 		t.Fatal("expected body limit error")
 	}
@@ -158,6 +161,8 @@ func TestGet_RejectsPathTraversal(t *testing.T) {
 	for _, path := range []string{
 		"/../admin", "/safe/../admin", "/safe/%2e/admin", "//evil.example/x",
 	} {
+		// LockedClient.Get ferme le corps avant de retourner la réponse.
+		//nolint:bodyclose
 		if _, _, err := c.Get(context.Background(), "main", path, nil); err == nil {
 			t.Fatalf("expected rejection for %q", path)
 		}
@@ -166,7 +171,7 @@ func TestGet_RejectsPathTraversal(t *testing.T) {
 
 func TestGet_RejectsOversizedPath(t *testing.T) {
 	c := NewLockedClient(Options{})
-	if _, _, err := c.Get(
+	if _, _, err := c.Get( //nolint:bodyclose
 		context.Background(), "main", "/"+strings.Repeat("x", 8192), nil,
 	); err == nil || !strings.Contains(err.Error(), "8192") {
 		t.Fatalf("erreur=%v", err)
@@ -182,7 +187,7 @@ func TestGet_CacheHit(t *testing.T) {
 	defer ts.Close()
 	c := NewLockedClient(Options{Timeout: time.Second, CacheTTL: time.Minute})
 	_ = c.RegisterDestination("main", ts.URL)
-	firstResp, _, err := c.Get(context.Background(), "main", "/x", nil)
+	firstResp, _, err := c.Get(context.Background(), "main", "/x", nil) //nolint:bodyclose
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +196,7 @@ func TestGet_CacheHit(t *testing.T) {
 		t.Fatalf("une réponse directe ne doit pas porter de date de cache : %s", got)
 	}
 	beforeHit := time.Now().UTC().Add(-time.Second)
-	cachedResp, _, err := c.Get(context.Background(), "main", "/x", nil)
+	cachedResp, _, err := c.Get(context.Background(), "main", "/x", nil) //nolint:bodyclose
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,6 +222,8 @@ func TestStats_ExcludesExpiredEntries(t *testing.T) {
 	if err := c.RegisterDestination("main", ts.URL); err != nil {
 		t.Fatal(err)
 	}
+	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	//nolint:bodyclose
 	if _, _, err := c.Get(context.Background(), "main", "/x", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +270,7 @@ func TestGet_PreservesBasePathPrefix(t *testing.T) {
 	if err := c.RegisterDestination("gatus", base); err != nil {
 		t.Fatal(err)
 	}
-	resp, body, err := c.Get(context.Background(), "gatus", "/api/v1/endpoints/statuses?all=true", nil)
+	resp, body, err := c.Get(context.Background(), "gatus", "/api/v1/endpoints/statuses?all=true", nil) //nolint:bodyclose
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,10 +354,14 @@ func TestGet_CacheKeyDoesNotLeakCustomTokenHeader(t *testing.T) {
 	c := NewLockedClient(Options{Timeout: time.Second, CacheTTL: time.Minute})
 	_ = c.RegisterDestination("main", ts.URL)
 	hdrs := map[string]string{"X-Auth-Token": secret}
+	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	//nolint:bodyclose
 	if _, _, err := c.Get(context.Background(), "main", "/cached", hdrs); err != nil {
 		t.Fatal(err)
 	}
 	// Le même chemin et les mêmes en-têtes doivent réutiliser le cache.
+	// LockedClient.Get ferme le corps avant de retourner la réponse.
+	//nolint:bodyclose
 	if _, _, err := c.Get(context.Background(), "main", "/cached", hdrs); err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +386,7 @@ func TestGet_CacheKeyDoesNotLeakQueryText(t *testing.T) {
 	defer ts.Close()
 	c := NewLockedClient(Options{Timeout: time.Second, CacheTTL: time.Minute})
 	_ = c.RegisterDestination("main", ts.URL)
-	if _, _, err := c.Get(
+	if _, _, err := c.Get( //nolint:bodyclose
 		context.Background(), "main", "/search?query="+secret, nil,
 	); err != nil {
 		t.Fatal(err)

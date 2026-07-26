@@ -13,7 +13,7 @@ func TestRotatingFile_WriteAndRotate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rf.Close()
+	defer func() { _ = rf.Close() }()
 	if _, err := rf.Write([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n")); err != nil {
 		t.Fatal(err)
 	}

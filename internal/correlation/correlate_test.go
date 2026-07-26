@@ -30,9 +30,6 @@ func TestBuildTimeline_OrderAndNoRootCause(t *testing.T) {
 	if !b.Items[0].ObservedAt.Equal(t0) || !b.Items[2].ObservedAt.Equal(t2) {
 		t.Fatalf("order %+v", b.Items)
 	}
-	if strings.Contains(strings.ToLower(b.FactualSummary), "root cause") && strings.Contains(b.FactualSummary, "is ") {
-		// La formulation autorisée précise que la causalité n’est pas établie.
-	}
 	if strings.Contains(b.FactualSummary, "root cause is") {
 		t.Fatal(b.FactualSummary)
 	}

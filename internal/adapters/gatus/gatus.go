@@ -121,7 +121,8 @@ func (c *Client) fetchAll(ctx context.Context, fallback time.Time) ([]endpointSt
 	paths := []string{"/api/v1/endpoints/statuses", "/api/v1/endpoints/statuses/"}
 	var lastErr error
 	for _, p := range paths {
-		resp, body, err := c.HTTP.Get(ctx, c.DestName, p, c.Headers)
+		// LockedClient.Get ferme le corps avant de retourner la réponse.
+		resp, body, err := c.HTTP.Get(ctx, c.DestName, p, c.Headers) //nolint:bodyclose
 		if err != nil {
 			lastErr = err
 			continue
