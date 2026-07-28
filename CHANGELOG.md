@@ -22,7 +22,7 @@ Notable changes are recorded in this file. The format follows
 - Optional rotating JSONL audit file.
 - Configuration JSON schema and integration examples.
 - Contract tests, race detection, short fuzzing, and end-to-end demo.
-- CI, binary publishing, and automated dependency tracking.
+- CI and automated dependency tracking. Multi-arch binary release workflow is present but no GitHub Release tag has been cut yet.
 
 ### Security
 
