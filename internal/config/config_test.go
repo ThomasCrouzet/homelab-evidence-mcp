@@ -570,6 +570,9 @@ func TestResolveToken_FilePerms(t *testing.T) {
 	if err := os.WriteFile(p, []byte("secret-token\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(p, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	_, err := ResolveToken(Source{TokenFile: p})
 	if err == nil || !strings.Contains(err.Error(), "group or world") {
 		t.Fatalf("got %v", err)
