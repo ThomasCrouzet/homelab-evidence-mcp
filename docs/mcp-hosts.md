@@ -45,7 +45,7 @@ homelab-evidence-mcp --version
 ```
 
 On Windows, replace `chmod 600` with an ACL granting access only to the account
-that launches the MCP client.
+that launches the MCP client. The binary does not inspect Windows ACLs.
 
 After startup, standard output is reserved exclusively for JSON-RPC. Do not
 redirect logs to stdout; they are written to stderr.

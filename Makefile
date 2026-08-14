@@ -51,6 +51,7 @@ clean:
 	rm -f $(BINARY) coverage.out coverage.html
 	rm -f dist/homelab-evidence-mcp_linux_amd64
 	rm -f dist/homelab-evidence-mcp_linux_arm64
+	rm -f dist/homelab-evidence-mcp_darwin_amd64
 	rm -f dist/homelab-evidence-mcp_darwin_arm64
 	rm -f dist/homelab-evidence-mcp_windows_amd64.exe
 	rm -f dist/SHA256SUMS dist/LICENSE.txt dist/THIRD_PARTY_LICENSES.txt

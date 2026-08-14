@@ -21,7 +21,7 @@ import (
 type emptyIn struct{}
 
 type listServicesIn struct {
-	Prefix string `json:"prefix,omitempty" jsonschema:"optional id/display_name prefix filter"`
+	Prefix string `json:"prefix,omitempty" jsonschema:"optional prefix filter on id or display_name"`
 	Offset int    `json:"offset,omitempty" jsonschema:"pagination offset"`
 	Limit  int    `json:"limit,omitempty" jsonschema:"page size, max 200"`
 }
@@ -59,16 +59,26 @@ type getEvidenceIn struct {
 	ID string `json:"id" jsonschema:"opaque evidence id from a prior response"`
 }
 
-func (a *App) withBudget(fn func() (*mcp.CallToolResult, any, error)) (*mcp.CallToolResult, any, error) {
+func (a *App) withBudget(tool string, fn func() (*mcp.CallToolResult, any, error)) (*mcp.CallToolResult, any, error) {
 	if err := a.budget.acquire(); err != nil {
-		return errResult(err), nil, nil
+		return a.toolError(tool, "", err)
 	}
 	defer a.budget.release()
 	return fn()
 }
 
+func (a *App) toolError(tool, serviceID string, err error) (*mcp.CallToolResult, any, error) {
+	if a != nil && a.Audit != nil {
+		a.Audit.Log(audit.Event{
+			Action: "tool", Tool: tool, ServiceID: serviceID, Status: "error",
+			Detail: sanitizeErr(err, a.Redact),
+		})
+	}
+	return errResult(err), nil, nil
+}
+
 func (a *App) toolCapabilities(ctx context.Context, _ *mcp.CallToolRequest, _ emptyIn) (*mcp.CallToolResult, any, error) {
-	return a.withBudget(func() (*mcp.CallToolResult, any, error) {
+	return a.withBudget("evidence_capabilities", func() (*mcp.CallToolResult, any, error) {
 		_ = ctx
 		// Sort for stable JSON despite non-deterministic map order.
 		type adapterRow struct {
@@ -144,10 +154,10 @@ func (a *App) toolCapabilities(ctx context.Context, _ *mcp.CallToolRequest, _ em
 }
 
 func (a *App) toolListServices(ctx context.Context, _ *mcp.CallToolRequest, in listServicesIn) (*mcp.CallToolResult, any, error) {
-	return a.withBudget(func() (*mcp.CallToolResult, any, error) {
+	return a.withBudget("list_services", func() (*mcp.CallToolResult, any, error) {
 		_ = ctx
 		if len(in.Prefix) > 128 {
-			return errResult(fmt.Errorf("prefix is too long")), nil, nil
+			return a.toolError("list_services", "", fmt.Errorf("prefix is too long"))
 		}
 		offset := in.Offset
 		if offset < 0 {
@@ -167,11 +177,11 @@ func (a *App) toolListServices(ctx context.Context, _ *mcp.CallToolRequest, in l
 }
 
 func (a *App) toolServiceStatus(ctx context.Context, _ *mcp.CallToolRequest, in serviceIDIn) (*mcp.CallToolResult, any, error) {
-	return a.withBudget(func() (*mcp.CallToolResult, any, error) {
+	return a.withBudget("service_status", func() (*mcp.CallToolResult, any, error) {
 		start := time.Now()
 		svc, err := a.Registry.Require(strings.TrimSpace(in.ServiceID))
 		if err != nil {
-			return errResult(err), nil, nil
+			return a.toolError("service_status", strings.TrimSpace(in.ServiceID), err)
 		}
 		ctx, cancel := context.WithTimeout(ctx, a.Cfg.Limits.TotalTimeout)
 		defer cancel()
@@ -235,7 +245,7 @@ func (a *App) toolServiceStatus(ctx context.Context, _ *mcp.CallToolRequest, in 
 		wg.Wait()
 		evidence.SortItems(items)
 		evidence.SortOutcomes(sources)
-		items, truncated := capItems(items, a.Cfg.Limits.MaxEvidenceItems)
+		items, truncated := evidence.KeepNewest(items, a.Cfg.Limits.MaxEvidenceItems)
 		a.Cache.PutAll(items)
 		out := map[string]any{
 			"service_id":   svc.ID,
@@ -256,15 +266,15 @@ func (a *App) toolServiceStatus(ctx context.Context, _ *mcp.CallToolRequest, in 
 }
 
 func (a *App) toolIncidentContext(ctx context.Context, _ *mcp.CallToolRequest, in incidentIn) (*mcp.CallToolResult, any, error) {
-	return a.withBudget(func() (*mcp.CallToolResult, any, error) {
+	return a.withBudget("incident_context", func() (*mcp.CallToolResult, any, error) {
 		startAll := time.Now()
 		svc, err := a.Registry.Require(strings.TrimSpace(in.ServiceID))
 		if err != nil {
-			return errResult(err), nil, nil
+			return a.toolError("incident_context", strings.TrimSpace(in.ServiceID), err)
 		}
 		winStart, winEnd, err := a.parseWindow(in.Start, in.End, in.Duration, a.Cfg.Limits.DefaultWindow, a.Cfg.Limits.MaxIncidentWindow)
 		if err != nil {
-			return errResult(err), nil, nil
+			return a.toolError("incident_context", svc.ID, err)
 		}
 		maxItems := in.MaxItems
 		if maxItems <= 0 || maxItems > a.Cfg.Limits.MaxEvidenceItems {
@@ -363,17 +373,17 @@ func (a *App) toolIncidentContext(ctx context.Context, _ *mcp.CallToolRequest, i
 }
 
 func (a *App) toolSearchLogs(ctx context.Context, _ *mcp.CallToolRequest, in searchLogsIn) (*mcp.CallToolResult, any, error) {
-	return a.withBudget(func() (*mcp.CallToolResult, any, error) {
+	return a.withBudget("search_logs", func() (*mcp.CallToolResult, any, error) {
 		svc, err := a.Registry.Require(strings.TrimSpace(in.ServiceID))
 		if err != nil {
-			return errResult(err), nil, nil
+			return a.toolError("search_logs", strings.TrimSpace(in.ServiceID), err)
 		}
 		if svc.Sources.Loki == nil {
-			return errResult(fmt.Errorf("service %s has no loki binding", svc.ID)), nil, nil
+			return a.toolError("search_logs", svc.ID, fmt.Errorf("service %s has no loki binding", svc.ID))
 		}
 		winStart, winEnd, err := a.parseWindow(in.Start, in.End, in.Duration, a.Cfg.Limits.DefaultWindow, a.Cfg.Limits.MaxIncidentWindow)
 		if err != nil {
-			return errResult(err), nil, nil
+			return a.toolError("search_logs", svc.ID, err)
 		}
 		limit := in.Limit
 		if limit <= 0 || limit > a.Cfg.Limits.MaxLogLines {
@@ -397,10 +407,14 @@ func (a *App) toolSearchLogs(ctx context.Context, _ *mcp.CallToolRequest, in sea
 }
 
 func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in failedCronsIn) (*mcp.CallToolResult, any, error) {
-	return a.withBudget(func() (*mcp.CallToolResult, any, error) {
-		winStart, winEnd, err := a.parseWindow(in.Start, in.End, in.Duration, 24*time.Hour, a.Cfg.Limits.MaxCronWindow)
+	return a.withBudget("failed_crons", func() (*mcp.CallToolResult, any, error) {
+		cronDefault := 24 * time.Hour
+		if a.Cfg.Limits.MaxCronWindow > 0 && a.Cfg.Limits.MaxCronWindow < cronDefault {
+			cronDefault = a.Cfg.Limits.MaxCronWindow
+		}
+		winStart, winEnd, err := a.parseWindow(in.Start, in.End, in.Duration, cronDefault, a.Cfg.Limits.MaxCronWindow)
 		if err != nil {
-			return errResult(err), nil, nil
+			return a.toolError("failed_crons", strings.TrimSpace(in.ServiceID), err)
 		}
 		ctx, cancel := context.WithTimeout(ctx, a.Cfg.Limits.TotalTimeout)
 		defer cancel()
@@ -421,10 +435,10 @@ func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in fa
 		if sid := strings.TrimSpace(in.ServiceID); sid != "" {
 			svc, err := a.Registry.Require(sid)
 			if err != nil {
-				return errResult(err), nil, nil
+				return a.toolError("failed_crons", sid, err)
 			}
 			if svc.Sources.Healthchecks == nil {
-				return errResult(fmt.Errorf("service %s has no healthchecks binding", sid)), nil, nil
+				return a.toolError("failed_crons", sid, fmt.Errorf("service %s has no healthchecks binding", sid))
 			}
 			o, its := a.collectHCWindow(ctx, svc.ID, svc.Sources.Healthchecks, winStart, winEnd)
 			sources = append(sources, o)
@@ -446,7 +460,7 @@ func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in fa
 		}
 		evidence.SortItems(items)
 		evidence.SortOutcomes(sources)
-		items, truncated := capItems(items, a.Cfg.Limits.MaxEvidenceItems)
+		items, truncated := evidence.KeepNewest(items, a.Cfg.Limits.MaxEvidenceItems)
 		a.Cache.PutAll(items)
 		out := map[string]any{
 			"effective_start": winStart.Format(time.RFC3339),
@@ -462,15 +476,15 @@ func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in fa
 }
 
 func (a *App) toolGetEvidence(ctx context.Context, _ *mcp.CallToolRequest, in getEvidenceIn) (*mcp.CallToolResult, any, error) {
-	return a.withBudget(func() (*mcp.CallToolResult, any, error) {
+	return a.withBudget("get_evidence", func() (*mcp.CallToolResult, any, error) {
 		_ = ctx
 		id := strings.TrimSpace(in.ID)
 		if id == "" {
-			return errResult(fmt.Errorf("id is required")), nil, nil
+			return a.toolError("get_evidence", "", fmt.Errorf("id is required"))
 		}
 		item, ok := a.Cache.Get(id)
 		if !ok {
-			return errResult(fmt.Errorf("evidence id not found or expired")), nil, nil
+			return a.toolError("get_evidence", "", fmt.Errorf("evidence id not found or expired"))
 		}
 		out := map[string]any{"item": item}
 		a.Audit.Log(audit.Event{Action: "tool", Tool: "get_evidence", Status: "ok"})
@@ -538,11 +552,4 @@ func clamp(v, def, max int) int {
 		return max
 	}
 	return v
-}
-
-func capItems(items []evidence.Item, max int) ([]evidence.Item, bool) {
-	if max <= 0 || len(items) <= max {
-		return items, false
-	}
-	return items[:max], true
 }

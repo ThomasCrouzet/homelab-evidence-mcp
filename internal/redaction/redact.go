@@ -46,7 +46,7 @@ func New(rules []Rule) (*Engine, error) {
 		`(?i)(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}`,
 		`(?i)sk-[A-Za-z0-9]{20,}`,
 		`(?i)AKIA[0-9A-Z]{16}`,
-		`(?is)-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----.*`,
+		`(?is)-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----.*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----`,
 		`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`,
 		`(?i)(cookie|set-cookie)\s*[:=]\s*\S+`,
 	}
@@ -180,7 +180,6 @@ func NeutralizeInstructionLike(s string) string {
 		"ignore previous instructions",
 		"ignore all instructions",
 		"you are now",
-		"system:",
 		"execute the following",
 		"run this command",
 	}

@@ -2,6 +2,7 @@ package httpx
 
 import (
 	"context"
+	"crypto/x509"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,39 @@ import (
 	"testing"
 	"time"
 )
+
+func TestGet_TrustsExtraCA(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer ts.Close()
+	cert, err := x509.ParseCertificate(ts.TLS.Certificates[0].Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(cert)
+
+	untrusted := NewLockedClient(Options{Timeout: 2 * time.Second})
+	if err := untrusted.RegisterDestination("src", ts.URL); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := untrusted.Get(context.Background(), "src", "/", nil); err == nil {
+		t.Fatal("expected TLS failure without extra CA")
+	}
+
+	trusted := NewLockedClient(Options{Timeout: 2 * time.Second, RootCAs: pool})
+	if err := trusted.RegisterDestination("src", ts.URL); err != nil {
+		t.Fatal(err)
+	}
+	resp, body, err := trusted.Get(context.Background(), "src", "/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "ok") {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+}
 
 func TestGet_OK(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -238,6 +272,19 @@ func TestStats_ExcludesExpiredEntries(t *testing.T) {
 	}
 	if got := c.Stats().Bytes; got != 0 {
 		t.Fatalf("expired bytes counted: %d", got)
+	}
+}
+
+func TestCachePut_EvictsOldestFirst(t *testing.T) {
+	c := NewLockedClient(Options{CacheTTL: time.Minute})
+	chunk := make([]byte, (maxCacheBytes/2)+1)
+	c.cachePut("oldest", http.StatusOK, chunk, time.Now())
+	c.cachePut("newest", http.StatusOK, chunk, time.Now())
+	if _, _, _, ok := c.cacheGet("oldest"); ok {
+		t.Fatal("oldest entry should be evicted first")
+	}
+	if _, _, _, ok := c.cacheGet("newest"); !ok {
+		t.Fatal("newest entry should remain")
 	}
 }
 

@@ -105,7 +105,7 @@ jobs:
           version_path="github.com/ThomasCrouzet/homelab-evidence-mcp"
           version_path+="/internal/version.Version"
           mkdir -p dist
-          for pair in linux/amd64 linux/arm64 darwin/arm64 windows/amd64; do
+          for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
             os="${pair%/*}"
             arch="${pair#*/}"
             ext=""

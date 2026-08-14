@@ -21,7 +21,8 @@
 
 Identifiers, summaries, and textual attributes from a source are cleaned,
 redacted, then bounded before emission. Numeric fields and closed vocabularies
-remain structured.
+remain structured. Loki `source_id` is derived from allowlisted stream labels.
+ntfy keeps the bounded body in `attributes.message`.
 
 ## Meaning of `observed_at`
 

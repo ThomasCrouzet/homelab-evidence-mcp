@@ -76,7 +76,12 @@ func (c *Client) Evidence(ctx context.Context, serviceID, systemName string) ([]
 }
 
 func (c *Client) fetchSystems(ctx context.Context, fallback time.Time) ([]systemRow, time.Time, error) {
-	paths := []string{"/api/systems", "/api/beszel/systems", "/api/systems/"}
+	paths := []string{
+		"/api/collections/systems/records",
+		"/api/systems",
+		"/api/beszel/systems",
+		"/api/systems/",
+	}
 	var lastErr error
 	for _, p := range paths {
 		// LockedClient.Get closes the body before returning the response.

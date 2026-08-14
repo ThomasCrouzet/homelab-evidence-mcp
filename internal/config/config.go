@@ -3,6 +3,7 @@ package config
 
 import (
 	"bytes"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -38,6 +39,7 @@ type Config struct {
 	Version  int
 	Limits   Limits
 	Audit    Audit
+	TLS      TLS
 	Sources  map[string]Source
 	Services []Service
 	Redact   []RedactRule
@@ -67,6 +69,11 @@ type Audit struct {
 	File     string
 	MaxBytes int64
 	MaxFiles int
+}
+
+// TLS holds optional extra trust material. Verification cannot be disabled.
+type TLS struct {
+	CAFile string
 }
 
 // Source represents a named adapter instance.
@@ -148,6 +155,7 @@ type fileConfig struct {
 	Version  int                   `yaml:"version"`
 	Limits   fileLimits            `yaml:"limits"`
 	Audit    fileAudit             `yaml:"audit"`
+	TLS      fileTLS               `yaml:"tls"`
 	Sources  map[string]fileSource `yaml:"sources"`
 	Services []fileService         `yaml:"services"`
 	Redact   []fileRedact          `yaml:"redact"`
@@ -164,7 +172,7 @@ type fileLimits struct {
 	MaxLogLineBytes       int    `yaml:"max_log_line_bytes"`
 	MaxBodyBytes          int    `yaml:"max_body_bytes"`
 	EvidenceCacheTTL      string `yaml:"evidence_cache_ttl"`
-	EvidenceCacheMax      int    `yaml:"evidence_cache_max"`
+	EvidenceCacheMax      *int   `yaml:"evidence_cache_max"`
 	SourceCacheTTL        string `yaml:"source_cache_ttl"`
 	MaxToolCallsPerMinute int    `yaml:"max_tool_calls_per_minute"`
 	MaxConcurrentTools    int    `yaml:"max_concurrent_tools"`
@@ -175,6 +183,10 @@ type fileAudit struct {
 	File     string `yaml:"file"`
 	MaxBytes int    `yaml:"max_bytes"`
 	MaxFiles int    `yaml:"max_files"`
+}
+
+type fileTLS struct {
+	CAFile string `yaml:"ca_file"`
 }
 
 type fileSource struct {
@@ -280,18 +292,11 @@ func LoadFile(path string) (*Config, error) {
 	if path == "" {
 		return nil, errors.New("config path is required")
 	}
-	f, err := os.Open(path)
+	f, st, err := openRegularUnlinkedFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	defer func() { _ = f.Close() }()
-	st, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("config: %w", err)
-	}
-	if !st.Mode().IsRegular() {
-		return nil, errors.New("config: path is not a regular file")
-	}
 	if st.Size() > maxConfigBytes {
 		return nil, fmt.Errorf("config: file exceeds %d bytes", maxConfigBytes)
 	}
@@ -345,6 +350,9 @@ func Parse(raw []byte) (*Config, error) {
 
 	auditCfg, aerr := parseAudit(fc.Audit)
 	errs = append(errs, aerr...)
+
+	tlsCfg, terr := parseTLS(fc.TLS)
+	errs = append(errs, terr...)
 
 	sources := make(map[string]Source)
 	if len(fc.Sources) == 0 {
@@ -431,6 +439,7 @@ func Parse(raw []byte) (*Config, error) {
 		Version:  fc.Version,
 		Limits:   limits,
 		Audit:    auditCfg,
+		TLS:      tlsCfg,
 		Sources:  sources,
 		Services: services,
 		Redact:   redact,
@@ -444,7 +453,6 @@ func parseLimits(f fileLimits) (Limits, ValidationErrors) {
 		MaxEvidenceItems:      f.MaxEvidenceItems,
 		MaxLogLineBytes:       f.MaxLogLineBytes,
 		MaxBodyBytes:          int64(f.MaxBodyBytes),
-		EvidenceCacheMax:      f.EvidenceCacheMax,
 		MaxToolCallsPerMinute: f.MaxToolCallsPerMinute,
 		MaxConcurrentTools:    f.MaxConcurrentTools,
 		WarnEmptyBindings:     true,
@@ -512,14 +520,14 @@ func parseLimits(f fileLimits) (Limits, ValidationErrors) {
 	if l.MaxBodyBytes > 8<<20 {
 		errs = append(errs, ValidationError{"limits.max_body_bytes", "must be <= 8MiB"})
 	}
-	if l.EvidenceCacheMax <= 0 {
-		if l.EvidenceCacheMax < 0 {
-			errs = append(errs, ValidationError{"limits.evidence_cache_max", "must be positive"})
-		}
+	if f.EvidenceCacheMax == nil {
 		l.EvidenceCacheMax = 256
-	}
-	if l.EvidenceCacheMax > 1000 {
+	} else if *f.EvidenceCacheMax < 0 {
+		errs = append(errs, ValidationError{"limits.evidence_cache_max", "must be >= 0"})
+	} else if *f.EvidenceCacheMax > 1000 {
 		errs = append(errs, ValidationError{"limits.evidence_cache_max", "must be <= 1000"})
+	} else {
+		l.EvidenceCacheMax = *f.EvidenceCacheMax
 	}
 	if l.MaxToolCallsPerMinute <= 0 {
 		if l.MaxToolCallsPerMinute < 0 {
@@ -546,6 +554,18 @@ func parseLimits(f fileLimits) (Limits, ValidationErrors) {
 		errs = append(errs, ValidationError{"limits.default_window", "must be <= max_incident_window"})
 	}
 	return l, errs
+}
+
+func parseTLS(f fileTLS) (TLS, ValidationErrors) {
+	var errs ValidationErrors
+	path := strings.TrimSpace(f.CAFile)
+	if path == "" {
+		return TLS{}, nil
+	}
+	if len([]rune(path)) > 4096 || hasControl(path) {
+		errs = append(errs, ValidationError{"tls.ca_file", "must be a valid path of at most 4096 characters"})
+	}
+	return TLS{CAFile: path}, errs
 }
 
 func parseAudit(f fileAudit) (Audit, ValidationErrors) {
@@ -996,18 +1016,17 @@ func readSecretFile(path string) (string, error) {
 			path = u.Opaque
 		}
 	}
-	f, err := os.Open(path)
+	f, st, err := openRegularUnlinkedFile(path)
 	if err != nil {
+		if strings.Contains(err.Error(), "symlink") {
+			return "", errors.New("token file must not be a symlink")
+		}
+		if strings.Contains(err.Error(), "regular") {
+			return "", errors.New("token file is not a regular file")
+		}
 		return "", err
 	}
 	defer func() { _ = f.Close() }()
-	st, err := f.Stat()
-	if err != nil {
-		return "", err
-	}
-	if !st.Mode().IsRegular() {
-		return "", errors.New("token file is not a regular file")
-	}
 	if st.Size() > 4<<10 {
 		return "", errors.New("token file exceeds 4KiB")
 	}
@@ -1027,4 +1046,59 @@ func readSecretFile(path string) (string, error) {
 
 func insecureUnixPermissions(mode os.FileMode) bool {
 	return runtime.GOOS != "windows" && mode.Perm()&0o077 != 0
+}
+
+func openRegularUnlinkedFile(path string) (*os.File, os.FileInfo, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, nil, errors.New("path must not be a symlink")
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil, errors.New("path is not a regular file")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	st, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, nil, err
+	}
+	if !os.SameFile(info, st) {
+		_ = f.Close()
+		return nil, nil, errors.New("file changed while opening")
+	}
+	return f, st, nil
+}
+
+// LoadExtraCertPool appends pem certificates from path onto the system pool.
+// An empty path leaves TLS defaults unchanged. Verification is never skipped.
+func LoadExtraCertPool(path string) (*x509.CertPool, error) {
+	if path == "" {
+		return nil, nil
+	}
+	f, st, err := openRegularUnlinkedFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("tls.ca_file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	if st.Size() > 1<<20 {
+		return nil, errors.New("tls.ca_file exceeds 1MiB")
+	}
+	pem, err := io.ReadAll(io.LimitReader(f, (1<<20)+1))
+	if err != nil {
+		return nil, fmt.Errorf("tls.ca_file: %w", err)
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, errors.New("tls.ca_file: no certificates found")
+	}
+	return pool, nil
 }
