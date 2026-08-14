@@ -27,7 +27,11 @@ func TestGet_TrustsExtraCA(t *testing.T) {
 	if err := untrusted.RegisterDestination("src", ts.URL); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := untrusted.Get(context.Background(), "src", "/", nil); err == nil {
+	resp, _, err := untrusted.Get(context.Background(), "src", "/", nil)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	if err == nil {
 		t.Fatal("expected TLS failure without extra CA")
 	}
 
@@ -36,6 +40,9 @@ func TestGet_TrustsExtraCA(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp, body, err := trusted.Get(context.Background(), "src", "/", nil)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
