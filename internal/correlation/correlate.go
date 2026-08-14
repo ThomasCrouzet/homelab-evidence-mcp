@@ -13,13 +13,8 @@ import (
 func BuildTimeline(serviceID string, start, end time.Time, items []evidence.Item, sources []evidence.SourceOutcome, maxItems int) evidence.Bundle {
 	now := time.Now().UTC()
 	cp := append([]evidence.Item(nil), items...)
-	evidence.SortItems(cp)
-
-	timelineTruncated := false
-	if maxItems > 0 && len(cp) > maxItems {
-		cp = cp[:maxItems]
-		timelineTruncated = true
-	}
+	var timelineTruncated bool
+	cp, timelineTruncated = evidence.KeepNewest(cp, maxItems)
 	truncated := timelineTruncated
 
 	var warnings []string
@@ -106,6 +101,7 @@ func factualSummary(serviceID string, start, end time.Time, items []evidence.Ite
 	if gatusFail+dockerBad+logErr+cronDown+beszelBad+ntfyBad == 0 {
 		b.WriteString(" No error-severity items in the collected set.")
 		b.WriteString(" Absence of evidence is not evidence of absence.")
+		b.WriteString(" Timeline is ordered by observed_at; correlation does not establish root cause.")
 		return b.String()
 	}
 	b.WriteString(" Counts by source with warning/error severity:")

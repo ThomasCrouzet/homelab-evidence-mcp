@@ -84,6 +84,29 @@ func main() {
 	}))
 	defer lokiDown.Close()
 
+	bz := httptest.NewServer(wrap("beszel", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/collections/systems/records" &&
+			r.URL.Path != "/api/systems" && r.URL.Path != "/api/systems/" &&
+			r.URL.Path != "/api/beszel/systems" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{{
+				"name": "media-host", "status": "up", "cpu": 12.0,
+			}},
+		})
+	}))
+	defer bz.Close()
+
+	nt := httptest.NewServer(wrap("ntfy", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"id": "n1", "time": t2.Unix(), "event": "message",
+			"message": "media disk warning", "priority": 3,
+		}})
+	}))
+	defer nt.Close()
+
 	hc := httptest.NewServer(wrap("healthchecks", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"checks": []map[string]any{{
@@ -97,7 +120,7 @@ func main() {
 	defer hc.Close()
 
 	_ = os.Setenv("HC_DEMO_TOKEN", "demo-readonly-token-not-real")
-	cfgPath := writeCfg(gatus.URL, dock.URL, loki.URL, hc.URL)
+	cfgPath := writeCfg(gatus.URL, dock.URL, loki.URL, hc.URL, bz.URL, nt.URL)
 
 	cfg, err := config.LoadFile(cfgPath)
 	must(err)
@@ -152,6 +175,8 @@ func main() {
 	assert(!strings.Contains(inc, "NOT_A_REAL_PING_SECRET"), "ping url absent")
 	assert(strings.Contains(inc, "factual_summary") || strings.Contains(inc, "Timeline"), "has summary")
 	assert(!strings.Contains(strings.ToLower(inc), "root cause is"), "no root-cause claim")
+	assert(strings.Contains(inc, "beszel"), "beszel family exercised")
+	assert(strings.Contains(inc, "ntfy"), "ntfy family exercised")
 
 	fmt.Println("\n--- search_logs ---")
 	logs := call("search_logs", map[string]any{
@@ -167,7 +192,7 @@ func main() {
 	fmt.Println(truncate(call("failed_crons", map[string]any{"duration": "24h"}), 1000))
 
 	// Rebuild the application with Loki unavailable.
-	cfg2Path := writeCfg(gatus.URL, dock.URL, lokiDown.URL, hc.URL)
+	cfg2Path := writeCfg(gatus.URL, dock.URL, lokiDown.URL, hc.URL, bz.URL, nt.URL)
 	cfg2, err := config.LoadFile(cfg2Path)
 	must(err)
 	app2, err := mcpserver.NewApp(cfg2, nil, audit.New(io.Discard))
@@ -216,7 +241,7 @@ func callDirectIncident(app *mcpserver.App) (*mcp.CallToolResult, any, error) {
 	return res, out, nil
 }
 
-func writeCfg(gatusURL, dockerURL, lokiURL, hcURL string) string {
+func writeCfg(gatusURL, dockerURL, lokiURL, hcURL, beszelURL, ntfyURL string) string {
 	raw := fmt.Sprintf(`
 version: 1
 limits:
@@ -241,6 +266,12 @@ sources:
     kind: healthchecks
     base_url: %s
     token_env: HC_DEMO_TOKEN
+  beszel:
+    kind: beszel
+    base_url: %s
+  ntfy:
+    kind: ntfy
+    base_url: %s
 services:
   - id: media
     display_name: Media
@@ -257,7 +288,13 @@ services:
       healthchecks:
         source: healthchecks
         check_tags: [media]
-`, gatusURL, dockerURL, lokiURL, hcURL)
+      beszel:
+        source: beszel
+        system_name: media-host
+      ntfy:
+        source: ntfy
+        topic: media-alerts
+`, gatusURL, dockerURL, lokiURL, hcURL, beszelURL, ntfyURL)
 	dir, err := os.MkdirTemp("", "hem-demo-*")
 	must(err)
 	p := filepath.Join(dir, "config.yaml")

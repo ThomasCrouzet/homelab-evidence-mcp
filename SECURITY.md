@@ -44,7 +44,8 @@ secret leak or an unpatched vulnerability.
 - Loki selectors and ntfy topics come exclusively from configuration.
 - Docker responses exclude `Config.Env`, raw mounts, and unauthorized labels.
 - Healthchecks responses exclude UUID, ping, pause, update, and badge URLs.
-- TLS verification stays enabled; no public option disables it.
+- TLS verification stays enabled; no public option disables it. An optional
+  `tls.ca_file` appends extra CAs to the system trust store.
 - Budgets limit call count, concurrency, and response volume.
 - The direct Docker Unix socket is not supported.
 
@@ -64,8 +65,9 @@ sensitive destinations.
 
 ### Secrets
 
-- Tokens come from `token_env` or a regular `token_file` in mode `0600` on
-  Unix. On Windows, apply a user-only ACL; POSIX bits are not interpreted there.
+- Tokens come from `token_env` or a regular `token_file`. The binary enforces
+  mode `0600` on Unix and refuses symbolic links. On Windows, apply a user-only
+  ACL; the binary does not inspect Windows ACLs.
 - `token_header` chooses the authentication header; static headers whose name
   suggests an access secret are refused.
 - Query strings, fragments, and userinfo are refused in `base_url`.
@@ -82,7 +84,8 @@ sensitive destinations.
 - The HTTP cache retains no response headers, including `Set-Cookie`.
 - The YAML configuration itself must also be owner-restricted.
 - The audit log is created in mode `0600` on Unix. On Windows, the operator
-  must protect its path with the same user ACL.
+  must protect its path with a user-only ACL; the binary does not inspect
+  Windows ACLs.
 
 ### Hostile text
 
@@ -99,8 +102,10 @@ content remains evidence to treat as untrusted data.
 - global per-minute and concurrency limits;
 - at most eight concurrent source requests, including during fan-out;
 - source response cache bounded to 128 entries, 32 MiB, and a TTL;
-- evidence cache bounded to 1,000 entries and a TTL, with individual texts
-  limited to 16 KiB;
+- evidence cache bounded to 1,000 entries and a TTL (`evidence_cache_max: 0`
+  disables it);
+- hostile log and notification texts bounded by `max_log_line_bytes` (16 KiB
+  ceiling);
 - explicit partial responses when a source fails;
 - limits reapplied client-side even if a remote source ignores them.
 
@@ -133,7 +138,8 @@ to reflect the real age of the data.
 1. Use a Docker proxy limited to `GET /containers/json`.
 2. Use a strictly read-only Healthchecks key.
 3. Store configuration and tokens outside the repository in mode `0600` on
-   Unix, or with an equivalent user ACL on Windows.
+   Unix. On Windows, apply a user-only ACL; the binary does not inspect
+   Windows ACLs.
 4. Run the binary with a low-privilege account.
 5. Prefer HTTPS with a valid internal PKI.
 6. Adapt `redact` rules to local secret formats.

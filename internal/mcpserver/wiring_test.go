@@ -75,7 +75,9 @@ func fullFixtureApp(t *testing.T) *App {
 	t.Cleanup(hc.Close)
 
 	beszel := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/systems" && r.URL.Path != "/api/systems/" && r.URL.Path != "/api/beszel/systems" {
+		switch r.URL.Path {
+		case "/api/collections/systems/records", "/api/systems", "/api/systems/", "/api/beszel/systems":
+		default:
 			t.Errorf("beszel path %s", r.URL.Path)
 		}
 		_ = json.NewEncoder(w).Encode([]map[string]any{
@@ -138,6 +140,7 @@ services:
       healthchecks:
         source: healthchecks
         check_tags: [media]
+        status_filter: up
       beszel:
         source: beszel
         system_name: media-host
@@ -264,6 +267,21 @@ func TestCollectNtfy_ViaIncidentContext(t *testing.T) {
 	}
 }
 
+func TestFailedCrons_ServiceIgnoresUpFilter(t *testing.T) {
+	app := fullFixtureApp(t)
+	_, out, err := app.toolFailedCrons(context.Background(), nil, failedCronsIn{
+		ServiceID: "media",
+		Duration:  "24h",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(out)
+	if !strings.Contains(string(b), "media-cron") {
+		t.Fatalf("status_filter=up hid current failures: %s", b)
+	}
+}
+
 func TestIncidentContext_ExcludesCurrentSnapshotsFromHistoricalWindow(t *testing.T) {
 	app := fullFixtureApp(t)
 	_, out, err := app.toolIncidentContext(context.Background(), nil, incidentIn{
@@ -353,6 +371,11 @@ func TestTools_ReadOnlyAnnotations(t *testing.T) {
 		}
 		if !tl.Annotations.ReadOnlyHint {
 			t.Fatalf("tool %s ReadOnlyHint=false", tl.Name)
+		}
+		openWorld := tl.Name == "service_status" || tl.Name == "incident_context" ||
+			tl.Name == "search_logs" || tl.Name == "failed_crons"
+		if tl.Annotations.OpenWorldHint == nil || *tl.Annotations.OpenWorldHint != openWorld {
+			t.Fatalf("tool %s OpenWorldHint=%v want %v", tl.Name, tl.Annotations.OpenWorldHint, openWorld)
 		}
 		// No mutation-sounding name should appear.
 		n := strings.ToLower(tl.Name)

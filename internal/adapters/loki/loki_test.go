@@ -208,6 +208,12 @@ func TestSearch_EnforcesLimitAgainstOversizedResponse(t *testing.T) {
 	if len(items) != 2 || !truncated {
 		t.Fatalf("items=%d truncated=%v", len(items), truncated)
 	}
+	if items[0].Attributes["line"] != "two" || items[1].Attributes["line"] != "three" {
+		t.Fatalf("wanted newest lines, got %+v %+v", items[0].Attributes, items[1].Attributes)
+	}
+	if items[0].SourceID != "app=x" {
+		t.Fatalf("source_id=%q", items[0].SourceID)
+	}
 }
 
 func TestSearch_RedactsBeforeTruncation(t *testing.T) {

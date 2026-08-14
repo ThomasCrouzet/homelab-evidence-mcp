@@ -84,6 +84,39 @@ services:
 	}
 }
 
+func TestParse_RejectsUserinfo(t *testing.T) {
+	raw := []byte(`
+version: 1
+sources:
+  gatus:
+    kind: gatus
+    base_url: https://user:pass@gatus.example.internal
+`)
+	_, err := Parse(raw)
+	if err == nil || !strings.Contains(err.Error(), "userinfo") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestParse_EvidenceCacheMaxZeroDisables(t *testing.T) {
+	raw := []byte(`
+version: 1
+limits:
+  evidence_cache_max: 0
+sources:
+  gatus:
+    kind: gatus
+    base_url: https://gatus.example.internal
+`)
+	cfg, err := Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Limits.EvidenceCacheMax != 0 {
+		t.Fatalf("want 0 to disable, got %d", cfg.Limits.EvidenceCacheMax)
+	}
+}
+
 func TestParse_RejectsSecretInURL(t *testing.T) {
 	raw := []byte(`
 version: 1
@@ -506,6 +539,29 @@ func TestConfigSchemaIsValidJSON(t *testing.T) {
 	var schema any
 	if err := json.Unmarshal(raw, &schema); err != nil {
 		t.Fatalf("config.schema.json: %v", err)
+	}
+}
+
+func TestLoadFile_RejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.yaml")
+	raw := []byte(`
+version: 1
+sources:
+  gatus:
+    kind: gatus
+    base_url: http://127.0.0.1:9
+`)
+	if err := os.WriteFile(target, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link.yaml")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadFile(link)
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("expected symlink rejection, got %v", err)
 	}
 }
 

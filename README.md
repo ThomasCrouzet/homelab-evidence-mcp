@@ -72,9 +72,10 @@ make build
 homelab-evidence-mcp --config /path/config.yaml --validate
 ```
 
-Validation loads tokens, checks destinations, and fails on any unknown YAML
-key. Query strings and fragments are forbidden in `base_url`; authentication
-uses `token_env` or `token_file`.
+Validation loads tokens and locks destinations from the YAML; it does not
+probe them with HTTP. It fails on any unknown YAML key. Query strings,
+fragments, and userinfo are forbidden in `base_url`; authentication uses
+`token_env` or `token_file`.
 
 Registration with an MCP client:
 
@@ -106,7 +107,7 @@ are written to standard error. See
 | Loki | `GET /loki/api/v1/query_range` | selector fixed in configuration |
 | Healthchecks | `GET /api/v3/checks/` | read-only key, no ping URL |
 | Beszel | `GET /api/systems` and compatible variants | optional host snapshot |
-| ntfy | `GET /{topic}/json?poll=1` | topic fixed in configuration |
+| ntfy | `GET /{topic}/json?poll=1&since=<unix>` | topic fixed in configuration |
 
 Destinations accept only `http` and `https`. For Docker, use a read-limited
 socket proxy; the direct Unix socket is not supported. `HTTP_PROXY` and
@@ -157,8 +158,8 @@ Key points:
 - no URL or stream selector supplied by an MCP call;
 - log content treated as hostile data;
 - built-in redaction and optional local rules;
-- configuration and token files limited to mode `0600` on Unix, or a user ACL
-  on Windows.
+- configuration and token files limited to mode `0600` on Unix. On Windows,
+  apply a user-only ACL; the binary does not inspect Windows ACLs.
 
 ## Local demo
 

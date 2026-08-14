@@ -13,6 +13,40 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 )
 
+func TestStatus_PocketBaseRecordsPath(t *testing.T) {
+	var sawOfficial bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("method %s", r.Method)
+		}
+		if r.URL.Path != "/api/collections/systems/records" {
+			http.NotFound(w, r)
+			return
+		}
+		sawOfficial = true
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"page": 1, "perPage": 30, "totalItems": 1,
+			"items": []map[string]any{
+				{"name": "pb-host", "status": "up", "cpu": 3.0, "host": "pb-host"},
+			},
+		})
+	}))
+	defer ts.Close()
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
+	_ = hc.RegisterDestination("bz", ts.URL)
+	cli := &Client{HTTP: hc, DestName: "bz"}
+	it, err := cli.Status(context.Background(), "media", "pb-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sawOfficial {
+		t.Fatal("PocketBase records path was not requested")
+	}
+	if it.Attributes["found"] != true || it.SourceID != "pb-host" {
+		t.Fatalf("%+v", it)
+	}
+}
+
 func TestStatus_Found(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

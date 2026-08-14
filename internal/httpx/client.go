@@ -6,6 +6,8 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -58,6 +60,7 @@ type LockedClient struct {
 	userAgent    string
 	cacheTTL     time.Duration
 	cache        map[string]cacheEntry
+	cacheOrder   []string
 	cacheBytes   int64
 	cacheKey     [32]byte
 	hits         atomic.Uint64
@@ -71,6 +74,9 @@ type Options struct {
 	UserAgent string
 	// CacheTTL sets how long identical GETs are cached; zero disables caching.
 	CacheTTL time.Duration
+	// RootCAs, when set, is the extra-augmented trust pool. TLS verification
+	// stays enabled; there is no skip-verify option.
+	RootCAs *x509.CertPool
 }
 
 // NewLockedClient builds a client with verified TLS and redirects refused.
@@ -94,6 +100,12 @@ func NewLockedClient(opts Options) *LockedClient {
 		MaxIdleConns:        16,
 		IdleConnTimeout:     60 * time.Second,
 		ForceAttemptHTTP2:   true,
+	}
+	if opts.RootCAs != nil {
+		transport.TLSClientConfig = &tls.Config{
+			RootCAs:    opts.RootCAs,
+			MinVersion: tls.VersionTLS12,
+		}
 	}
 	lc := &LockedClient{
 		destinations: make(map[string]*destination),
@@ -198,12 +210,7 @@ func invalidPath(path string) bool {
 func (c *LockedClient) Stats() CacheStats {
 	c.mu.Lock()
 	now := time.Now()
-	for key, entry := range c.cache {
-		if !now.Before(entry.expiresAt) {
-			c.cacheBytes -= int64(len(entry.body))
-			delete(c.cache, key)
-		}
-	}
+	c.expireCacheLocked(now)
 	size := len(c.cache)
 	bytes := c.cacheBytes
 	ttl := c.cacheTTL
@@ -348,8 +355,7 @@ func (c *LockedClient) cacheGet(key string) ([]byte, int, time.Time, bool) {
 		return nil, 0, time.Time{}, false
 	}
 	if time.Now().After(e.expiresAt) {
-		c.cacheBytes -= int64(len(e.body))
-		delete(c.cache, key)
+		c.removeCacheLocked(key)
 		return nil, 0, time.Time{}, false
 	}
 	body := make([]byte, len(e.body))
@@ -365,23 +371,15 @@ func (c *LockedClient) cachePut(key string, status int, body []byte, collectedAt
 		return
 	}
 	now := time.Now()
-	for k, e := range c.cache {
-		if now.After(e.expiresAt) {
-			c.cacheBytes -= int64(len(e.body))
-			delete(c.cache, k)
-		}
+	c.expireCacheLocked(now)
+	if _, ok := c.cache[key]; ok {
+		c.removeCacheLocked(key)
 	}
-	if previous, ok := c.cache[key]; ok {
-		c.cacheBytes -= int64(len(previous.body))
-		delete(c.cache, key)
-	}
-	// Bound both entry count and cumulative size at the same time.
 	for len(c.cache) >= maxCacheEntries || c.cacheBytes+bodyBytes > maxCacheBytes {
-		for k, e := range c.cache {
-			c.cacheBytes -= int64(len(e.body))
-			delete(c.cache, k)
+		if len(c.cacheOrder) == 0 {
 			break
 		}
+		c.removeCacheLocked(c.cacheOrder[0])
 	}
 	cp := make([]byte, len(body))
 	copy(cp, body)
@@ -391,7 +389,33 @@ func (c *LockedClient) cachePut(key string, status int, body []byte, collectedAt
 		collectedAt: collectedAt.UTC(),
 		expiresAt:   time.Now().Add(c.cacheTTL),
 	}
+	c.cacheOrder = append(c.cacheOrder, key)
 	c.cacheBytes += bodyBytes
+}
+
+func (c *LockedClient) expireCacheLocked(now time.Time) {
+	for key, entry := range c.cache {
+		if !now.Before(entry.expiresAt) {
+			c.removeCacheLocked(key)
+		}
+	}
+}
+
+func (c *LockedClient) removeCacheLocked(key string) {
+	e, ok := c.cache[key]
+	if !ok {
+		return
+	}
+	c.cacheBytes -= int64(len(e.body))
+	delete(c.cache, key)
+	n := 0
+	for _, k := range c.cacheOrder {
+		if k != key {
+			c.cacheOrder[n] = k
+			n++
+		}
+	}
+	c.cacheOrder = c.cacheOrder[:n]
 }
 
 // CollectionTime returns the original collection time of a cached response.

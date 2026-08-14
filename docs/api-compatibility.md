@@ -10,6 +10,7 @@ become a successful empty list.
 - Route: `GET /api/v1/endpoints/statuses`.
 - Body: array of objects with `name`, `group`, `key`, and `results`.
 - Result: `success`, `status`, `timestamp`, `errors`, and `duration`.
+- `duration` is accepted as a nanosecond number (stock Gatus) or as a string.
 - The latest state is chosen by the greatest valid timestamp.
 - Empty lists, empty results, unknown fields, and unordered history are tested.
 
@@ -46,7 +47,7 @@ become a successful empty list.
 
 ## Beszel
 
-- Routes tried: `/api/systems`, `/api/beszel/systems`, and trailing-slash variants.
+- Routes tried: `/api/collections/systems/records` (PocketBase), then `/api/systems`, `/api/beszel/systems`, and trailing-slash variants.
 - Arrays and `systems`, `items`, or `data` envelopes accepted, including empty ones.
 - Identity via `name`, `system`, `host`, or `info.h`.
 - Optional `cpu` and `mem` values, including zero.
@@ -56,6 +57,7 @@ become a successful empty list.
 ## ntfy
 
 - Route: `GET /{topic}/json?poll=1&since=<unix>`.
+- The bounded message body is kept in `attributes.message`; the summary is a shorter view.
 - Topic defined only in configuration.
 - NDJSON and JSON arrays accepted.
 - Fields: `id`, `time`, `event`, `message`, `title`, `priority`, and `tags`.

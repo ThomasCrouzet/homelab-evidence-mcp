@@ -88,7 +88,6 @@ func (c *Client) History(ctx context.Context, serviceID, topic string, start, en
 		return msgs[i].ID < msgs[j].ID
 	})
 	var items []evidence.Item
-	truncated := false
 	for _, m := range msgs {
 		if m.Event != "" && m.Event != "message" {
 			continue
@@ -102,17 +101,13 @@ func (c *Client) History(ctx context.Context, serviceID, topic string, start, en
 		} else if ts.Before(start) || ts.After(end) {
 			continue
 		}
-		if len(items) >= limit {
-			truncated = true
-			continue
-		}
 		item := c.itemFrom(serviceID, topic, m, ts, now, maxLineBytes)
 		item.WindowStart = timePtr(start)
 		item.WindowEnd = timePtr(end)
 		items = append(items, item)
 	}
-	evidence.SortItems(items)
-	return items, truncated, nil
+	kept, truncated := evidence.KeepNewest(items, limit)
+	return kept, truncated, nil
 }
 
 func decodeMessages(body []byte) ([]message, error) {
@@ -186,6 +181,7 @@ func (c *Client) itemFrom(serviceID, topic string, m message, ts, now time.Time,
 	attrs := map[string]any{
 		"topic":    topic,
 		"priority": m.Priority,
+		"message":  cleaned,
 	}
 	if len(m.Tags) > 0 {
 		tagCount := len(m.Tags)

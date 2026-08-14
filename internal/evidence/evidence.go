@@ -98,6 +98,17 @@ type Bundle struct {
 	RetrievedAt    time.Time       `json:"retrieved_at"`
 }
 
+// KeepNewest sorts items and retains the newest max entries.
+// The returned slice stays in SortItems order (oldest first among keepers).
+func KeepNewest(items []Item, max int) ([]Item, bool) {
+	if max <= 0 || len(items) <= max {
+		SortItems(items)
+		return items, false
+	}
+	SortItems(items)
+	return items[len(items)-max:], true
+}
+
 // SortItems sorts evidence by time, source, source identity, then id.
 func SortItems(items []Item) {
 	sort.SliceStable(items, func(i, j int) bool {

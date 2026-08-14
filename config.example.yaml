@@ -64,6 +64,16 @@ sources:
     token_env: HEALTHCHECKS_API_TOKEN
     # token_file: /run/secrets/healthchecks_api_token
 
+  beszel:
+    kind: beszel
+    base_url: https://beszel.example.internal
+    # Optional Bearer from the environment for the PocketBase API:
+    # token_env: BESZEL_TOKEN
+
+  ntfy:
+    kind: ntfy
+    base_url: https://ntfy.example.internal
+
 # Optional redaction rules; built-in rules stay active.
 redact:
   - exact: "example-local-token-value"
@@ -85,6 +95,12 @@ services:
       healthchecks:
         source: healthchecks
         check_tags: [proxy]
+      beszel:
+        source: beszel
+        system_name: proxy-host
+      ntfy:
+        source: ntfy
+        topic: proxy-alerts
 
   - id: media
     display_name: Media Server

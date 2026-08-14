@@ -62,7 +62,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	auditOut := io.Writer(stderr)
 	var closer io.Closer
-	if cfg.Audit.File != "" {
+	if !*validateOnly && cfg.Audit.File != "" {
 		rf, err := audit.OpenRotating(cfg.Audit.File, cfg.Audit.MaxBytes, cfg.Audit.MaxFiles)
 		if err != nil {
 			log.Error("audit file open failed", "err", err)

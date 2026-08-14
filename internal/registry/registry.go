@@ -64,7 +64,8 @@ func (r *Registry) List(prefix string, offset, limit int) ([]ServiceView, int) {
 	var matched []string
 	prefix = strings.ToLower(strings.TrimSpace(prefix))
 	for _, id := range r.order {
-		if prefix != "" && !strings.HasPrefix(id, prefix) && !strings.Contains(strings.ToLower(r.byID[id].DisplayName), prefix) {
+		display := strings.ToLower(r.byID[id].DisplayName)
+		if prefix != "" && !strings.HasPrefix(id, prefix) && !strings.HasPrefix(display, prefix) {
 			continue
 		}
 		matched = append(matched, id)

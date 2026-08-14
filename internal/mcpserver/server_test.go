@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -348,5 +349,47 @@ func TestUnknownService(t *testing.T) {
 	res, _, _ := app.toolServiceStatus(context.Background(), nil, serviceIDIn{ServiceID: "nope"})
 	if res == nil || !res.IsError {
 		t.Fatal("expected error result")
+	}
+}
+
+func TestUnknownService_IsAuditedWithoutSecrets(t *testing.T) {
+	app := newTestApp(t, false)
+	var buf bytes.Buffer
+	app.Audit = audit.New(&buf)
+	res, _, _ := app.toolServiceStatus(context.Background(), nil, serviceIDIn{ServiceID: "nope"})
+	if res == nil || !res.IsError {
+		t.Fatal("expected error result")
+	}
+	got := buf.String()
+	if !strings.Contains(got, `"status":"error"`) || !strings.Contains(got, "service_status") {
+		t.Fatalf("error not audited: %s", got)
+	}
+	if strings.Contains(got, "http://") || strings.Contains(got, "HC_DEMO") {
+		t.Fatalf("audit leaked secret: %s", got)
+	}
+}
+
+func TestFailedCrons_DefaultWindowRespectsMax(t *testing.T) {
+	app := newTestApp(t, false)
+	app.Cfg.Limits.MaxCronWindow = 12 * time.Hour
+	res, _, err := app.toolFailedCrons(context.Background(), nil, failedCronsIn{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res != nil && res.IsError {
+		t.Fatalf("default window exceeded max: %+v", res.Content)
+	}
+}
+
+func TestGetEvidence_ExpiredIsAudited(t *testing.T) {
+	app := newTestApp(t, false)
+	var buf bytes.Buffer
+	app.Audit = audit.New(&buf)
+	res, _, _ := app.toolGetEvidence(context.Background(), nil, getEvidenceIn{ID: "missing"})
+	if res == nil || !res.IsError {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(buf.String(), `"status":"error"`) {
+		t.Fatalf("miss not audited: %s", buf.String())
 	}
 }

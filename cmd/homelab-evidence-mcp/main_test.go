@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,6 +73,32 @@ services:
 	}
 	if !strings.Contains(out.String(), "config ok") {
 		t.Fatal(out.String())
+	}
+}
+
+func TestRun_ValidateDoesNotOpenAuditFile(t *testing.T) {
+	dir := t.TempDir()
+	auditPath := filepath.Join(dir, "audit.jsonl")
+	p := filepath.Join(dir, "cfg.yaml")
+	raw := fmt.Sprintf(`
+version: 1
+audit:
+  file: %s
+sources:
+  gatus:
+    kind: gatus
+    base_url: https://gatus.example.internal
+`, auditPath)
+	if err := os.WriteFile(p, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := run([]string{"--config", p, "--validate"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("code=%d err=%s", code, errb.String())
+	}
+	if _, err := os.Stat(auditPath); !os.IsNotExist(err) {
+		t.Fatalf("validate opened audit file: %v", err)
 	}
 }
 

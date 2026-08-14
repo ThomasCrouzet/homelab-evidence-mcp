@@ -118,7 +118,7 @@ func TestApply_AWSAndPEM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	in := `key=AKIAIOSFODNN7EXAMPLE and -----BEGIN RSA PRIVATE KEY----- MIIE`
+	in := "key=AKIAIOSFODNN7EXAMPLE and -----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----"
 	out, n := e.Apply(in)
 	if n < 1 {
 		t.Fatalf("n=%d out=%s", n, out)
@@ -146,6 +146,28 @@ func TestNeutralizeInstructionLike(t *testing.T) {
 	plain := "upstream timeout after 30s"
 	if got := NeutralizeInstructionLike(plain); got != plain {
 		t.Fatalf("false positive: %q", got)
+	}
+	systemd := "systemd[1]: Started docker.service"
+	if got := NeutralizeInstructionLike(systemd); got != systemd {
+		t.Fatalf("system: false positive: %q", got)
+	}
+}
+
+func TestApply_PEMDoesNotSwallowRemainder(t *testing.T) {
+	e, err := New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY----- trailing-ok"
+	out, n := e.Apply(in)
+	if n < 1 {
+		t.Fatalf("n=%d out=%s", n, out)
+	}
+	if strings.Contains(out, "MIIE") || strings.Contains(out, "BEGIN RSA") {
+		t.Fatal(out)
+	}
+	if !strings.Contains(out, "trailing-ok") {
+		t.Fatalf("PEM redaction swallowed remainder: %s", out)
 	}
 }
 

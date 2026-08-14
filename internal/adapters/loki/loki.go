@@ -158,7 +158,7 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 				ID:                evidence.NewOpaqueID("ev"),
 				ServiceID:         opt.ServiceID,
 				Source:            evidence.SourceLoki,
-				SourceID:          "query_range",
+				SourceID:          streamSourceID(labels),
 				Kind:              evidence.KindLogLine,
 				ObservedAt:        ts,
 				RetrievedAt:       now,
@@ -180,11 +180,24 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 		}
 		return items[i].ID < items[j].ID
 	})
-	truncated := len(items) >= opt.Limit
-	if len(items) > opt.Limit {
-		items = items[:opt.Limit]
+	kept, truncated := evidence.KeepNewest(items, opt.Limit)
+	return kept, truncated, nil
+}
+
+func streamSourceID(labels map[string]string) string {
+	if len(labels) == 0 {
+		return "stream"
 	}
-	return items, truncated, nil
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+labels[k])
+	}
+	return strings.Join(parts, ",")
 }
 
 type lokiResponse struct {

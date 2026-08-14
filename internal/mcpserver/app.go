@@ -31,6 +31,21 @@ const (
 	maxConcurrentSourceRequests = 8
 )
 
+var (
+	hintTrue  = true
+	hintFalse = false
+)
+
+func readOnlyAnns(openWorld bool) *mcp.ToolAnnotations {
+	ann := &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true}
+	if openWorld {
+		ann.OpenWorldHint = &hintTrue
+	} else {
+		ann.OpenWorldHint = &hintFalse
+	}
+	return ann
+}
+
 // App holds runtime dependencies.
 type App struct {
 	Cfg      *config.Config
@@ -68,11 +83,16 @@ func NewApp(cfg *config.Config, log *slog.Logger, aud *audit.Logger) (*App, erro
 	if err != nil {
 		return nil, err
 	}
+	roots, err := config.LoadExtraCertPool(cfg.TLS.CAFile)
+	if err != nil {
+		return nil, err
+	}
 	hc := httpx.NewLockedClient(httpx.Options{
 		Timeout:   cfg.Limits.TotalTimeout,
 		MaxBody:   cfg.Limits.MaxBodyBytes,
 		UserAgent: version.UserAgent(),
 		CacheTTL:  cfg.Limits.SourceCacheTTL,
+		RootCAs:   roots,
 	})
 	app := &App{
 		Cfg:       cfg,
@@ -137,37 +157,37 @@ func (a *App) Server() *mcp.Server {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "evidence_capabilities",
 		Description: "Return server version, active adapters, covered services, limits, and compatibility notes. Never includes base URLs or secrets.",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true},
+		Annotations: readOnlyAnns(false),
 	}, a.toolCapabilities)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "list_services",
 		Description: "List canonical services with per-source coverage. Optional prefix filter and pagination.",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true},
+		Annotations: readOnlyAnns(false),
 	}, a.toolListServices)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "service_status",
 		Description: "Multi-source status snapshot for one service_id (Gatus, Docker, Healthchecks, Beszel). Loki/ntfy are not queried.",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true},
+		Annotations: readOnlyAnns(true),
 	}, a.toolServiceStatus)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "incident_context",
 		Description: "Collect bounded multi-source evidence timeline for a service_id. Deterministic correlation only; no root-cause claims.",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true},
+		Annotations: readOnlyAnns(true),
 	}, a.toolIncidentContext)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "search_logs",
 		Description: "Search Loki logs for a service_id using the preconfigured selector. Optional text filter; caller cannot change URL or stream selector labels.",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true},
+		Annotations: readOnlyAnns(true),
 	}, a.toolSearchLogs)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "failed_crons",
 		Description: "List Healthchecks checks that are currently down, in grace, or paused. Never returns ping URLs.",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true},
+		Annotations: readOnlyAnns(true),
 	}, a.toolFailedCrons)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "get_evidence",
 		Description: "Return one previously emitted evidence item by opaque process-local id (short TTL cache).",
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true},
+		Annotations: readOnlyAnns(false),
 	}, a.toolGetEvidence)
 	return s
 }

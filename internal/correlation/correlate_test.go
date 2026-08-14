@@ -51,6 +51,9 @@ func TestBuildTimeline_Truncation(t *testing.T) {
 	if !b.Truncated || len(b.Items) != 3 {
 		t.Fatalf("%v %d", b.Truncated, len(b.Items))
 	}
+	if b.Items[0].ObservedAt != base.Add(7*time.Minute) || b.Items[2].ObservedAt != base.Add(9*time.Minute) {
+		t.Fatalf("did not keep newest: %+v", b.Items)
+	}
 }
 
 func TestBuildTimeline_SourceTruncation(t *testing.T) {

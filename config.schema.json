@@ -22,7 +22,7 @@
         "max_log_line_bytes": { "type": "integer", "minimum": 1, "maximum": 16384 },
         "max_body_bytes": { "type": "integer", "minimum": 1, "maximum": 8388608, "description": "Maximum HTTP body size, limited to 8 MiB" },
         "evidence_cache_ttl": { "type": "string", "description": "TTL of the local cache used by get_evidence" },
-        "evidence_cache_max": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "evidence_cache_max": { "type": "integer", "minimum": 0, "maximum": 1000, "description": "0 disables the get_evidence cache" },
         "source_cache_ttl": {
           "type": "string",
           "description": "Short cache of identical GET responses. Default: 15s; 0 disables it. Evidence freshness remains based on source or collection timestamps."
@@ -36,9 +36,22 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "file": { "type": "string", "maxLength": 4096, "description": "Optional path for the rotating JSONL audit log, mode 0600 on Unix or a user ACL on Windows" },
+        "file": { "type": "string", "maxLength": 4096, "description": "Optional path for the rotating JSONL audit log. The binary enforces mode 0600 on Unix. On Windows, apply a user-only ACL; the binary does not inspect Windows ACLs." },
         "max_bytes": { "type": "integer", "minimum": 1, "maximum": 104857600 },
         "max_files": { "type": "integer", "minimum": 1, "maximum": 20 }
+      }
+    },
+    "tls": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional extra CA bundle. TLS verification cannot be disabled.",
+      "properties": {
+        "ca_file": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "PEM file of additional CA certificates appended to the system trust store"
+        }
       }
     },
     "sources": {
@@ -59,11 +72,11 @@
             "type": "string",
             "maxLength": 4096,
             "format": "uri",
-            "pattern": "^https?://[^\\s/?#]+(?:/[^\\s?#]*)?$",
+            "pattern": "^https?://[^\\s/?#@]+(?:/[^\\s?#]*)?$",
             "description": "Absolute http(s) URL. Path prefixes are preserved. Userinfo, query strings, and fragments are refused."
           },
           "token_env": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
-          "token_file": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Regular file limited to 4 KiB, mode 0600 on Unix or a user ACL on Windows" },
+          "token_file": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Regular file limited to 4 KiB. The binary enforces mode 0600 on Unix. On Windows, apply a user-only ACL; the binary does not inspect Windows ACLs." },
           "token_header": {
             "type": "string",
             "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$",

@@ -7,17 +7,17 @@ This example uses only fictional names, domains, and identifiers.
 | Role | Access |
 |---|---|
 | MCP client host | runs `homelab-evidence-mcp` as a stdio process |
-| Monitoring host | exposes Gatus, Loki, and Healthchecks |
+| Monitoring host | exposes Gatus, Loki, Healthchecks, Beszel, and ntfy |
 | Docker hosts | expose a read-limited socket proxy |
 
 ## Pilot services
 
-| `service_id` | Gatus key | Container | Loki selector | Healthchecks |
-|---|---|---|---|---|
-| `reverse-proxy` | `infra_proxy` | `caddy` | `{container="caddy"}` | tag `proxy` |
-| `media` | `media_app` | `media` | `{container="media"}` | tag `media` |
-| `git-forge` | `forge_web` | `gitea` | `{container="gitea"}` | optional |
-| `monitoring` | `monitoring_grafana` | `grafana` | `{container="grafana"}` | name `monitoring-heartbeat` |
+| `service_id` | Gatus key | Container | Loki selector | Healthchecks | Beszel | ntfy |
+|---|---|---|---|---|---|---|
+| `reverse-proxy` | `infra_proxy` | `caddy` | `{container="caddy"}` | tag `proxy` | `proxy-host` | `proxy-alerts` |
+| `media` | `media_app` | `media` | `{container="media"}` | tag `media` | optional | optional |
+| `git-forge` | `forge_web` | `gitea` | `{container="gitea"}` | optional | optional | optional |
+| `monitoring` | `monitoring_grafana` | `grafana` | `{container="grafana"}` | name `monitoring-heartbeat` | optional | optional |
 
 Starting with a few services limits noise and makes it easier to verify
 bindings.
@@ -40,6 +40,12 @@ sources:
     kind: healthchecks
     base_url: https://healthchecks.example.internal
     token_env: HEALTHCHECKS_API_TOKEN
+  beszel:
+    kind: beszel
+    base_url: https://beszel.example.internal
+  ntfy:
+    kind: ntfy
+    base_url: https://ntfy.example.internal
 services:
   - id: media
     display_name: Media
@@ -48,10 +54,12 @@ services:
       docker: { source: docker-main, container_name: media }
       loki: { source: loki, selector: '{container="media"}' }
       healthchecks: { source: healthchecks, check_tags: [media] }
+      beszel: { source: beszel, system_name: media-host }
+      ntfy: { source: ntfy, topic: media-alerts }
 ```
 
-Store the real file outside the repository with mode `0600` on Unix, or a
-user-only ACL on Windows.
+Store the real file outside the repository with mode `0600` on Unix. On
+Windows, apply a user-only ACL; the binary does not inspect Windows ACLs.
 
 ## Progressive verification
 

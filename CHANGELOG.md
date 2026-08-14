@@ -22,7 +22,9 @@ Notable changes are recorded in this file. The format follows
 - Optional rotating JSONL audit file.
 - Configuration JSON schema and integration examples.
 - Contract tests, race detection, short fuzzing, and end-to-end demo.
-- CI and automated dependency tracking. Multi-arch binary release workflow is present but no GitHub Release tag has been cut yet.
+- CI and automated dependency tracking. Multi-arch binaries include
+  `darwin/amd64` as well as `linux/{amd64,arm64}`, `darwin/arm64`, and
+  `windows/amd64`.
 
 ### Security
 
@@ -42,4 +44,13 @@ Notable changes are recorded in this file. The format follows
 - Result limits reapplied client-side.
 - Docker, Healthchecks, and Beszel snapshots excluded from historical windows.
 - Absolute paths, traversal, fragments, and query strings refused.
+- Symbolic links refused for configuration, token, CA, and audit files.
+- Extra CA bundle via `tls.ca_file` (verification cannot be disabled).
+- Failed MCP tool calls are audited without secrets.
+- Configuration and token files limited to mode `0600` on Unix. On Windows the
+  operator must apply a user ACL; the binary does not inspect Windows ACLs.
 - Symbolic audit files refused and permissions tightened on open.
+- Timeline and log caps keep the newest items.
+- Gatus accepts numeric `duration` values from the stock API.
+- Beszel collects from PocketBase `/api/collections/systems/records`.
+- `evidence_cache_max: 0` disables the evidence cache.
