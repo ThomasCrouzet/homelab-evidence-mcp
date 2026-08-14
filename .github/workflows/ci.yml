@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Full history so gitleaks can resolve parent ranges on PRs.
           fetch-depth: 0
