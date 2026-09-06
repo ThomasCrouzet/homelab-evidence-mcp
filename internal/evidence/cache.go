@@ -7,7 +7,7 @@ import (
 
 const maxCacheItems = 1000
 
-// Cache temporarily holds a bounded number of evidence items in-process.
+// Cache temporarily holds evidence items in-process. max sets the item limit.
 type Cache struct {
 	mu    sync.Mutex
 	ttl   time.Duration
@@ -21,7 +21,7 @@ type cacheEntry struct {
 	expiresAt time.Time
 }
 
-// NewCache creates a cache; max <= 0 disables storage.
+// NewCache makes a cache. max <= 0 deactivates storage.
 func NewCache(ttl time.Duration, max int) *Cache {
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
@@ -62,7 +62,7 @@ func (c *Cache) PutAll(items []Item) {
 	}
 }
 
-// Get returns a non-expired evidence item.
+// Get gives a non-expired evidence item.
 func (c *Cache) Get(id string) (Item, bool) {
 	if c == nil || id == "" {
 		return Item{}, false
@@ -85,7 +85,7 @@ func (c *Cache) expireLocked(now time.Time) {
 			delete(c.items, id)
 		}
 	}
-	// Compact order after expiration.
+	// Remove expired IDs from the order.
 	n := 0
 	for _, id := range c.order {
 		if _, ok := c.items[id]; ok {

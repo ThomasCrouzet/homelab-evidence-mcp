@@ -113,7 +113,7 @@ sources:
 		t.Fatal(err)
 	}
 	if cfg.Limits.EvidenceCacheMax != 0 {
-		t.Fatalf("want 0 to disable, got %d", cfg.Limits.EvidenceCacheMax)
+		t.Fatalf("want 0 to deactivate cache, got %d", cfg.Limits.EvidenceCacheMax)
 	}
 }
 
@@ -575,7 +575,7 @@ sources:
     base_url: http://127.0.0.1:9
 services: []
 `)
-	// Mode 0644 must be rejected.
+	// Make sure that LoadFile gives an error for mode 0644.
 	loose := filepath.Join(dir, "loose.yaml")
 	if err := os.WriteFile(loose, raw, 0o600); err != nil {
 		t.Fatal(err)
@@ -588,7 +588,7 @@ services: []
 		t.Fatalf("expected permission error, got %v", err)
 	}
 
-	// Mode 0600 must be accepted.
+	// Make sure that LoadFile can read mode 0600.
 	tight := filepath.Join(dir, "tight.yaml")
 	if err := os.WriteFile(tight, raw, 0o600); err != nil {
 		t.Fatal(err)

@@ -1,8 +1,8 @@
 # MCP client configuration
 
-`homelab-evidence-mcp` runs as a child process over **stdio** transport. The
-client must provide the binary path, configuration file, and required
-environment variables.
+The MCP client starts `homelab-evidence-mcp` as a child process over **stdio**.
+The client must give the binary path and configuration file. It must also give
+the necessary environment variables.
 
 ## Generic JSON configuration
 
@@ -33,8 +33,8 @@ Some clients use a list rather than a named object:
 }
 ```
 
-Adapt only the envelope expected by the client. The command, arguments, and
-environment remain the same.
+Change only the envelope that the client expects. Keep the command, arguments,
+and environment the same.
 
 ## Verification
 
@@ -44,8 +44,8 @@ homelab-evidence-mcp --config /path/config.yaml --validate
 homelab-evidence-mcp --version
 ```
 
-On Windows, replace `chmod 600` with an ACL granting access only to the account
-that launches the MCP client. The binary does not inspect Windows ACLs.
+On Windows, use an ACL in place of `chmod 600`. Give access only to the account
+that starts the MCP client. The binary does not examine Windows ACLs.
 
-After startup, standard output is reserved exclusively for JSON-RPC. Do not
-redirect logs to stdout; they are written to stderr.
+After startup, use standard output only for JSON-RPC. Do not send logs to
+standard output. The binary writes logs to standard error.

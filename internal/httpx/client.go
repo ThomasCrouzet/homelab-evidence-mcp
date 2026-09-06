@@ -1,4 +1,4 @@
-// Package httpx provides adapters with a GET-only locked HTTP client.
+// Package httpx gives adapters a GET-only locked HTTP client.
 package httpx
 
 import (
@@ -30,12 +30,12 @@ const (
 	cacheTimeHeader = "X-Homelab-Evidence-Cache-Time"
 )
 
-// destination represents a base URL locked at startup.
+// destination contains a base URL set at startup.
 type destination struct {
 	BaseURL *url.URL
 }
 
-// CacheStats describes local GET response cache usage.
+// CacheStats gives data about local GET response cache usage.
 type CacheStats struct {
 	Hits   uint64 `json:"hits"`
 	Misses uint64 `json:"misses"`
@@ -51,7 +51,7 @@ type cacheEntry struct {
 	expiresAt   time.Time
 }
 
-// LockedClient only issues GET requests to pre-registered destinations.
+// LockedClient sends GET requests only to destinations in its registry.
 type LockedClient struct {
 	mu           sync.RWMutex
 	destinations map[string]*destination
@@ -67,19 +67,19 @@ type LockedClient struct {
 	misses       atomic.Uint64
 }
 
-// Options configures the client.
+// Options contains the client settings.
 type Options struct {
 	Timeout   time.Duration
 	MaxBody   int64
 	UserAgent string
-	// CacheTTL sets how long identical GETs are cached; zero disables caching.
+	// CacheTTL sets the cache duration for the same GET requests. Zero deactivates caching.
 	CacheTTL time.Duration
-	// RootCAs, when set, is the extra-augmented trust pool. TLS verification
-	// stays enabled; there is no skip-verify option.
+	// RootCAs contains the trust pool with additional certificates. TLS certificate verification is always active.
+	// The client does not give a skip-verify option.
 	RootCAs *x509.CertPool
 }
 
-// NewLockedClient builds a client with verified TLS and redirects refused.
+// NewLockedClient makes a client with TLS certificate verification. Redirects cannot occur.
 func NewLockedClient(opts Options) *LockedClient {
 	if opts.Timeout <= 0 {
 		opts.Timeout = 10 * time.Second
@@ -91,7 +91,7 @@ func NewLockedClient(opts Options) *LockedClient {
 		opts.UserAgent = "homelab-evidence-mcp/0.1"
 	}
 	transport := &http.Transport{
-		Proxy: nil, // never apply HTTP_PROXY to adapter traffic
+		Proxy: nil, // Do not use HTTP_PROXY for adapter traffic.
 		DialContext: (&net.Dialer{
 			Timeout:   5 * time.Second,
 			KeepAlive: 30 * time.Second,
@@ -115,8 +115,7 @@ func NewLockedClient(opts Options) *LockedClient {
 		cache:        make(map[string]cacheEntry),
 	}
 	if _, err := rand.Read(lc.cacheKey[:]); err != nil {
-		// Without a random key, disable the cache rather than create a weak
-		// authentication fingerprint.
+		// If there is no random key, deactivate the cache. This prevents a weak authentication fingerprint.
 		lc.cacheTTL = 0
 	}
 	lc.client = &http.Client{
@@ -136,7 +135,7 @@ var (
 )
 
 // RegisterDestination locks a named URL at startup.
-// Path prefixes are preserved when composing routes.
+// RegisterDestination keeps path prefixes when it joins routes.
 func (c *LockedClient) RegisterDestination(name, rawURL string) error {
 	if name == "" {
 		return errors.New("destination name is required")
@@ -160,7 +159,7 @@ func (c *LockedClient) RegisterDestination(name, rawURL string) error {
 	if len([]rune(rawURL)) > 4096 || invalidPath(u.Path) {
 		return fmt.Errorf("destination %q: invalid or oversized base path", name)
 	}
-	// Preserve the prefix and strip trailing slashes for stable composition.
+	// Keep the prefix and remove trailing slashes for stable composition.
 	basePath := strings.TrimRight(u.Path, "/")
 	base := &url.URL{
 		Scheme: u.Scheme,
@@ -176,8 +175,8 @@ func (c *LockedClient) RegisterDestination(name, rawURL string) error {
 	return nil
 }
 
-// joinURLPath concatenates a locked prefix and a relative path.
-// rel starts with /; an empty prefix leaves it unchanged.
+// joinURLPath joins a locked prefix and a relative path.
+// rel starts with /. If the prefix is empty, rel does not change.
 func joinURLPath(basePath, rel string) string {
 	basePath = strings.TrimRight(basePath, "/")
 	if !strings.HasPrefix(rel, "/") {
@@ -206,7 +205,7 @@ func invalidPath(path string) bool {
 	return false
 }
 
-// Stats returns cache counters.
+// Stats gives cache counters.
 func (c *LockedClient) Stats() CacheStats {
 	c.mu.Lock()
 	now := time.Now()
@@ -224,8 +223,8 @@ func (c *LockedClient) Stats() CacheStats {
 	}
 }
 
-// Get performs a GET against a registered destination and relative path.
-// path must start with / and may include a query string.
+// Get sends a GET request to a destination in the registry and a relative path.
+// The path must start with /. It can include a query string.
 func (c *LockedClient) Get(ctx context.Context, destName, path string, headers map[string]string) (*http.Response, []byte, error) {
 	if ctx == nil {
 		return nil, nil, errors.New("nil context")
@@ -256,7 +255,7 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 	if strings.HasPrefix(rel.Path, "//") || invalidPath(rel.Path) {
 		return nil, nil, errors.New("invalid relative path")
 	}
-	// Manual composition: ResolveReference strips the prefix for a path starting with /.
+	// Compose the URL here. ResolveReference removes the prefix from a path that starts with /.
 	full := &url.URL{
 		Scheme:   dest.BaseURL.Scheme,
 		Host:     dest.BaseURL.Host,
@@ -306,7 +305,7 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 		return nil, nil, sanitizeNetErr(err, destName)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	// A remote server must not be able to spoof cache metadata.
+	// A remote server cannot set cache metadata.
 	resp.Header.Del(cacheTimeHeader)
 
 	limited := io.LimitReader(resp.Body, c.maxBody+1)
@@ -328,8 +327,8 @@ func headerFingerprint(h map[string]string, key []byte) string {
 	if len(h) == 0 {
 		return ""
 	}
-	// Authentication values use a process-local HMAC fingerprint, which
-	// distinguishes secrets without storing them.
+	// Authentication values use a process-local HMAC fingerprint.
+	// The fingerprint is different for each secret and does not store the secret.
 	parts := make([]string, 0, len(h))
 	for k, v := range h {
 		lk := strings.ToLower(strings.TrimSpace(k))
@@ -418,8 +417,8 @@ func (c *LockedClient) removeCacheLocked(key string) {
 	c.cacheOrder = c.cacheOrder[:n]
 }
 
-// CollectionTime returns the original collection time of a cached response.
-// For a direct network response, fallback is preserved.
+// CollectionTime gives the initial collection time of a cached response.
+// CollectionTime keeps fallback for a direct network response.
 func CollectionTime(resp *http.Response, fallback time.Time) time.Time {
 	fallback = fallback.UTC()
 	if resp == nil {

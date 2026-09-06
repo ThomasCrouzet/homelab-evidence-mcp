@@ -23,7 +23,7 @@ func main() {
 	os.Exit(code)
 }
 
-// run is the testable entry point with injectable stdout and stderr.
+// Tests use run with specified stdout and stderr writers.
 func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("homelab-evidence-mcp", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -35,7 +35,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(stderr, "error: unexpected positional arguments")
+		_, _ = fmt.Fprintln(stderr, "error: you cannot use positional arguments")
 		return 2
 	}
 	if *showVersion {
@@ -43,7 +43,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	if *configPath == "" {
-		_, _ = fmt.Fprintln(stderr, "error: --config is required")
+		_, _ = fmt.Fprintln(stderr, "error: --config is necessary")
 		return 2
 	}
 

@@ -4,23 +4,32 @@ This example uses only fictional names, domains, and identifiers.
 
 ## Topology
 
-| Role | Access |
-|---|---|
-| MCP client host | runs `homelab-evidence-mcp` as a stdio process |
-| Monitoring host | exposes Gatus, Loki, Healthchecks, Beszel, and ntfy |
-| Docker hosts | expose a read-limited socket proxy |
+This example has this topology:
+
+- The MCP client host runs `homelab-evidence-mcp` as a stdio process.
+- The monitoring host gives access to Gatus, Loki, Healthchecks, Beszel, and
+  ntfy.
+- Each Docker host gives access through a read-limited socket proxy.
 
 ## Pilot services
 
-| `service_id` | Gatus key | Container | Loki selector | Healthchecks | Beszel | ntfy |
-|---|---|---|---|---|---|---|
-| `reverse-proxy` | `infra_proxy` | `caddy` | `{container="caddy"}` | tag `proxy` | `proxy-host` | `proxy-alerts` |
-| `media` | `media_app` | `media` | `{container="media"}` | tag `media` | optional | optional |
-| `git-forge` | `forge_web` | `gitea` | `{container="gitea"}` | optional | optional | optional |
-| `monitoring` | `monitoring_grafana` | `grafana` | `{container="grafana"}` | name `monitoring-heartbeat` | optional | optional |
+Use these pilot service connections:
 
-Starting with a few services limits noise and makes it easier to verify
-bindings.
+- **`reverse-proxy`**: Use the Gatus endpoint key `infra_proxy`, container `caddy`,
+  and Loki selector `{container="caddy"}`. Use the Healthchecks tag `proxy`,
+  Beszel system `proxy-host`, and ntfy topic `proxy-alerts`.
+- **`media`**: Use the Gatus endpoint key `media_app`, container `media`, and Loki
+  selector `{container="media"}`. Use the Healthchecks tag `media`. Beszel and
+  ntfy are optional.
+- **`git-forge`**: Use the Gatus endpoint key `forge_web` and container
+  `gitea`. Use Loki selector `{container="gitea"}`. Healthchecks, Beszel, and
+  ntfy are optional.
+- **`monitoring`**: Use the Gatus endpoint key `monitoring_grafana` and
+  container `grafana`. Use Loki selector `{container="grafana"}` and the
+  Healthchecks name `monitoring-heartbeat`. Beszel and ntfy are optional.
+
+Start with some services. This method limits noise and makes the source map
+easy to examine.
 
 ## Minimal configuration
 
@@ -58,18 +67,21 @@ services:
       ntfy: { source: ntfy, topic: media-alerts }
 ```
 
-Store the real file outside the repository with mode `0600` on Unix. On
-Windows, apply a user-only ACL; the binary does not inspect Windows ACLs.
+On Unix, store the configuration file in a directory that is not in the
+repository. Set its mode to `0600`. On Windows, set a user-only ACL. The
+binary does not examine Windows ACLs.
 
-## Progressive verification
+## Verification sequence
 
-1. Create only read-only access secrets.
-2. Restrict the Docker proxy to the required `GET` routes.
+Use this verification sequence:
+
+1. Make read-only access secrets.
+2. Make sure that the Docker proxy has only the necessary `GET` routes.
 3. Validate the configuration with `--validate`.
 4. Compare `service_status` to the source UIs.
-5. Test redaction with a fake secret.
-6. Simulate an incident without interrupting production.
-7. Expand coverage only after pilot services are validated.
+5. Do a redaction test with a test secret.
+6. Do an incident test that does not interrupt production.
+7. Expand coverage only after you validate the pilot services.
 
-The binary remains a stdio child process; it does not need to be exposed as a
-permanent network service.
+The binary stays a stdio child process. Permanent network exposure is not
+necessary.

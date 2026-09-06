@@ -20,7 +20,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/config"
 )
 
-// fullFixtureApp builds an App whose six adapters cover the media service.
+// fullFixtureApp makes an App that includes six adapters for the media service.
 func fullFixtureApp(t *testing.T) *App {
 	t.Helper()
 	t.Setenv("HC_DEMO_TOKEN", "demo-readonly-token-not-real")
@@ -183,7 +183,7 @@ func TestCollectBeszel_ViaServiceStatus(t *testing.T) {
 	if !strings.Contains(s, "media-host") && !strings.Contains(s, "metric") {
 		// Attributes may include the system name.
 		if !strings.Contains(s, `"kind":"beszel"`) && !strings.Contains(s, "SourceBeszel") {
-			// The source outcome should report Beszel as ok.
+			// The source outcome must show Beszel as ok.
 			if !strings.Contains(s, `"kind":"beszel"`) {
 				// JSON uses beszel as the SourceOutcome kind.
 				if !strings.Contains(s, "beszel") {
@@ -192,7 +192,7 @@ func TestCollectBeszel_ViaServiceStatus(t *testing.T) {
 			}
 		}
 	}
-	// Beszel should succeed and provide items.
+	// The Beszel result must have status ok and items.
 	var parsed struct {
 		Items   []map[string]any `json:"items"`
 		Sources []struct {
@@ -310,7 +310,7 @@ func TestIncidentContext_ExcludesCurrentSnapshotsFromHistoricalWindow(t *testing
 
 func TestFailedCrons_GlobalAllHC(t *testing.T) {
 	app := fullFixtureApp(t)
-	// Without service_id, query all Healthchecks clients.
+	// Without service_id, get data from all Healthchecks clients.
 	_, out, err := app.toolFailedCrons(context.Background(), nil, failedCronsIn{
 		Duration: "24h",
 	})
@@ -322,7 +322,7 @@ func TestFailedCrons_GlobalAllHC(t *testing.T) {
 	if strings.Contains(s, "LEAKME") {
 		t.Fatal("ping url leaked")
 	}
-	// The global path should include media-cron and other-cron.
+	// The global path must include media-cron and other-cron.
 	if !strings.Contains(s, "media-cron") {
 		t.Fatalf("media-cron missing: %s", s)
 	}
@@ -377,7 +377,7 @@ func TestTools_ReadOnlyAnnotations(t *testing.T) {
 		if tl.Annotations.OpenWorldHint == nil || *tl.Annotations.OpenWorldHint != openWorld {
 			t.Fatalf("tool %s OpenWorldHint=%v want %v", tl.Name, tl.Annotations.OpenWorldHint, openWorld)
 		}
-		// No mutation-sounding name should appear.
+		// Tool names must not imply mutation.
 		n := strings.ToLower(tl.Name)
 		for _, bad := range []string{"restart", "delete", "write", "exec", "stop", "start", "patch"} {
 			if strings.Contains(n, bad) {

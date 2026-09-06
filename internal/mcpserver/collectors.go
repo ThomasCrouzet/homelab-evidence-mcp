@@ -106,7 +106,7 @@ func (a *App) collectHCWindow(ctx context.Context, serviceID string, ref *config
 			return nil, fmt.Errorf("healthchecks client missing")
 		}
 		f := healthchecks.FilterFromRef(ref)
-		// Incident/failed-cron paths always select current down/grace/paused
+		// Incident paths and cron failure paths always select current down/grace/paused
 		// states. A binding status_filter of "up" must not hide failures.
 		f.Status = ""
 		return cli.FailedInWindow(ctx, serviceID, f, start, end)

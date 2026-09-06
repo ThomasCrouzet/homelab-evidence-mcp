@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Event represents an audit entry without secrets or raw log bodies.
+// Event contains an audit entry without secrets or raw log bodies.
 type Event struct {
 	Time       time.Time `json:"time"`
 	Action     string    `json:"action"`
@@ -26,7 +26,7 @@ type Logger struct {
 	out io.Writer
 }
 
-// New creates a JSONL log to w, or stderr by default.
+// New makes a JSONL log to w, or stderr by default.
 func New(w io.Writer) *Logger {
 	if w == nil {
 		w = os.Stderr

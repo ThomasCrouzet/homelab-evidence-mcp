@@ -5,7 +5,7 @@ Dependencies are declared in `go.mod` and locked by `go.sum`.
 ## Direct dependencies
 
 | Module | Usage |
-|---|---|
+| --- | --- |
 | `github.com/modelcontextprotocol/go-sdk` | MCP client and server protocol |
 | `gopkg.in/yaml.v3` | configuration decoding |
 

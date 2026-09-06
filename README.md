@@ -3,32 +3,34 @@
 [![CI](https://github.com/ThomasCrouzet/homelab-evidence-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/ThomasCrouzet/homelab-evidence-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Local MCP server over **stdio** transport that gathers incident evidence from a
-homelab. It ships as a static Go binary and offers no mutation operations.
+This local MCP server uses **stdio** transport. It collects incident evidence
+from a homelab. The server is a static Go binary. It has no mutation operations.
 
 ## Why
 
-When a service fails, the signals are scattered:
+When a service has a failure, each source contains different signals:
 
-- Gatus reports an error;
-- Docker shows a container restarting;
-- Loki contains a timeout a few moments earlier;
-- Healthchecks shows a scheduled job failing.
+- Gatus gives an error.
+- Docker shows a container in the `restarting` state.
+- Loki contains a timeout from some moments before the failure.
+- Healthchecks gives a scheduled job failure.
 
-Specialized tools correctly expose their own source, but they share neither a
-service identity, nor a common evidence format, nor a shared timeline. This
-project provides that correlation layer without inventing causality.
+Each source tool gives data from one source. The tools do not use the same
+service identities, evidence formats, or timelines. This project correlates
+the data. It does not identify a cause.
 
 ## Principles
 
-1. **Canonical registry**: an explicit `service_id` links Gatus, Docker, Loki,
+The project uses these principles:
+
+1. **Canonical service registry**: A `service_id` connects Gatus, Docker, Loki,
    Healthchecks, Beszel, and ntfy identities.
-2. **Common evidence model**: every item is bounded, timestamped, attributed,
-   redacted, and marked when truncated.
-3. **Deterministic correlation**: the timeline presents facts; it does not claim
-   to establish a root cause.
-4. **Structural read-only**: only HTTP `GET` requests to destinations locked at
-   startup are allowed.
+2. **Common evidence model**: The model adds a source and two timestamps to
+   each item. It also redacts data and uses limits. It shows truncation.
+3. **Deterministic correlation**: The timeline presents facts. It does not identify
+   a root cause.
+4. **Read-only operation**: The server sends only HTTP `GET` requests.
+   Destinations cannot change after startup.
 
 Short example:
 
@@ -38,15 +40,15 @@ Short example:
 02:14 Gatus media/app failure status=503
 02:15 Healthchecks "media-cron" is down
 
-Timeline is ordered by observed_at; correlation does not establish root cause.
+The timeline uses observed_at order. Correlation does not identify a root cause.
 ```
 
-This server is neither a dashboard, nor a generic HTTP proxy, nor a control
-plane. It restarts no container and produces no root-cause analysis.
+This server is not a dashboard, an HTTP proxy for general use, or a control
+plane. It does not start containers again or identify root causes.
 
 ## Installation
 
-Prerequisite: Go 1.25 or later.
+Prerequisite: Go 1.25 is the minimum version.
 
 ```bash
 go install github.com/ThomasCrouzet/homelab-evidence-mcp/cmd/homelab-evidence-mcp@latest
@@ -61,21 +63,25 @@ make build
 
 ## Quick start
 
-1. Copy `config.example.yaml` to a private location.
-2. Restrict the file to the owner: `chmod 600 /path/config.yaml` on Unix, or a
-   user-only ACL on Windows.
-3. Fill in internal URLs and a few pilot services.
-4. Export required tokens, for example `HEALTHCHECKS_API_TOKEN`.
-5. Validate the configuration before wiring it into the MCP client.
+Do these steps:
+
+1. Copy `config.example.yaml` to a directory that is not in the repository.
+2. Make sure that only its owner can access the file. On Unix, use
+   `chmod 600 /path/config.yaml`. On Windows, use a user-only ACL.
+3. Add URLs for the internal network and some pilot services.
+4. Set the necessary tokens as environment variables, for example
+   `HEALTHCHECKS_API_TOKEN`.
+5. Validate the configuration before you add it to the MCP client.
 
 ```bash
 homelab-evidence-mcp --config /path/config.yaml --validate
 ```
 
-Validation loads tokens and locks destinations from the YAML; it does not
-probe them with HTTP. It fails on any unknown YAML key. Query strings,
-fragments, and userinfo are forbidden in `base_url`; authentication uses
-`token_env` or `token_file`.
+Validation loads tokens from the YAML settings. Destinations cannot change
+after this step. Validation sends no HTTP requests to these destinations.
+Validation gives an error for each unknown YAML key. A `base_url` cannot
+contain query strings, fragments, or userinfo.
+Authentication uses `token_env` or `token_file`.
 
 Registration with an MCP client:
 
@@ -93,73 +99,85 @@ Registration with an MCP client:
 }
 ```
 
-Standard output is reserved for the JSON-RPC protocol. Logs and audit events
-are written to standard error. See
+The server uses standard output only for the JSON-RPC protocol. It writes logs
+and audit events to standard error. See
 [MCP client configuration](docs/mcp-hosts.md) and the
 [integration example](docs/configuration-example.md).
 
-## Supported sources
+## Source adapters
 
-| Source | Surface used | Main guarantees |
-|---|---|---|
-| Gatus | `GET /api/v1/endpoints/statuses` | latest result chosen by timestamp |
-| Docker Engine | `GET /containers/json?all=true` | filtered fields, never `Config.Env` |
-| Loki | `GET /loki/api/v1/query_range` | selector fixed in configuration |
-| Healthchecks | `GET /api/v3/checks/` | read-only key, no ping URL |
-| Beszel | `GET /api/systems` and compatible variants | optional host snapshot |
-| ntfy | `GET /{topic}/json?poll=1&since=<unix>` | topic fixed in configuration |
+The server has these source adapters:
 
-Destinations accept only `http` and `https`. For Docker, use a read-limited
-socket proxy; the direct Unix socket is not supported. `HTTP_PROXY` and
-`HTTPS_PROXY` are ignored.
+- **Gatus**: The adapter uses `GET /api/v1/endpoints/statuses`. It selects the
+  result with the greatest timestamp.
+- **Docker Engine**: The adapter uses `GET /containers/json?all=true`. It
+  filters fields and does not include `Config.Env`.
+- **Loki**: The adapter uses `GET /loki/api/v1/query_range`. The configuration
+  supplies the selector.
+- **Healthchecks**: The adapter uses `GET /api/v3/checks/`. It uses a read-only
+  key and does not include ping URLs in its output.
+- **Beszel**: The adapter uses `GET /api/systems` and compatible routes. It can
+  give a host snapshot.
+- **ntfy**: The adapter uses `GET /{topic}/json?poll=1&since=<unix>`. The
+  configuration supplies the topic.
 
-A path prefix is allowed in `base_url`:
-`https://proxy.example/gatus` is correctly combined with Gatus routes.
+Destinations use only `http` and `https`. For Docker, use a read-limited socket
+proxy. The Docker Unix socket is not compatible with the server. The server
+ignores `HTTP_PROXY` and `HTTPS_PROXY`.
 
-The source response cache (`limits.source_cache_ttl`, default `15s`, `0` to
-disable) briefly memorizes identical requests. Authentication values are never
-stored in clear text in its keys; a process-local HMAC fingerprint distinguishes
-access secrets. On a hit, `observed_at` keeps the original collection time and
-`retrieved_at` marks the current read; freshness therefore reflects the real age
-of the snapshot.
+You can use a path prefix in `base_url`. For example, use
+`https://proxy.example/gatus` for Gatus. The server keeps `/gatus` before each
+Gatus API route.
+
+The source response cache keeps responses to the same requests for a short
+time.
+Set the cache TTL with `limits.source_cache_ttl`. The default is `15s`. A value
+of `0` deactivates the cache.
+
+The cache does not store clear-text authentication values in its keys. A
+process-local HMAC fingerprint identifies each access secret. On a cache hit,
+`observed_at` keeps the initial collection time. The `retrieved_at` field gives
+the time of this read. Thus, freshness shows the age of the snapshot.
 
 ## MCP tools
 
-| Tool | Usage |
-|---|---|
-| `evidence_capabilities` | version, active sources, limits, and statistics |
-| `list_services` | canonical services and coverage |
-| `service_status` | Gatus, Docker, Healthchecks, and Beszel snapshot |
-| `incident_context` | bounded multi-source timeline |
-| `search_logs` | Loki search on the configured selector |
-| `failed_crons` | checks currently `down`, `grace`, or `paused` |
-| `get_evidence` | temporary re-read of evidence by opaque identifier |
+The server has these MCP tools:
 
-All tools are annotated as read-only. Global limits bound windows, HTTP bodies,
-evidence counts, and concurrency.
+- `evidence_capabilities` gives the version, active sources, limits, and
+  statistics.
+- `list_services` gives services in the canonical service registry.
+- `service_status` gives a Gatus, Docker, Healthchecks, and Beszel snapshot.
+- `incident_context` gives a multi-source timeline with configuration limits.
+- `search_logs` examines Loki with the selector in the configuration.
+- `failed_crons` gives checks in the `down`, `grace`, or `paused` state.
+- `get_evidence` reads temporary evidence again by its opaque identifier.
+
+All tool annotations identify the tools as read-only. Global limits control
+windows, HTTP body sizes, evidence counts, and concurrency.
 
 ## Evidence model
 
-Each evidence item includes its source, observation timestamp, collection
-timestamp, severity, freshness state, any truncation, and the number of
-redactions applied. Responses also report sources that succeeded, were absent,
-skipped, errored, or timed out.
+Each evidence item contains its source and its observation and collection
+timestamps. It also contains severity, freshness state, truncation, and the
+redaction count. Responses give the `ok`, `absent`, `skipped`, `error`, and
+`timeout` state of each source.
 
 See the [evidence model](docs/evidence-model.md) and
 [tested API contracts](docs/api-compatibility.md).
 
 ## Security
 
-Guarantees and residual risks are detailed in [SECURITY.md](SECURITY.md).
-Key points:
+Read [SECURITY.md](SECURITY.md) for guarantees and remaining risks. The primary
+security controls are:
 
-- destinations locked at startup;
-- HTTP redirects refused;
-- no URL or stream selector supplied by an MCP call;
-- log content treated as hostile data;
-- built-in redaction and optional local rules;
-- configuration and token files limited to mode `0600` on Unix. On Windows,
-  apply a user-only ACL; the binary does not inspect Windows ACLs.
+- Destinations cannot change after startup.
+- The server does not accept HTTP redirects.
+- MCP calls cannot supply a URL or stream selector.
+- Log content is hostile data.
+- The server uses built-in redaction and optional local rules.
+- On Unix, give only the owner access to configuration and token files. Use
+  mode `0600`.
+- On Windows, use a user-only ACL. The binary does not examine Windows ACLs.
 
 ## Local demo
 
@@ -167,22 +185,23 @@ Key points:
 go run ./demo
 ```
 
-The demo starts test HTTP servers, opens an in-memory MCP session, verifies
-partial results, redaction, and the complete absence of non-`GET` requests. No
-real homelab is required.
+The demo starts test HTTP servers and opens an in-memory MCP session. It
+examines results when sources have errors and examines redaction. It also
+makes sure that the server sends only `GET` requests. A homelab is not necessary.
 
 ## Development
 
 ```bash
 make test          # tests with race detection
 make test-quick    # fast tests
-make lint          # formatting, go vet, and golangci-lint if available
+make lint-docs     # Markdown checks
+make lint          # formatting, go vet, and golangci-lint
 make coverage
 make build
 ```
 
-The project builds Linux, macOS, and Windows binaries in CI. Primary targets
-remain headless Linux and macOS systems.
+CI builds Linux, macOS, and Windows binaries. The primary targets are headless
+Linux and macOS systems.
 
 ## License
 

@@ -1,4 +1,4 @@
-// Package docker implements the GET-only Docker Engine adapter.
+// Package docker contains the GET-only Docker Engine adapter.
 package docker
 
 import (
@@ -15,7 +15,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 )
 
-// Client lists containers via GET /containers/json.
+// Client gets container data through GET /containers/json.
 type Client struct {
 	HTTP     *httpx.LockedClient
 	DestName string
@@ -34,7 +34,7 @@ type containerSummary struct {
 	Created int64             `json:"Created"`
 }
 
-// Status returns the filtered state for containerName.
+// Status gives the state selected for containerName.
 func (c *Client) Status(ctx context.Context, serviceID, containerName string) (evidence.Item, error) {
 	retrievedAt := c.now()
 	list, observedAt, err := c.list(ctx, retrievedAt)
@@ -66,7 +66,7 @@ func (c *Client) Status(ctx context.Context, serviceID, containerName string) (e
 	return c.itemFrom(serviceID, ct, observedAt, retrievedAt), nil
 }
 
-// Evidence returns the current state; the list API provides no history.
+// Evidence gives the current state. The list API gives no history.
 func (c *Client) Evidence(ctx context.Context, serviceID, containerName string) ([]evidence.Item, error) {
 	item, err := c.Status(ctx, serviceID, containerName)
 	if err != nil {
@@ -76,9 +76,9 @@ func (c *Client) Evidence(ctx context.Context, serviceID, containerName string) 
 }
 
 func (c *Client) list(ctx context.Context, fallback time.Time) ([]containerSummary, time.Time, error) {
-	// all=true includes stopped containers; name filtering stays local.
+	// all=true includes stopped containers. The name filter stays local.
 	path := "/containers/json?" + url.Values{"all": {"true"}}.Encode()
-	// LockedClient.Get closes the body before returning the response.
+	// LockedClient.Get closes the body before it gives the response.
 	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
 	if err != nil {
 		return nil, time.Time{}, err
@@ -88,7 +88,7 @@ func (c *Client) list(ctx context.Context, fallback time.Time) ([]containerSumma
 	}
 	var list []containerSummary
 	if err := json.Unmarshal(body, &list); err != nil {
-		// A decode error must never become a successful empty list.
+		// Give a decode error instead of an incorrect empty list.
 		return nil, time.Time{}, fmt.Errorf("docker decode: invalid JSON")
 	}
 	if list == nil {
@@ -124,7 +124,7 @@ func (c *Client) itemFrom(serviceID string, ct containerSummary, observedAt, ret
 		sev = evidence.SeverityInfo
 	case "restarting":
 		sev = evidence.SeverityWarning
-		rawSummary = fmt.Sprintf("docker container %s is restarting (%s)", primaryName(ct), ct.Status)
+		rawSummary = fmt.Sprintf("docker container %s state=restarting (%s)", primaryName(ct), ct.Status)
 	case "exited", "dead":
 		sev = evidence.SeverityError
 		rawSummary = fmt.Sprintf("docker container %s state=%s (%s)", primaryName(ct), state, ct.Status)
@@ -154,13 +154,13 @@ func (c *Client) itemFrom(serviceID string, ct containerSummary, observedAt, ret
 		"status":         statusClean,
 		"image":          imageClean,
 		"found":          true,
-		// The list API does not expose last state change; observed_at is collection time.
+		// The list API does not show the last state change. observed_at is the collection time.
 		"snapshot": true,
 	}
 	if health != "" {
 		attrs["health"] = health
 	}
-	// Never return all labels, only explicitly allowlisted keys.
+	// Give only labels with keys in the allowlist.
 	if v := safeLabel(ct.Labels, "com.docker.compose.service"); v != "" {
 		clean, n, cut := redaction.ApplyAndTruncate(c.Redact, v, 128)
 		redactions += n
