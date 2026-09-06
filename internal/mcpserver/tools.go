@@ -44,7 +44,7 @@ type searchLogsIn struct {
 	End       string `json:"end,omitempty" jsonschema:"Set the RFC3339 end time."`
 	Duration  string `json:"duration,omitempty" jsonschema:"Set a Go duration that ends at the current time."`
 	Text      string `json:"text,omitempty" jsonschema:"Use an optional safe substring filter."`
-	Regex     string `json:"regex,omitempty" jsonschema:"Use an optional regex filter with the limits from the configuration."`
+	Regex     string `json:"regex,omitempty" jsonschema:"Use an optional regex filter with built-in limits."`
 	Limit     int    `json:"limit,omitempty" jsonschema:"Set the maximum line count. The server limit can decrease this value."`
 }
 

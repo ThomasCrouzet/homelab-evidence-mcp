@@ -53,7 +53,7 @@ type QueryOptions struct {
 	Limit     int
 	// Text adds an optional substring filter.
 	Text string
-	// Regex adds an optional regular expression filter with limits from the configuration. It must compile.
+	// Regex adds an optional regular expression filter with built-in limits. It must compile.
 	Regex string
 }
 
