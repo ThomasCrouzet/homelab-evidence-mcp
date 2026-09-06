@@ -1,6 +1,6 @@
 .PHONY: build test test-quick race lint lint-docs vet fmt fuzz demo clean coverage
 
-VERSION ?= 0.1.1
+VERSION ?= 0.1.2
 BINARY ?= bin/homelab-evidence-mcp
 LINT_GOTOOLCHAIN ?= go1.25.14
 LDFLAGS := -s -w -X github.com/ThomasCrouzet/homelab-evidence-mcp/internal/version.Version=$(VERSION)

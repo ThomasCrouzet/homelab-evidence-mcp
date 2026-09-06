@@ -104,7 +104,7 @@ jobs:
           "$(go env GOPATH)/bin/govulncheck" ./...
 
       - name: Secret scan
-        uses: gitleaks/gitleaks-action@v2.3.9
+        uses: gitleaks/gitleaks-action@v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -123,7 +123,7 @@ jobs:
             out="dist/homelab-evidence-mcp_${os}_${arch}${ext}"
             echo "Build output: $out"
             GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath \
-              -ldflags="-s -w -X ${version_path}=0.1.1" \
+              -ldflags="-s -w -X ${version_path}=0.1.2" \
               -o "$out" ./cmd/homelab-evidence-mcp
           done
           ls -la dist
