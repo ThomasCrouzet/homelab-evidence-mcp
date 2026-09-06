@@ -4,6 +4,13 @@ This file records project changes. Its format uses
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] - 2026-09-06
+
+### Fixed
+
+- Use Gitleaks action 3.0.0 with Node.js 24 in CI and release checks.
+- Remove the Node.js 20 deprecation warning from these checks.
+
 ## [0.1.1] - 2026-09-06
 
 ### Changed

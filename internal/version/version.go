@@ -3,7 +3,7 @@ package version
 
 // The linker sets Version at link time through -ldflags.
 // The default value stays in sync with the changelog and Makefile.
-var Version = "0.1.1"
+var Version = "0.1.2"
 
 // UserAgent gives the HTTP User-Agent used by adapters.
 func UserAgent() string {
