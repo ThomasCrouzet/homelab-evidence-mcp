@@ -106,7 +106,7 @@ func TestApplyAndTruncate_RedactsBeforeCutting(t *testing.T) {
 	}
 	got, redactions, truncated := ApplyAndTruncate(eng, "password=supersecret suffix", 10)
 	if strings.Contains(got, "supersecret") {
-		t.Fatalf("secret partially exposed: %q", got)
+		t.Fatalf("secret is not fully redacted: %q", got)
 	}
 	if redactions != 1 || !truncated {
 		t.Fatalf("redactions=%d truncated=%v", redactions, truncated)

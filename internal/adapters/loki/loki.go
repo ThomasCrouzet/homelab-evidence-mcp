@@ -1,4 +1,4 @@
-// Package loki implements the read-only Loki query_range adapter.
+// Package loki contains the read-only Loki query_range adapter.
 package loki
 
 import (
@@ -34,7 +34,7 @@ var allowedLabels = map[string]struct{}{
 	"compose":   {},
 }
 
-// Client queries Loki with a predefined selector.
+// Client gets data from Loki with a selector from the configuration.
 type Client struct {
 	HTTP         *httpx.LockedClient
 	DestName     string
@@ -44,7 +44,7 @@ type Client struct {
 	MaxLineBytes int
 }
 
-// QueryOptions bounds a log search.
+// QueryOptions contains the limits for a log search.
 type QueryOptions struct {
 	ServiceID string
 	Selector  string // predefined in the registry
@@ -53,11 +53,11 @@ type QueryOptions struct {
 	Limit     int
 	// Text adds an optional substring filter.
 	Text string
-	// Regex adds an optional regular expression filter, compilable and bounded.
+	// Regex adds an optional regular expression filter with limits from the configuration. It must compile.
 	Regex string
 }
 
-// Search runs query_range and returns lines as evidence items.
+// Search sends a query_range request and gives lines as evidence items.
 func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item, bool, error) {
 	now := c.now()
 	if opt.Selector == "" {
@@ -89,7 +89,7 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 	vals.Set("direction", "forward")
 
 	path := "/loki/api/v1/query_range?" + vals.Encode()
-	// LockedClient.Get closes the body before returning the response.
+	// LockedClient.Get closes the body before it gives the response.
 	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
 	if err != nil {
 		return nil, false, err
@@ -98,7 +98,7 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 		return nil, false, fmt.Errorf("loki rate limited (429)")
 	}
 	if resp.StatusCode != http.StatusOK {
-		// Do not return the body, which may contain the internal query.
+		// Do not give the body, which may contain the internal query.
 		return nil, false, fmt.Errorf("loki HTTP %d", resp.StatusCode)
 	}
 
@@ -136,10 +136,10 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 				continue
 			}
 			line := pair[1]
-			// Hostile content remains data: sanitize then redact.
+			// Untrusted content is data. Sanitize it, then redact it.
 			line = redaction.SanitizeControl(line)
 			cleaned, rn := c.redact(line)
-			// Mark instruction-like text without executing it.
+			// Mark instruction-like text. Do not run it.
 			cleaned = redaction.NeutralizeInstructionLike(cleaned)
 			cleaned, lineTruncated := redaction.TruncateBytes(cleaned, maxLineBytes)
 
@@ -173,7 +173,7 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 			})
 		}
 	}
-	// Produce a deterministic order.
+	// Put the items in the same order for the same input.
 	sort.SliceStable(items, func(i, j int) bool {
 		if !items[i].ObservedAt.Equal(items[j].ObservedAt) {
 			return items[i].ObservedAt.Before(items[j].ObservedAt)
@@ -236,7 +236,7 @@ func buildQuery(selector, text, rx string) (string, error) {
 		if _, err := regexp.Compile(rx); err != nil {
 			return "", fmt.Errorf("invalid search regex")
 		}
-		// Reject abnormally complex expressions as a precaution.
+		// Give an error for abnormally complex expressions as a precaution.
 		if strings.Count(rx, "+")+strings.Count(rx, "*") > 8 {
 			return "", fmt.Errorf("search regex too complex")
 		}

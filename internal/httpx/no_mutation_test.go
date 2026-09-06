@@ -53,7 +53,7 @@ func TestAdapterSourcesHaveNoMutationHTTP(t *testing.T) {
 				t.Errorf("%s contains %q", f, bad)
 			}
 		}
-		// No Post or Put form method calls.
+		// Do not use methods that send POST or PUT requests.
 		for _, bad := range []string{".Post(", ".Put(", ".Patch(", ".Delete("} {
 			if strings.Contains(body, bad) {
 				t.Errorf("%s contains %q", f, bad)

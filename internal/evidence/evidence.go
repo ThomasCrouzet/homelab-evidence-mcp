@@ -29,7 +29,7 @@ const (
 	SeverityUnknown  Severity = "unknown"
 )
 
-// Freshness describes how old an evidence item is at collection time.
+// Freshness gives the age category of an evidence item at collection time.
 type Freshness string
 
 const (
@@ -53,7 +53,7 @@ const (
 	SourceNtfy         SourceKind = "ntfy"
 )
 
-// Item represents bounded, attributed, and explicitly truncated evidence.
+// Item contains evidence, its source, and its truncation state.
 type Item struct {
 	ID                string         `json:"id"`
 	ServiceID         string         `json:"service_id,omitempty"`
@@ -72,7 +72,7 @@ type Item struct {
 	Freshness         Freshness      `json:"freshness"`
 }
 
-// SourceOutcome describes the result of querying a source.
+// SourceOutcome gives the result of a source query.
 type SourceOutcome struct {
 	SourceName string     `json:"source_name"`
 	Kind       SourceKind `json:"kind"`
@@ -83,7 +83,7 @@ type SourceOutcome struct {
 	DurationMS int64      `json:"duration_ms"`
 }
 
-// Bundle wraps a multi-source response.
+// Bundle contains a multi-source response.
 type Bundle struct {
 	ServiceID      string          `json:"service_id,omitempty"`
 	RequestedStart time.Time       `json:"requested_start,omitempty"`
@@ -98,7 +98,7 @@ type Bundle struct {
 	RetrievedAt    time.Time       `json:"retrieved_at"`
 }
 
-// KeepNewest sorts items and retains the newest max entries.
+// KeepNewest puts items in order and keeps the newest max entries.
 // The returned slice stays in SortItems order (oldest first among keepers).
 func KeepNewest(items []Item, max int) ([]Item, bool) {
 	if max <= 0 || len(items) <= max {
@@ -109,7 +109,7 @@ func KeepNewest(items []Item, max int) ([]Item, bool) {
 	return items[len(items)-max:], true
 }
 
-// SortItems sorts evidence by time, source, source identity, then id.
+// SortItems puts evidence in order by time, source, source identity, and then id.
 func SortItems(items []Item) {
 	sort.SliceStable(items, func(i, j int) bool {
 		a, b := items[i], items[j]
@@ -126,7 +126,7 @@ func SortItems(items []Item) {
 	})
 }
 
-// SortOutcomes sorts outcomes by kind then name.
+// SortOutcomes puts outcomes in order by kind and then name.
 func SortOutcomes(outcomes []SourceOutcome) {
 	sort.SliceStable(outcomes, func(i, j int) bool {
 		if outcomes[i].Kind != outcomes[j].Kind {
@@ -136,7 +136,7 @@ func SortOutcomes(outcomes []SourceOutcome) {
 	})
 }
 
-// ComputeFreshness classifies age relative to now.
+// ComputeFreshness gives a freshness category for age relative to now.
 func ComputeFreshness(observed, now time.Time) Freshness {
 	if observed.IsZero() {
 		return FreshnessUnknown

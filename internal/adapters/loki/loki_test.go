@@ -96,7 +96,7 @@ func TestSearch_MultiStreamOrderAndRedaction(t *testing.T) {
 		t.Fatal(items[0].Attributes)
 	}
 	if len([]rune(items[0].Attributes["label_host"].(string))) != 128 || !items[0].Truncated {
-		t.Fatalf("label truncation not reported: %+v", items[0])
+		t.Fatalf("label truncation is missing: %+v", items[0])
 	}
 }
 
@@ -125,7 +125,7 @@ func TestSearch_InstructionLikeMarked(t *testing.T) {
 		t.Fatal(items[0].Attributes["line"])
 	}
 	if len(items[0].Attributes["line"].(string)) > cli.MaxLineBytes || !items[0].Truncated {
-		t.Fatalf("hostile bound not respected: %+v", items[0])
+		t.Fatalf("untrusted data exceeds the limit: %+v", items[0])
 	}
 }
 

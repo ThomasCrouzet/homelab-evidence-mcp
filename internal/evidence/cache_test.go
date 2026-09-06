@@ -13,7 +13,7 @@ func TestCache_TTLAndEvict(t *testing.T) {
 	if len(c.items) > 2 {
 		t.Fatal(len(c.items))
 	}
-	// The item may have been evicted by the capacity limit.
+	// The capacity limit can remove the item.
 	_, _ = c.Get("a")
 	got, ok := c.Get("c")
 	if !ok || got.Freshness != FreshnessCached {
@@ -29,7 +29,7 @@ func TestNewCache_ZeroDisables(t *testing.T) {
 	c := NewCache(time.Minute, 0)
 	c.Put(Item{ID: "a", Summary: "1"})
 	if _, ok := c.Get("a"); ok {
-		t.Fatal("max 0 must disable storage")
+		t.Fatal("max 0 must deactivate storage")
 	}
 }
 
@@ -95,7 +95,7 @@ func TestSortItems(t *testing.T) {
 		{ID: "c", Source: SourceGatus, ObservedAt: t0.Add(time.Second)},
 	}
 	SortItems(items)
-	// On equal timestamps: source ascending then id.
+	// For equal timestamps, put items in order by source and then by id.
 	if items[0].ID != "b" || items[1].ID != "a" || items[2].ID != "c" {
 		t.Fatalf("%+v", items)
 	}
