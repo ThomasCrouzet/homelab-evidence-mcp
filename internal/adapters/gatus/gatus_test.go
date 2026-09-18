@@ -51,7 +51,7 @@ func TestStatus_LatestByTimestampNotOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	if item.Severity != evidence.SeverityError {
-		t.Fatalf("want error latest, got %s attrs=%v", item.Severity, item.Attributes)
+		t.Fatalf("want error with maximum timestamp, got %s attrs=%v", item.Severity, item.Attributes)
 	}
 	if item.Attributes["http_status"] != 503 {
 		t.Fatalf("%v", item.Attributes)
@@ -139,6 +139,68 @@ func TestEvidenceInWindow(t *testing.T) {
 	}
 }
 
+func TestStatus_NumericDuration(t *testing.T) {
+	cli := setup(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{
+			"name":"a","key":"a",
+			"results":[{"success":true,"status":200,"duration":15000000,"timestamp":"2026-07-25T11:00:00Z"}]
+		}]`))
+	})
+	item, err := cli.Status(context.Background(), "x", "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := item.Attributes["duration"].(string)
+	if got == "" {
+		t.Fatalf("numeric duration not decoded: %+v", item.Attributes)
+	}
+	if !strings.Contains(got, "15ms") && got != (15*time.Millisecond).String() {
+		t.Fatalf("duration=%q attrs=%v", got, item.Attributes)
+	}
+}
+
+func TestEvidenceInWindow_MissingEndpointIsAbsence(t *testing.T) {
+	cli := setup(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"name":"a","key":"a","results":[{"success":true,"status":200,"timestamp":"2026-07-25T11:00:00Z"}]}]`))
+	})
+	start := time.Date(2026, 7, 25, 11, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	items, truncated, err := cli.EvidenceInWindow(context.Background(), "x", "missing", start, end, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if truncated || len(items) != 1 {
+		t.Fatalf("items=%d truncated=%v", len(items), truncated)
+	}
+	if items[0].Freshness != evidence.FreshnessMissing || items[0].Attributes["found"] != false {
+		t.Fatalf("want a missing item, got %+v", items[0])
+	}
+}
+
+func TestEvidenceInWindow_KeepsNewestWhenTruncating(t *testing.T) {
+	cli := setup(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{
+			"name":"a","key":"a",
+			"results":[
+				{"success":false,"status":500,"timestamp":"2026-07-25T11:10:00Z"},
+				{"success":false,"status":501,"timestamp":"2026-07-25T11:20:00Z"}
+			]
+		}]`))
+	})
+	start := time.Date(2026, 7, 25, 11, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	items, truncated, err := cli.EvidenceInWindow(context.Background(), "x", "a", start, end, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !truncated || len(items) != 1 {
+		t.Fatalf("items=%d truncated=%v", len(items), truncated)
+	}
+	if items[0].Attributes["http_status"] != 501 {
+		t.Fatalf("kept oldest instead of newest: %+v", items[0].Attributes)
+	}
+}
+
 func TestEvidenceInWindow_ReportsTruncation(t *testing.T) {
 	cli := setup(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`[{
@@ -189,6 +251,6 @@ func TestStatus_RedactsAllTextAttributes(t *testing.T) {
 		t.Fatalf("attribute not redacted: %s", raw)
 	}
 	if item.RedactionsApplied == 0 {
-		t.Fatal("no redaction reported")
+		t.Fatal("redaction data is missing")
 	}
 }

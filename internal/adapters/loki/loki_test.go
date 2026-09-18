@@ -96,7 +96,7 @@ func TestSearch_MultiStreamOrderAndRedaction(t *testing.T) {
 		t.Fatal(items[0].Attributes)
 	}
 	if len([]rune(items[0].Attributes["label_host"].(string))) != 128 || !items[0].Truncated {
-		t.Fatalf("label truncation not reported: %+v", items[0])
+		t.Fatalf("label truncation is missing: %+v", items[0])
 	}
 }
 
@@ -125,7 +125,7 @@ func TestSearch_InstructionLikeMarked(t *testing.T) {
 		t.Fatal(items[0].Attributes["line"])
 	}
 	if len(items[0].Attributes["line"].(string)) > cli.MaxLineBytes || !items[0].Truncated {
-		t.Fatalf("hostile bound not respected: %+v", items[0])
+		t.Fatalf("untrusted data exceeds the limit: %+v", items[0])
 	}
 }
 
@@ -207,6 +207,12 @@ func TestSearch_EnforcesLimitAgainstOversizedResponse(t *testing.T) {
 	}
 	if len(items) != 2 || !truncated {
 		t.Fatalf("items=%d truncated=%v", len(items), truncated)
+	}
+	if items[0].Attributes["line"] != "two" || items[1].Attributes["line"] != "three" {
+		t.Fatalf("wanted newest lines, got %+v %+v", items[0].Attributes, items[1].Attributes)
+	}
+	if items[0].SourceID != "app=x" {
+		t.Fatalf("source_id=%q", items[0].SourceID)
 	}
 }
 

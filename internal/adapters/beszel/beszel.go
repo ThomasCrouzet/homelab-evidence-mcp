@@ -1,5 +1,5 @@
-// Package beszel implements the read-only Beszel status adapter.
-// Compatible routes return a JSON array or wrapper.
+// Package beszel contains the read-only Beszel status adapter.
+// Compatible routes give a JSON array or wrapper.
 package beszel
 
 import (
@@ -15,7 +15,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 )
 
-// Client queries a Beszel-compatible API using GET only.
+// Client gets data from a Beszel-compatible API with GET only.
 type Client struct {
 	HTTP     *httpx.LockedClient
 	DestName string
@@ -30,14 +30,14 @@ type systemRow struct {
 	Host   string   `json:"host"`
 	CPU    *float64 `json:"cpu"`
 	Mem    *float64 `json:"mem"`
-	// Alternate fields observed in some variants.
+	// Some API variants use these alternative fields.
 	System string `json:"system"`
 	Info   struct {
 		Hostname string `json:"h"`
 	} `json:"info"`
 }
 
-// Status returns a snapshot for systemName.
+// Status gives a snapshot for systemName.
 func (c *Client) Status(ctx context.Context, serviceID, systemName string) (evidence.Item, error) {
 	retrievedAt := c.now()
 	list, observedAt, err := c.fetchSystems(ctx, retrievedAt)
@@ -66,7 +66,7 @@ func (c *Client) Status(ctx context.Context, serviceID, systemName string) (evid
 	return c.itemFrom(serviceID, row, observedAt, retrievedAt), nil
 }
 
-// Evidence wraps Status in a list.
+// Evidence gives Status in a list.
 func (c *Client) Evidence(ctx context.Context, serviceID, systemName string) ([]evidence.Item, error) {
 	it, err := c.Status(ctx, serviceID, systemName)
 	if err != nil {
@@ -76,10 +76,15 @@ func (c *Client) Evidence(ctx context.Context, serviceID, systemName string) ([]
 }
 
 func (c *Client) fetchSystems(ctx context.Context, fallback time.Time) ([]systemRow, time.Time, error) {
-	paths := []string{"/api/systems", "/api/beszel/systems", "/api/systems/"}
+	paths := []string{
+		"/api/collections/systems/records",
+		"/api/systems",
+		"/api/beszel/systems",
+		"/api/systems/",
+	}
 	var lastErr error
 	for _, p := range paths {
-		// LockedClient.Get closes the body before returning the response.
+		// LockedClient.Get closes the body before it gives the response.
 		resp, body, err := c.HTTP.Get(ctx, c.DestName, p, c.Headers) //nolint:bodyclose
 		if err != nil {
 			lastErr = err

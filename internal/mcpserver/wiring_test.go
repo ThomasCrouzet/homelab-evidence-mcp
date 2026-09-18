@@ -20,7 +20,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/config"
 )
 
-// fullFixtureApp builds an App whose six adapters cover the media service.
+// fullFixtureApp makes an App that includes six adapters for the media service.
 func fullFixtureApp(t *testing.T) *App {
 	t.Helper()
 	t.Setenv("HC_DEMO_TOKEN", "demo-readonly-token-not-real")
@@ -75,7 +75,9 @@ func fullFixtureApp(t *testing.T) *App {
 	t.Cleanup(hc.Close)
 
 	beszel := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/systems" && r.URL.Path != "/api/systems/" && r.URL.Path != "/api/beszel/systems" {
+		switch r.URL.Path {
+		case "/api/collections/systems/records", "/api/systems", "/api/systems/", "/api/beszel/systems":
+		default:
 			t.Errorf("beszel path %s", r.URL.Path)
 		}
 		_ = json.NewEncoder(w).Encode([]map[string]any{
@@ -138,6 +140,7 @@ services:
       healthchecks:
         source: healthchecks
         check_tags: [media]
+        status_filter: up
       beszel:
         source: beszel
         system_name: media-host
@@ -180,7 +183,7 @@ func TestCollectBeszel_ViaServiceStatus(t *testing.T) {
 	if !strings.Contains(s, "media-host") && !strings.Contains(s, "metric") {
 		// Attributes may include the system name.
 		if !strings.Contains(s, `"kind":"beszel"`) && !strings.Contains(s, "SourceBeszel") {
-			// The source outcome should report Beszel as ok.
+			// The source outcome must show Beszel as ok.
 			if !strings.Contains(s, `"kind":"beszel"`) {
 				// JSON uses beszel as the SourceOutcome kind.
 				if !strings.Contains(s, "beszel") {
@@ -189,7 +192,7 @@ func TestCollectBeszel_ViaServiceStatus(t *testing.T) {
 			}
 		}
 	}
-	// Beszel should succeed and provide items.
+	// The Beszel result must have status ok and items.
 	var parsed struct {
 		Items   []map[string]any `json:"items"`
 		Sources []struct {
@@ -264,6 +267,21 @@ func TestCollectNtfy_ViaIncidentContext(t *testing.T) {
 	}
 }
 
+func TestFailedCrons_ServiceIgnoresUpFilter(t *testing.T) {
+	app := fullFixtureApp(t)
+	_, out, err := app.toolFailedCrons(context.Background(), nil, failedCronsIn{
+		ServiceID: "media",
+		Duration:  "24h",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(out)
+	if !strings.Contains(string(b), "media-cron") {
+		t.Fatalf("status_filter=up hid current failures: %s", b)
+	}
+}
+
 func TestIncidentContext_ExcludesCurrentSnapshotsFromHistoricalWindow(t *testing.T) {
 	app := fullFixtureApp(t)
 	_, out, err := app.toolIncidentContext(context.Background(), nil, incidentIn{
@@ -292,7 +310,7 @@ func TestIncidentContext_ExcludesCurrentSnapshotsFromHistoricalWindow(t *testing
 
 func TestFailedCrons_GlobalAllHC(t *testing.T) {
 	app := fullFixtureApp(t)
-	// Without service_id, query all Healthchecks clients.
+	// Without service_id, get data from all Healthchecks clients.
 	_, out, err := app.toolFailedCrons(context.Background(), nil, failedCronsIn{
 		Duration: "24h",
 	})
@@ -304,7 +322,7 @@ func TestFailedCrons_GlobalAllHC(t *testing.T) {
 	if strings.Contains(s, "LEAKME") {
 		t.Fatal("ping url leaked")
 	}
-	// The global path should include media-cron and other-cron.
+	// The global path must include media-cron and other-cron.
 	if !strings.Contains(s, "media-cron") {
 		t.Fatalf("media-cron missing: %s", s)
 	}
@@ -354,7 +372,12 @@ func TestTools_ReadOnlyAnnotations(t *testing.T) {
 		if !tl.Annotations.ReadOnlyHint {
 			t.Fatalf("tool %s ReadOnlyHint=false", tl.Name)
 		}
-		// No mutation-sounding name should appear.
+		openWorld := tl.Name == "service_status" || tl.Name == "incident_context" ||
+			tl.Name == "search_logs" || tl.Name == "failed_crons"
+		if tl.Annotations.OpenWorldHint == nil || *tl.Annotations.OpenWorldHint != openWorld {
+			t.Fatalf("tool %s OpenWorldHint=%v want %v", tl.Name, tl.Annotations.OpenWorldHint, openWorld)
+		}
+		// Tool names must not imply mutation.
 		n := strings.ToLower(tl.Name)
 		for _, bad := range []string{"restart", "delete", "write", "exec", "stop", "start", "patch"} {
 			if strings.Contains(n, bad) {

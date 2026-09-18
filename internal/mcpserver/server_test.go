@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -151,7 +152,7 @@ func fixtureServers(t *testing.T, downLoki bool) (gatusURL, dockerURL, lokiURL, 
 
 func nano(tm time.Time) string {
 	return strings.TrimSpace(strings.ReplaceAll(
-		// Format as an integer representing nanoseconds.
+		// Format as a nanosecond integer.
 		func() string {
 			return jsonNumber(tm.UnixNano())
 		}(), " ", ""))
@@ -263,7 +264,7 @@ func TestToolsViaMCPSession(t *testing.T) {
 		t.Fatal("ping url leak")
 	}
 	if !strings.Contains(inc, "UNTRUSTED_LOG_DATA") && !strings.Contains(inc, "timeout") {
-		// Require at least some evidence.
+		// Make sure that the response has some evidence.
 		if !strings.Contains(inc, "factual_summary") {
 			t.Fatal(inc)
 		}
@@ -283,7 +284,7 @@ func TestToolsViaMCPSession(t *testing.T) {
 		t.Fatal(crons)
 	}
 
-	// Extract an evidence id for get_evidence.
+	// Get an evidence id for get_evidence.
 	var stObj struct {
 		Items []struct {
 			ID string `json:"id"`
@@ -315,16 +316,16 @@ func TestPartialResultsWhenLokiDown(t *testing.T) {
 	b, _ := json.Marshal(out)
 	s := string(b)
 	if !strings.Contains(s, `"status":"error"`) && !strings.Contains(s, `"status":"timeout"`) {
-		// Loki should appear as an error.
+		// Loki must appear as an error.
 		if !strings.Contains(s, "loki") {
 			t.Fatal(s)
 		}
 	}
-	// Other sources should still contribute.
+	// Other sources must give evidence.
 	if !strings.Contains(s, "gatus") && !strings.Contains(s, "docker") {
 		t.Fatal(s)
 	}
-	// The factual summary should still be present.
+	// The response must have factual_summary.
 	if !strings.Contains(s, "factual_summary") && !strings.Contains(s, "FactualSummary") {
 		// JSON uses factual_summary.
 		var m map[string]any
@@ -348,5 +349,47 @@ func TestUnknownService(t *testing.T) {
 	res, _, _ := app.toolServiceStatus(context.Background(), nil, serviceIDIn{ServiceID: "nope"})
 	if res == nil || !res.IsError {
 		t.Fatal("expected error result")
+	}
+}
+
+func TestUnknownService_IsAuditedWithoutSecrets(t *testing.T) {
+	app := newTestApp(t, false)
+	var buf bytes.Buffer
+	app.Audit = audit.New(&buf)
+	res, _, _ := app.toolServiceStatus(context.Background(), nil, serviceIDIn{ServiceID: "nope"})
+	if res == nil || !res.IsError {
+		t.Fatal("expected error result")
+	}
+	got := buf.String()
+	if !strings.Contains(got, `"status":"error"`) || !strings.Contains(got, "service_status") {
+		t.Fatalf("error not audited: %s", got)
+	}
+	if strings.Contains(got, "http://") || strings.Contains(got, "HC_DEMO") {
+		t.Fatalf("audit leaked secret: %s", got)
+	}
+}
+
+func TestFailedCrons_DefaultWindowRespectsMax(t *testing.T) {
+	app := newTestApp(t, false)
+	app.Cfg.Limits.MaxCronWindow = 12 * time.Hour
+	res, _, err := app.toolFailedCrons(context.Background(), nil, failedCronsIn{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res != nil && res.IsError {
+		t.Fatalf("default window exceeded max: %+v", res.Content)
+	}
+}
+
+func TestGetEvidence_ExpiredIsAudited(t *testing.T) {
+	app := newTestApp(t, false)
+	var buf bytes.Buffer
+	app.Audit = audit.New(&buf)
+	res, _, _ := app.toolGetEvidence(context.Background(), nil, getEvidenceIn{ID: "missing"})
+	if res == nil || !res.IsError {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(buf.String(), `"status":"error"`) {
+		t.Fatalf("miss not audited: %s", buf.String())
 	}
 }

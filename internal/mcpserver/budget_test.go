@@ -61,7 +61,7 @@ func TestWithBudget_DeniesWhenConcurrentExceeded(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, _, _ = app.withBudget(func() (*mcp.CallToolResult, any, error) {
+		_, _, _ = app.withBudget("service_status", func() (*mcp.CallToolResult, any, error) {
 			close(started)
 			<-releaseHold
 			return textResult(map[string]string{"ok": "held"}), map[string]string{"ok": "held"}, nil
@@ -72,12 +72,12 @@ func TestWithBudget_DeniesWhenConcurrentExceeded(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("holder did not start")
 	}
-	res, _, err := app.withBudget(func() (*mcp.CallToolResult, any, error) {
+	res, _, err := app.withBudget("service_status", func() (*mcp.CallToolResult, any, error) {
 		t.Fatal("second call must not run under concurrent budget of 1")
 		return nil, nil, nil
 	})
 	if err != nil {
-		t.Fatalf("withBudget should return tool error result, not Go error: %v", err)
+		t.Fatalf("withBudget should give a tool error result, not a Go error: %v", err)
 	}
 	if res == nil || !res.IsError {
 		t.Fatalf("expected IsError budget result, got %+v", res)
@@ -93,7 +93,7 @@ func TestWithBudget_DeniesWhenConcurrentExceeded(t *testing.T) {
 func TestWithBudget_DeniesWhenRateExceeded(t *testing.T) {
 	app := &App{budget: newToolBudget(2, 8)}
 	for i := 0; i < 2; i++ {
-		res, _, err := app.withBudget(func() (*mcp.CallToolResult, any, error) {
+		res, _, err := app.withBudget("service_status", func() (*mcp.CallToolResult, any, error) {
 			return textResult(map[string]string{"ok": "yes"}), nil, nil
 		})
 		if err != nil {
@@ -103,7 +103,7 @@ func TestWithBudget_DeniesWhenRateExceeded(t *testing.T) {
 			t.Fatalf("call %d should succeed: %+v", i, res)
 		}
 	}
-	res, _, err := app.withBudget(func() (*mcp.CallToolResult, any, error) {
+	res, _, err := app.withBudget("service_status", func() (*mcp.CallToolResult, any, error) {
 		t.Fatal("third call must not run")
 		return nil, nil, nil
 	})
@@ -131,7 +131,7 @@ func TestSanitizeErr_UsesRedaction(t *testing.T) {
 	if !strings.Contains(msg, "[REDACTED]") {
 		t.Fatalf("expected redaction marker: %s", msg)
 	}
-	// The path without an engine must also redact characteristic secrets.
+	// The path without an engine must redact built-in secret patterns.
 	msg2 := sanitizeErr(errString("request failed token=aaaaaaaaaaaaaaaaaaaa"), nil)
 	if strings.Contains(msg2, "aaaaaaaaaaaaaaaaaaaa") {
 		t.Fatalf("token leaked: %s", msg2)
@@ -145,15 +145,16 @@ func TestSanitizeErr_UsesRedaction(t *testing.T) {
 	}
 }
 
-func TestCapItems(t *testing.T) {
-	items := []evidence.Item{{ID: "1"}, {ID: "2"}, {ID: "3"}}
-	got, truncated := capItems(items, 2)
-	if len(got) != 2 || !truncated {
-		t.Fatalf("len=%d truncated=%v", len(got), truncated)
+func TestKeepNewest_UsedByTools(t *testing.T) {
+	t0 := time.Unix(100, 0).UTC()
+	items := []evidence.Item{
+		{ID: "1", ObservedAt: t0},
+		{ID: "2", ObservedAt: t0.Add(time.Second)},
+		{ID: "3", ObservedAt: t0.Add(2 * time.Second)},
 	}
-	got, truncated = capItems(items, 3)
-	if len(got) != 3 || truncated {
-		t.Fatalf("len=%d truncated=%v", len(got), truncated)
+	got, truncated := evidence.KeepNewest(items, 2)
+	if len(got) != 2 || !truncated || got[0].ID != "2" || got[1].ID != "3" {
+		t.Fatalf("len=%d truncated=%v got=%+v", len(got), truncated, got)
 	}
 }
 

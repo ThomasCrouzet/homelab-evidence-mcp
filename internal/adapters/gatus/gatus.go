@@ -1,4 +1,4 @@
-// Package gatus implements the read-only Gatus adapter.
+// Package gatus contains the read-only Gatus adapter.
 package gatus
 
 import (
@@ -15,7 +15,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 )
 
-// Client queries the Gatus status route and compatible variants.
+// Client gets data from the Gatus status route and compatible variants.
 type Client struct {
 	HTTP     *httpx.LockedClient
 	DestName string
@@ -33,14 +33,42 @@ type endpointStatus struct {
 }
 
 type endpointResult struct {
-	Status    int      `json:"status"`
-	Success   bool     `json:"success"`
-	Timestamp string   `json:"timestamp"`
-	Duration  string   `json:"duration"`
-	Errors    []string `json:"errors"`
+	Status    int          `json:"status"`
+	Success   bool         `json:"success"`
+	Timestamp string       `json:"timestamp"`
+	Duration  flexDuration `json:"duration"`
+	Errors    []string     `json:"errors"`
 }
 
-// Status fetches the latest observation for endpointKey.
+// flexDuration accepts Gatus nanosecond numbers and duration strings.
+type flexDuration string
+
+func (d *flexDuration) UnmarshalJSON(raw []byte) error {
+	if string(raw) == "null" || len(raw) == 0 {
+		*d = ""
+		return nil
+	}
+	if raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return err
+		}
+		*d = flexDuration(s)
+		return nil
+	}
+	var nanos int64
+	if err := json.Unmarshal(raw, &nanos); err != nil {
+		return err
+	}
+	if nanos < 0 {
+		*d = ""
+		return nil
+	}
+	*d = flexDuration(time.Duration(nanos).String())
+	return nil
+}
+
+// Status gets the observation with the maximum timestamp for endpointKey.
 func (c *Client) Status(ctx context.Context, serviceID, endpointKey string) (evidence.Item, error) {
 	retrievedAt := c.now()
 	list, snapshotAt, err := c.fetchAll(ctx, retrievedAt)
@@ -49,42 +77,49 @@ func (c *Client) Status(ctx context.Context, serviceID, endpointKey string) (evi
 	}
 	ep, ok := findEndpoint(list, endpointKey)
 	if !ok {
-		cleanKey, redactions, truncated := redaction.ApplyAndTruncate(c.Redact, endpointKey, 256)
-		return evidence.Item{
-			ID:                evidence.NewOpaqueID("ev"),
-			ServiceID:         serviceID,
-			Source:            evidence.SourceGatus,
-			SourceID:          cleanKey,
-			Kind:              evidence.KindEndpointCheck,
-			ObservedAt:        snapshotAt,
-			RetrievedAt:       retrievedAt,
-			Summary:           "gatus endpoint not found in status list",
-			Severity:          evidence.SeverityUnknown,
-			Attributes:        map[string]any{"endpoint_key": cleanKey, "found": false},
-			Truncated:         truncated,
-			RedactionsApplied: redactions,
-			Freshness:         evidence.FreshnessMissing,
-		}, nil
+		return c.missingItem(serviceID, endpointKey, snapshotAt, retrievedAt), nil
 	}
 	return c.itemFromEndpoint(serviceID, ep, snapshotAt, retrievedAt), nil
 }
 
-// EvidenceInWindow returns results between start and end.
+func (c *Client) missingItem(serviceID, endpointKey string, observedAt, retrievedAt time.Time) evidence.Item {
+	cleanKey, redactions, truncated := redaction.ApplyAndTruncate(c.Redact, endpointKey, 256)
+	return evidence.Item{
+		ID:                evidence.NewOpaqueID("ev"),
+		ServiceID:         serviceID,
+		Source:            evidence.SourceGatus,
+		SourceID:          cleanKey,
+		Kind:              evidence.KindEndpointCheck,
+		ObservedAt:        observedAt,
+		RetrievedAt:       retrievedAt,
+		Summary:           "gatus endpoint not found in status list",
+		Severity:          evidence.SeverityUnknown,
+		Attributes:        map[string]any{"endpoint_key": cleanKey, "found": false},
+		Truncated:         truncated,
+		RedactionsApplied: redactions,
+		Freshness:         evidence.FreshnessMissing,
+	}
+}
+
+// EvidenceInWindow gives results between start and end.
 func (c *Client) EvidenceInWindow(ctx context.Context, serviceID, endpointKey string, start, end time.Time, max int) ([]evidence.Item, bool, error) {
 	retrievedAt := c.now()
-	list, _, err := c.fetchAll(ctx, retrievedAt)
+	list, snapshotAt, err := c.fetchAll(ctx, retrievedAt)
 	if err != nil {
 		return nil, false, err
 	}
 	ep, ok := findEndpoint(list, endpointKey)
 	if !ok {
-		return nil, false, nil
+		item := c.missingItem(serviceID, endpointKey, snapshotAt, retrievedAt)
+		item.WindowStart = timePtr(start)
+		item.WindowEnd = timePtr(end)
+		return []evidence.Item{item}, false, nil
 	}
 	if max <= 0 {
 		max = 20
 	}
 	var items []evidence.Item
-	// Gatus may return unsorted history; order by timestamp.
+	// Put results in timestamp order because Gatus can give history out of order.
 	type pair struct {
 		r  endpointResult
 		ts time.Time
@@ -104,10 +139,10 @@ func (c *Client) EvidenceInWindow(ctx context.Context, serviceID, endpointKey st
 		return pairs[i].ts.Before(pairs[j].ts)
 	})
 	truncated := len(pairs) > max
+	if truncated {
+		pairs = pairs[len(pairs)-max:]
+	}
 	for _, p := range pairs {
-		if len(items) >= max {
-			break
-		}
 		item := c.itemFromResult(serviceID, ep, p.r, p.ts, retrievedAt)
 		item.WindowStart = timePtr(start)
 		item.WindowEnd = timePtr(end)
@@ -121,7 +156,7 @@ func (c *Client) fetchAll(ctx context.Context, fallback time.Time) ([]endpointSt
 	paths := []string{"/api/v1/endpoints/statuses", "/api/v1/endpoints/statuses/"}
 	var lastErr error
 	for _, p := range paths {
-		// LockedClient.Get closes the body before returning the response.
+		// LockedClient.Get closes the body before it gives the response.
 		resp, body, err := c.HTTP.Get(ctx, c.DestName, p, c.Headers) //nolint:bodyclose
 		if err != nil {
 			lastErr = err
@@ -155,7 +190,7 @@ func findEndpoint(list []endpointStatus, key string) (endpointStatus, bool) {
 		if ep.Key == key {
 			return ep, true
 		}
-		// Also accept the name or group_name composition used by some versions.
+		// Some versions use a name or group_name composition. The adapter can use these compositions.
 		if ep.Name == key {
 			return ep, true
 		}
@@ -198,8 +233,8 @@ func (c *Client) itemFromEndpoint(serviceID string, ep endpointStatus, snapshotA
 			Freshness:         evidence.FreshnessUnknown,
 		}
 	}
-	// Pick the latest valid timestamp, without relying on array order.
-	// Without a valid date, keep the first result at collection time.
+	// Select the maximum correct timestamp. Do not use the array order.
+	// Without a correct date, keep the first result at collection time.
 	best := ep.Results[0]
 	bestTS := snapshotAt
 	foundValid := false
@@ -238,7 +273,7 @@ func (c *Client) itemFromResult(serviceID string, ep endpointStatus, r endpointR
 	redactions := keyRedactions + nameRedactions + groupRedactions
 	truncated := keyCut || nameCut || groupCut
 	if r.Duration != "" {
-		duration, n, cut := redaction.ApplyAndTruncate(c.Redact, r.Duration, 64)
+		duration, n, cut := redaction.ApplyAndTruncate(c.Redact, string(r.Duration), 64)
 		redactions += n
 		truncated = truncated || cut
 		attrs["duration"] = duration

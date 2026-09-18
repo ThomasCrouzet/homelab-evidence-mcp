@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/ThomasCrouzet/homelab-evidence-mcp/config.schema.json",
   "title": "homelab-evidence-mcp configuration",
-  "description": "Editor help. Binary validation is stricter. Always run: homelab-evidence-mcp --config path --validate",
+  "description": "Use these rules for editor validation. The binary uses more validation rules. Always run this command: homelab-evidence-mcp --config path --validate",
   "type": "object",
   "required": ["version", "sources"],
   "additionalProperties": false,
@@ -12,7 +12,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "default_window": { "type": "string", "description": "Go duration, for example 1h" },
+        "default_window": { "type": "string", "description": "Use a Go duration, for example 1h." },
         "max_incident_window": { "type": "string" },
         "max_cron_window": { "type": "string" },
         "max_log_lines": { "type": "integer", "minimum": 1, "maximum": 500 },
@@ -20,12 +20,12 @@
         "per_source_timeout": { "type": "string" },
         "total_timeout": { "type": "string" },
         "max_log_line_bytes": { "type": "integer", "minimum": 1, "maximum": 16384 },
-        "max_body_bytes": { "type": "integer", "minimum": 1, "maximum": 8388608, "description": "Maximum HTTP body size, limited to 8 MiB" },
-        "evidence_cache_ttl": { "type": "string", "description": "TTL of the local cache used by get_evidence" },
-        "evidence_cache_max": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "max_body_bytes": { "type": "integer", "minimum": 1, "maximum": 8388608, "description": "The maximum HTTP body size is 8 MiB." },
+        "evidence_cache_ttl": { "type": "string", "description": "Set the local cache TTL for get_evidence." },
+        "evidence_cache_max": { "type": "integer", "minimum": 0, "maximum": 1000, "description": "A value of 0 deactivates the get_evidence cache." },
         "source_cache_ttl": {
           "type": "string",
-          "description": "Short cache of identical GET responses. Default: 15s; 0 disables it. Evidence freshness remains based on source or collection timestamps."
+          "description": "The source response cache keeps the same GET responses for a short time. The default is 15s. A value of 0 deactivates this cache. The source or collection time supplies the evidence timestamp."
         },
         "max_tool_calls_per_minute": { "type": "integer", "minimum": 1, "maximum": 1000 },
         "max_concurrent_tools": { "type": "integer", "minimum": 1, "maximum": 64 },
@@ -36,9 +36,22 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "file": { "type": "string", "maxLength": 4096, "description": "Optional path for the rotating JSONL audit log, mode 0600 on Unix or a user ACL on Windows" },
+        "file": { "type": "string", "maxLength": 4096, "description": "Set the optional path for the rotating JSONL audit log. The binary sets mode 0600 on Unix. On Windows, use a user-only ACL. The binary does not examine Windows ACLs." },
         "max_bytes": { "type": "integer", "minimum": 1, "maximum": 104857600 },
         "max_files": { "type": "integer", "minimum": 1, "maximum": 20 }
+      }
+    },
+    "tls": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The TLS configuration can include an optional CA bundle. TLS certificate verification is always active.",
+      "properties": {
+        "ca_file": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "The PEM file contains CA certificates that the client adds to the system trust store."
+        }
       }
     },
     "sources": {
@@ -59,22 +72,22 @@
             "type": "string",
             "maxLength": 4096,
             "format": "uri",
-            "pattern": "^https?://[^\\s/?#]+(?:/[^\\s?#]*)?$",
-            "description": "Absolute http(s) URL. Path prefixes are preserved. Userinfo, query strings, and fragments are refused."
+            "pattern": "^https?://[^\\s/?#@]+(?:/[^\\s?#]*)?$",
+            "description": "Use an absolute http(s) URL. The client keeps path prefixes. It does not accept userinfo, query strings, or fragments."
           },
           "token_env": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
-          "token_file": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Regular file limited to 4 KiB, mode 0600 on Unix or a user ACL on Windows" },
+          "token_file": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Use a regular file with a maximum size of 4 KiB. On Unix, let only the owner access the file. Use mode 0600. The binary does not accept files that a group or other users can access. On Windows, use a user-only ACL. The binary does not examine Windows ACLs." },
           "token_header": {
             "type": "string",
             "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$",
-            "description": "X-Api-Key by default for Healthchecks, Authorization for other sources"
+            "description": "Use X-Api-Key by default for Healthchecks. Use Authorization for other sources."
           },
           "headers": {
             "type": "object",
             "maxProperties": 64,
             "additionalProperties": { "type": "string", "maxLength": 4096 },
             "propertyNames": { "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$" },
-            "description": "Static headers without secrets. The binary refuses authentication-related names and reserved headers."
+            "description": "Use static headers without secrets. Do not use authentication-related names or reserved headers."
           }
         },
         "allOf": [
@@ -91,7 +104,7 @@
             "not": {
               "required": ["token_env", "token_file"]
             },
-            "description": "Set only one of token_env and token_file"
+            "description": "Do not set both token_env and token_file."
           },
           {
             "if": { "required": ["token_header"] },
@@ -147,7 +160,7 @@
                     "type": "string",
                     "minLength": 3,
                     "maxLength": 512,
-                    "description": "Simple LogQL selector with optional |= or |~ filters. The binary strictly validates syntax."
+                    "description": "Use a simple LogQL selector with optional |= or |~ filters. The binary validates the syntax."
                   }
                 }
               },

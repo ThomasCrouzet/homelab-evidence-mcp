@@ -1,4 +1,4 @@
-// Package registry holds canonical service identities.
+// Package registry holds service identities used by all adapters.
 package registry
 
 import (
@@ -9,7 +9,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/config"
 )
 
-// Coverage indicates which source families are bound to a service.
+// Coverage shows which source families a service uses.
 type Coverage struct {
 	Gatus        bool `json:"gatus"`
 	Docker       bool `json:"docker"`
@@ -26,13 +26,13 @@ type ServiceView struct {
 	Coverage    Coverage `json:"coverage"`
 }
 
-// Registry is an immutable table built from configuration.
+// Registry is a table from the configuration. It does not change.
 type Registry struct {
 	byID  map[string]config.Service
 	order []string
 }
 
-// New builds a registry from a validated configuration.
+// New makes a registry from a validated configuration.
 func New(cfg *config.Config) *Registry {
 	r := &Registry{
 		byID: make(map[string]config.Service, len(cfg.Services)),
@@ -50,7 +50,7 @@ func (r *Registry) get(id string) (config.Service, bool) {
 	return s, ok
 }
 
-// List returns a bounded page of services.
+// List gives a page of services with the specified limit.
 func (r *Registry) List(prefix string, offset, limit int) ([]ServiceView, int) {
 	if limit <= 0 {
 		limit = 50
@@ -64,7 +64,8 @@ func (r *Registry) List(prefix string, offset, limit int) ([]ServiceView, int) {
 	var matched []string
 	prefix = strings.ToLower(strings.TrimSpace(prefix))
 	for _, id := range r.order {
-		if prefix != "" && !strings.HasPrefix(id, prefix) && !strings.Contains(strings.ToLower(r.byID[id].DisplayName), prefix) {
+		display := strings.ToLower(r.byID[id].DisplayName)
+		if prefix != "" && !strings.HasPrefix(id, prefix) && !strings.HasPrefix(display, prefix) {
 			continue
 		}
 		matched = append(matched, id)
@@ -100,10 +101,10 @@ func (r *Registry) view(id string) ServiceView {
 	}
 }
 
-// Len returns the number of services.
+// Len gives the number of services.
 func (r *Registry) Len() int { return len(r.order) }
 
-// Require returns the service or an error.
+// Require gives the service or an error.
 func (r *Registry) Require(id string) (config.Service, error) {
 	s, ok := r.get(id)
 	if !ok {

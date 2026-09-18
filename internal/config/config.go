@@ -3,6 +3,7 @@ package config
 
 import (
 	"bytes"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -33,17 +34,18 @@ const (
 	maxRedactRules      = 128
 )
 
-// Config represents fully validated runtime configuration.
+// Config contains the runtime configuration after validation.
 type Config struct {
 	Version  int
 	Limits   Limits
 	Audit    Audit
+	TLS      TLS
 	Sources  map[string]Source
 	Services []Service
 	Redact   []RedactRule
 }
 
-// Limits groups global budgets locked at startup.
+// Limits contains the global budgets set at startup.
 type Limits struct {
 	DefaultWindow         time.Duration
 	MaxIncidentWindow     time.Duration
@@ -62,32 +64,37 @@ type Limits struct {
 	WarnEmptyBindings     bool
 }
 
-// Audit configures the optional audit log; stderr always receives events.
+// Audit contains settings for the optional audit log. The application always sends events to stderr.
 type Audit struct {
 	File     string
 	MaxBytes int64
 	MaxFiles int
 }
 
-// Source represents a named adapter instance.
+// TLS holds optional extra trust material. TLS verification remains active.
+type TLS struct {
+	CAFile string
+}
+
+// Source contains the configuration for one named adapter.
 type Source struct {
 	Kind        string // gatus | docker | loki | healthchecks | beszel | ntfy
 	BaseURL     string
 	TokenEnv    string
 	TokenFile   string
-	TokenHeader string // optional; X-Api-Key for Healthchecks, Authorization otherwise
-	// Headers holds only static non-secret headers.
+	TokenHeader string // optional. Use X-Api-Key for Healthchecks and Authorization for other sources.
+	// Headers contains only static headers without secrets.
 	Headers map[string]string
 }
 
-// Service represents a canonical registry entry.
+// Service contains one registry entry.
 type Service struct {
 	ID          string
 	DisplayName string
 	Sources     ServiceSources
 }
 
-// ServiceSources associates optional adapter-specific identities.
+// ServiceSources connects optional identities to adapters.
 type ServiceSources struct {
 	Gatus        *GatusRef
 	Docker       *DockerRef
@@ -97,57 +104,58 @@ type ServiceSources struct {
 	Ntfy         *NtfyRef
 }
 
-// GatusRef links a service to a Gatus endpoint key.
+// GatusRef connects a service to a Gatus endpoint key.
 type GatusRef struct {
 	Source      string
 	EndpointKey string
 }
 
-// DockerRef links a service to a Docker container name.
+// DockerRef connects a service to a Docker container name.
 type DockerRef struct {
 	Source        string
 	ContainerName string
 }
 
-// LokiRef links a service to a predefined LogQL selector.
+// LokiRef connects a service to a LogQL selector from the configuration.
 type LokiRef struct {
 	Source   string
 	Selector string
 }
 
-// HealthchecksRef links a service to Healthchecks filters.
+// HealthchecksRef connects a service to Healthchecks filters.
 type HealthchecksRef struct {
 	Source    string
 	CheckName string
 	CheckTags []string
 	CheckUUID string
-	// StatusFilter optionally filters by status; an empty value accepts all.
+	// StatusFilter selects one status. An empty value accepts all statuses.
 	StatusFilter string
 }
 
-// BeszelRef links a service to a Beszel system.
+// BeszelRef connects a service to a Beszel system.
 type BeszelRef struct {
 	Source     string
 	SystemName string
 }
 
-// NtfyRef links a service to an ntfy topic defined in configuration.
+// NtfyRef connects a service to an ntfy topic in the configuration.
 type NtfyRef struct {
 	Source string
 	Topic  string
 }
 
-// RedactRule represents a redaction rule.
+// RedactRule contains a redaction rule.
 type RedactRule struct {
 	Exact string
 	Regex string
 }
 
-// Raw file structures, before validation.
+// These structures hold raw file data before validation.
 type fileConfig struct {
 	Version  int                   `yaml:"version"`
 	Limits   fileLimits            `yaml:"limits"`
 	Audit    fileAudit             `yaml:"audit"`
+	TLS      fileTLS               `yaml:"tls"`
 	Sources  map[string]fileSource `yaml:"sources"`
 	Services []fileService         `yaml:"services"`
 	Redact   []fileRedact          `yaml:"redact"`
@@ -164,7 +172,7 @@ type fileLimits struct {
 	MaxLogLineBytes       int    `yaml:"max_log_line_bytes"`
 	MaxBodyBytes          int    `yaml:"max_body_bytes"`
 	EvidenceCacheTTL      string `yaml:"evidence_cache_ttl"`
-	EvidenceCacheMax      int    `yaml:"evidence_cache_max"`
+	EvidenceCacheMax      *int   `yaml:"evidence_cache_max"`
 	SourceCacheTTL        string `yaml:"source_cache_ttl"`
 	MaxToolCallsPerMinute int    `yaml:"max_tool_calls_per_minute"`
 	MaxConcurrentTools    int    `yaml:"max_concurrent_tools"`
@@ -175,6 +183,10 @@ type fileAudit struct {
 	File     string `yaml:"file"`
 	MaxBytes int    `yaml:"max_bytes"`
 	MaxFiles int    `yaml:"max_files"`
+}
+
+type fileTLS struct {
+	CAFile string `yaml:"ca_file"`
 }
 
 type fileSource struct {
@@ -239,7 +251,7 @@ type fileRedact struct {
 	Regex string `yaml:"regex"`
 }
 
-// ValidationError locates a configuration problem.
+// ValidationError identifies a configuration problem.
 type ValidationError struct {
 	Path    string
 	Message string
@@ -249,7 +261,7 @@ func (e ValidationError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Path, e.Message)
 }
 
-// ValidationErrors aggregates multiple problems.
+// ValidationErrors collects multiple problems.
 type ValidationErrors []ValidationError
 
 func (e ValidationErrors) Error() string {
@@ -275,23 +287,16 @@ var (
 )
 
 // LoadFile reads and validates a YAML file.
-// The file must not be group- or world-accessible.
+// LoadFile does not accept files that a group or all users can access.
 func LoadFile(path string) (*Config, error) {
 	if path == "" {
 		return nil, errors.New("config path is required")
 	}
-	f, err := os.Open(path)
+	f, st, err := openRegularUnlinkedFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	defer func() { _ = f.Close() }()
-	st, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("config: %w", err)
-	}
-	if !st.Mode().IsRegular() {
-		return nil, errors.New("config: path is not a regular file")
-	}
 	if st.Size() > maxConfigBytes {
 		return nil, fmt.Errorf("config: file exceeds %d bytes", maxConfigBytes)
 	}
@@ -305,7 +310,7 @@ func LoadFile(path string) (*Config, error) {
 	return Parse(raw)
 }
 
-// Parse validates YAML content and builds Config.
+// Parse validates YAML content and makes Config.
 func Parse(raw []byte) (*Config, error) {
 	if len(raw) == 0 {
 		return nil, ValidationErrors{{Path: "version", Message: "empty configuration"}}
@@ -313,7 +318,7 @@ func Parse(raw []byte) (*Config, error) {
 	if len(raw) > maxConfigBytes {
 		return nil, ValidationErrors{{Path: ".", Message: fmt.Sprintf("configuration exceeds %d bytes", maxConfigBytes)}}
 	}
-	// Reject clearly executable or include syntax.
+	// Give an error for clearly executable or include syntax.
 	s := string(raw)
 	for _, bad := range []string{"{{", "}}", "!!python", "!!js", "${", "`$(", "include:", "!include"} {
 		if strings.Contains(s, bad) {
@@ -345,6 +350,9 @@ func Parse(raw []byte) (*Config, error) {
 
 	auditCfg, aerr := parseAudit(fc.Audit)
 	errs = append(errs, aerr...)
+
+	tlsCfg, terr := parseTLS(fc.TLS)
+	errs = append(errs, terr...)
 
 	sources := make(map[string]Source)
 	if len(fc.Sources) == 0 {
@@ -431,6 +439,7 @@ func Parse(raw []byte) (*Config, error) {
 		Version:  fc.Version,
 		Limits:   limits,
 		Audit:    auditCfg,
+		TLS:      tlsCfg,
 		Sources:  sources,
 		Services: services,
 		Redact:   redact,
@@ -444,7 +453,6 @@ func parseLimits(f fileLimits) (Limits, ValidationErrors) {
 		MaxEvidenceItems:      f.MaxEvidenceItems,
 		MaxLogLineBytes:       f.MaxLogLineBytes,
 		MaxBodyBytes:          int64(f.MaxBodyBytes),
-		EvidenceCacheMax:      f.EvidenceCacheMax,
 		MaxToolCallsPerMinute: f.MaxToolCallsPerMinute,
 		MaxConcurrentTools:    f.MaxConcurrentTools,
 		WarnEmptyBindings:     true,
@@ -512,14 +520,14 @@ func parseLimits(f fileLimits) (Limits, ValidationErrors) {
 	if l.MaxBodyBytes > 8<<20 {
 		errs = append(errs, ValidationError{"limits.max_body_bytes", "must be <= 8MiB"})
 	}
-	if l.EvidenceCacheMax <= 0 {
-		if l.EvidenceCacheMax < 0 {
-			errs = append(errs, ValidationError{"limits.evidence_cache_max", "must be positive"})
-		}
+	if f.EvidenceCacheMax == nil {
 		l.EvidenceCacheMax = 256
-	}
-	if l.EvidenceCacheMax > 1000 {
+	} else if *f.EvidenceCacheMax < 0 {
+		errs = append(errs, ValidationError{"limits.evidence_cache_max", "must be >= 0"})
+	} else if *f.EvidenceCacheMax > 1000 {
 		errs = append(errs, ValidationError{"limits.evidence_cache_max", "must be <= 1000"})
+	} else {
+		l.EvidenceCacheMax = *f.EvidenceCacheMax
 	}
 	if l.MaxToolCallsPerMinute <= 0 {
 		if l.MaxToolCallsPerMinute < 0 {
@@ -546,6 +554,18 @@ func parseLimits(f fileLimits) (Limits, ValidationErrors) {
 		errs = append(errs, ValidationError{"limits.default_window", "must be <= max_incident_window"})
 	}
 	return l, errs
+}
+
+func parseTLS(f fileTLS) (TLS, ValidationErrors) {
+	var errs ValidationErrors
+	path := strings.TrimSpace(f.CAFile)
+	if path == "" {
+		return TLS{}, nil
+	}
+	if len([]rune(path)) > 4096 || hasControl(path) {
+		errs = append(errs, ValidationError{"tls.ca_file", "must be a valid path of at most 4096 characters"})
+	}
+	return TLS{CAFile: path}, errs
 }
 
 func parseAudit(f fileAudit) (Audit, ValidationErrors) {
@@ -601,10 +621,10 @@ func parseSource(name string, fs fileSource) (Source, ValidationErrors) {
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			errs = append(errs, ValidationError{"sources." + name + ".base_url", "must be absolute http(s) URL with host"})
 		} else if u.User != nil {
-			errs = append(errs, ValidationError{"sources." + name + ".base_url", "userinfo not allowed; use token_env or token_file"})
+			errs = append(errs, ValidationError{"sources." + name + ".base_url", "userinfo is not allowed. Use token_env or token_file"})
 		}
 		if u != nil && u.RawQuery != "" {
-			errs = append(errs, ValidationError{"sources." + name + ".base_url", "query strings are not allowed; use headers or token_env/token_file"})
+			errs = append(errs, ValidationError{"sources." + name + ".base_url", "query strings are not allowed. Use headers or token_env/token_file"})
 		}
 		if u != nil && u.Fragment != "" {
 			errs = append(errs, ValidationError{"sources." + name + ".base_url", "fragments are not allowed"})
@@ -928,7 +948,7 @@ func sanitizeYAMLErr(err error) string {
 	return msg
 }
 
-// ResolveToken returns a source's token, or an empty string.
+// ResolveToken gives a source's token, or an empty string.
 func ResolveToken(src Source) (string, error) {
 	if src.TokenEnv != "" {
 		v := strings.TrimSpace(os.Getenv(src.TokenEnv))
@@ -943,8 +963,8 @@ func ResolveToken(src Source) (string, error) {
 	return "", nil
 }
 
-// AuthHeaders builds static headers and optional authentication.
-// Authentication values come only from the environment or a file.
+// AuthHeaders makes static headers and optional authentication.
+// The environment or a file supplies authentication values.
 func AuthHeaders(src Source, token string) map[string]string {
 	out := map[string]string{}
 	for k, v := range src.Headers {
@@ -975,7 +995,7 @@ func AuthHeaders(src Source, token string) map[string]string {
 	return out
 }
 
-// HasAnyBinding reports whether a service has at least one source.
+// HasAnyBinding shows if a service has at least one source.
 func HasAnyBinding(s Service) bool {
 	ss := s.Sources
 	return ss.Gatus != nil || ss.Docker != nil || ss.Loki != nil ||
@@ -996,18 +1016,17 @@ func readSecretFile(path string) (string, error) {
 			path = u.Opaque
 		}
 	}
-	f, err := os.Open(path)
+	f, st, err := openRegularUnlinkedFile(path)
 	if err != nil {
+		if strings.Contains(err.Error(), "symlink") {
+			return "", errors.New("token file must not be a symlink")
+		}
+		if strings.Contains(err.Error(), "regular") {
+			return "", errors.New("token file is not a regular file")
+		}
 		return "", err
 	}
 	defer func() { _ = f.Close() }()
-	st, err := f.Stat()
-	if err != nil {
-		return "", err
-	}
-	if !st.Mode().IsRegular() {
-		return "", errors.New("token file is not a regular file")
-	}
 	if st.Size() > 4<<10 {
 		return "", errors.New("token file exceeds 4KiB")
 	}
@@ -1027,4 +1046,59 @@ func readSecretFile(path string) (string, error) {
 
 func insecureUnixPermissions(mode os.FileMode) bool {
 	return runtime.GOOS != "windows" && mode.Perm()&0o077 != 0
+}
+
+func openRegularUnlinkedFile(path string) (*os.File, os.FileInfo, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, nil, errors.New("path must not be a symlink")
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil, errors.New("path is not a regular file")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	st, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, nil, err
+	}
+	if !os.SameFile(info, st) {
+		_ = f.Close()
+		return nil, nil, errors.New("file changed during the open operation")
+	}
+	return f, st, nil
+}
+
+// LoadExtraCertPool adds PEM certificates from path to the system pool.
+// An empty path keeps the TLS defaults. TLS verification stays active.
+func LoadExtraCertPool(path string) (*x509.CertPool, error) {
+	if path == "" {
+		return nil, nil
+	}
+	f, st, err := openRegularUnlinkedFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("tls.ca_file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	if st.Size() > 1<<20 {
+		return nil, errors.New("tls.ca_file exceeds 1MiB")
+	}
+	pem, err := io.ReadAll(io.LimitReader(f, (1<<20)+1))
+	if err != nil {
+		return nil, fmt.Errorf("tls.ca_file: %w", err)
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, errors.New("tls.ca_file: no certificates found")
+	}
+	return pool, nil
 }

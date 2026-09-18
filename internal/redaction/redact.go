@@ -1,4 +1,4 @@
-// Package redaction applies built-in and configured redaction rules.
+// Package redaction uses built-in rules and rules from the configuration.
 package redaction
 
 import (
@@ -17,13 +17,13 @@ type Engine struct {
 	regexps []*regexp.Regexp
 }
 
-// Rule represents a rule from configuration.
+// Rule contains a rule from the configuration.
 type Rule struct {
 	Exact string
 	Regex string
 }
 
-// New builds an engine and rejects any invalid regular expression.
+// New makes an engine and gives an error for each incorrect regular expression.
 func New(rules []Rule) (*Engine, error) {
 	e := &Engine{}
 	for i, r := range rules {
@@ -38,7 +38,7 @@ func New(rules []Rule) (*Engine, error) {
 			e.regexps = append(e.regexps, re)
 		}
 	}
-	// Built-in patterns stay active; they are not a substitute for a DLP system.
+	// Built-in patterns remain active. They do not replace a DLP system.
 	builtins := []string{
 		`(?i)"(password|passwd|pwd|secret|token|api[_-]?key|authorization|cookie|set-cookie)"\s*:\s*"[^"]*"`,
 		`(?i)(((proxy-)?authorization)\s*[:=]\s*)?(bearer|basic)\s+[a-z0-9\-._~+/]+=*`,
@@ -46,7 +46,7 @@ func New(rules []Rule) (*Engine, error) {
 		`(?i)(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}`,
 		`(?i)sk-[A-Za-z0-9]{20,}`,
 		`(?i)AKIA[0-9A-Z]{16}`,
-		`(?is)-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----.*`,
+		`(?is)-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----.*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----`,
 		`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`,
 		`(?i)(cookie|set-cookie)\s*[:=]\s*\S+`,
 	}
@@ -60,7 +60,7 @@ func New(rules []Rule) (*Engine, error) {
 	return e, nil
 }
 
-// Apply redacts s and returns the text plus the number of replacements.
+// Apply redacts s and gives the text plus the number of replacements.
 func (e *Engine) Apply(s string) (string, int) {
 	if e == nil || s == "" {
 		return s, 0
@@ -88,7 +88,7 @@ func (e *Engine) Apply(s string) (string, int) {
 	return SanitizeControl(out), n
 }
 
-// ApplyAndTruncate sanitizes, redacts, then bounds text in that order.
+// ApplyAndTruncate sanitizes and redacts the text. It then sets a maximum size.
 func ApplyAndTruncate(e *Engine, s string, max int) (string, int, bool) {
 	s = SanitizeControl(s)
 	redactions := 0
@@ -99,7 +99,7 @@ func ApplyAndTruncate(e *Engine, s string, max int) (string, int, bool) {
 	return s, redactions, truncated
 }
 
-// SanitizeControl strips control characters except tab and newlines.
+// SanitizeControl removes control characters except tab and newlines.
 func SanitizeControl(s string) string {
 	if s == "" {
 		return s
@@ -120,7 +120,7 @@ func SanitizeControl(s string) string {
 	return b.String()
 }
 
-// Truncate limits the rune count without splitting a UTF-8 character.
+// Truncate sets a maximum rune count and does not divide a UTF-8 character.
 func Truncate(s string, max int) (string, bool) {
 	if max <= 0 {
 		return "", true
@@ -135,7 +135,7 @@ func Truncate(s string, max int) (string, bool) {
 	return string(runes[:max-3]) + "...", true
 }
 
-// TruncateBytes limits UTF-8 size without splitting a character.
+// TruncateBytes sets a maximum UTF-8 size and does not divide a character.
 func TruncateBytes(s string, max int) (string, bool) {
 	if max <= 0 {
 		return "", true
@@ -162,12 +162,12 @@ func TruncateBytes(s string, max int) (string, bool) {
 	return s[:end] + suffix, true
 }
 
-// UntrustedDataMarker prefixes text that looks like an instruction.
+// UntrustedDataMarker adds a prefix to text that looks like an instruction.
 // The content remains available as untrusted analysis data.
 const UntrustedDataMarker = "[UNTRUSTED_LOG_DATA]"
 
 // NeutralizeInstructionLike marks text that looks like an instruction
-// injection without removing its forensic value.
+// injection and keeps its forensic value.
 func NeutralizeInstructionLike(s string) string {
 	if s == "" {
 		return s
@@ -180,7 +180,6 @@ func NeutralizeInstructionLike(s string) string {
 		"ignore previous instructions",
 		"ignore all instructions",
 		"you are now",
-		"system:",
 		"execute the following",
 		"run this command",
 	}

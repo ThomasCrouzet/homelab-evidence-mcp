@@ -1,8 +1,8 @@
 # Example configuration for homelab-evidence-mcp.
-# Copy this file outside the repository, then pass it with --config.
-# Never put real tokens, emails, or private names in Git.
-# JSON schema for the editor: config.schema.json.
-# Validate without starting MCP: homelab-evidence-mcp --config path --validate
+# Copy this file outside the repository. Pass its path with --config.
+# Do not put secret tokens, email addresses, or private names in Git.
+# Use config.schema.json for editor validation.
+# Run this command to validate the configuration without starting MCP: homelab-evidence-mcp --config path --validate
 
 ---
 version: 1
@@ -19,16 +19,16 @@ limits:
   max_body_bytes: 2097152
   evidence_cache_ttl: 5m
   evidence_cache_max: 256
-  # Short cache of identical GET responses (0 disables it).
-  # On a hit, observed_at keeps the original collection time; cached applies
-  # only to get_evidence. Keep a low value for snapshots.
+  # This source response cache keeps the same GET responses for a short time. A value of 0 deactivates it.
+  # On a cache hit, observed_at keeps the initial collection time.
+  # Only get_evidence sets freshness to cached. Use a low value for snapshots.
   source_cache_ttl: 15s
   max_tool_calls_per_minute: 120
   max_concurrent_tools: 8
   warn_empty_bindings: true
 
-# Optional rotating JSONL audit file.
-# stderr always receives events.
+# Configure an optional rotating JSONL audit file.
+# The application always sends audit events to stderr.
 # audit:
 #   file: /var/log/homelab-evidence-mcp/audit.jsonl
 #   max_bytes: 10485760
@@ -38,33 +38,43 @@ sources:
   gatus:
     kind: gatus
     base_url: https://gatus.example.internal
-    # Path prefixes are preserved.
-    # Example: https://proxy.example/gatus.
-    # Optional static headers, without secrets:
+    # The client keeps path prefixes.
+    # For example, use https://proxy.example/gatus.
+    # Use optional static headers without secrets.
     # headers:
     #   X-Scope-OrgID: lab
 
   loki:
     kind: loki
     base_url: https://loki.example.internal
-    # Optional Bearer from the environment, never from YAML:
+    # Get an optional Bearer token from the environment. Do not get it from YAML.
     # token_env: LOKI_TOKEN
     # token_header: Authorization
 
   docker-main:
     kind: docker
-    # Use a Docker socket proxy limited to GET routes.
-    # The unix:///var/run/docker.sock socket is not supported.
+    # Use a Docker socket proxy that lets the client use only GET routes.
+    # The client cannot use the unix:///var/run/docker.sock socket.
     base_url: http://docker-proxy.example.internal:2375
 
   healthchecks:
     kind: healthchecks
     base_url: https://healthchecks.example.internal
-    # Read-only key via the environment or a private token_file.
+    # Set a read-only key through the environment or a private token_file.
     token_env: HEALTHCHECKS_API_TOKEN
     # token_file: /run/secrets/healthchecks_api_token
 
-# Optional redaction rules; built-in rules stay active.
+  beszel:
+    kind: beszel
+    base_url: https://beszel.example.internal
+    # Get an optional Bearer token from the environment for the PocketBase API.
+    # token_env: BESZEL_TOKEN
+
+  ntfy:
+    kind: ntfy
+    base_url: https://ntfy.example.internal
+
+# Add optional redaction rules. Built-in rules remain active.
 redact:
   - exact: "example-local-token-value"
   - regex: '(?i)sessionid=[A-Za-z0-9]+'
@@ -85,6 +95,12 @@ services:
       healthchecks:
         source: healthchecks
         check_tags: [proxy]
+      beszel:
+        source: beszel
+        system_name: proxy-host
+      ntfy:
+        source: ntfy
+        topic: proxy-alerts
 
   - id: media
     display_name: Media Server

@@ -1,4 +1,4 @@
-// Command demo runs end-to-end MCP calls against mock HTTP servers.
+// Command demo makes end-to-end MCP calls against mock HTTP servers.
 package main
 
 import (
@@ -61,7 +61,7 @@ func main() {
 	}))
 	defer dock.Close()
 
-	// The first Loki scenario contains a fake secret and a hostile instruction.
+	// The first Loki scenario contains an example secret and an untrusted instruction.
 	loki := httptest.NewServer(wrap("loki", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status": "success",
@@ -78,11 +78,34 @@ func main() {
 	}))
 	defer loki.Close()
 
-	// A separate unavailable server then demonstrates partial results.
+	// The next scenario uses a server that is not available. It shows results from the available sources.
 	lokiDown := httptest.NewServer(wrap("loki-down", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(503)
 	}))
 	defer lokiDown.Close()
+
+	bz := httptest.NewServer(wrap("beszel", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/collections/systems/records" &&
+			r.URL.Path != "/api/systems" && r.URL.Path != "/api/systems/" &&
+			r.URL.Path != "/api/beszel/systems" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{{
+				"name": "media-host", "status": "up", "cpu": 12.0,
+			}},
+		})
+	}))
+	defer bz.Close()
+
+	nt := httptest.NewServer(wrap("ntfy", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"id": "n1", "time": t2.Unix(), "event": "message",
+			"message": "media disk warning", "priority": 3,
+		}})
+	}))
+	defer nt.Close()
 
 	hc := httptest.NewServer(wrap("healthchecks", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -97,7 +120,7 @@ func main() {
 	defer hc.Close()
 
 	_ = os.Setenv("HC_DEMO_TOKEN", "demo-readonly-token-not-real")
-	cfgPath := writeCfg(gatus.URL, dock.URL, loki.URL, hc.URL)
+	cfgPath := writeCfg(gatus.URL, dock.URL, loki.URL, hc.URL, bz.URL, nt.URL)
 
 	cfg, err := config.LoadFile(cfgPath)
 	must(err)
@@ -149,9 +172,11 @@ func main() {
 	})
 	fmt.Println(truncate(inc, 2500))
 	assert(!strings.Contains(inc, "demo-not-a-real-secret"), "secret redacted")
-	assert(!strings.Contains(inc, "NOT_A_REAL_PING_SECRET"), "ping url absent")
+	assert(!strings.Contains(inc, "NOT_A_REAL_PING_SECRET"), "no ping URL")
 	assert(strings.Contains(inc, "factual_summary") || strings.Contains(inc, "Timeline"), "has summary")
 	assert(!strings.Contains(strings.ToLower(inc), "root cause is"), "no root-cause claim")
+	assert(strings.Contains(inc, "beszel"), "beszel family exercised")
+	assert(strings.Contains(inc, "ntfy"), "ntfy family exercised")
 
 	fmt.Println("\n--- search_logs ---")
 	logs := call("search_logs", map[string]any{
@@ -166,8 +191,8 @@ func main() {
 	fmt.Println("\n--- failed_crons ---")
 	fmt.Println(truncate(call("failed_crons", map[string]any{"duration": "24h"}), 1000))
 
-	// Rebuild the application with Loki unavailable.
-	cfg2Path := writeCfg(gatus.URL, dock.URL, lokiDown.URL, hc.URL)
+	// Make a new application instance while Loki is not available.
+	cfg2Path := writeCfg(gatus.URL, dock.URL, lokiDown.URL, hc.URL, bz.URL, nt.URL)
 	cfg2, err := config.LoadFile(cfg2Path)
 	must(err)
 	app2, err := mcpserver.NewApp(cfg2, nil, audit.New(io.Discard))
@@ -176,7 +201,7 @@ func main() {
 	must(err)
 	_ = res
 	partialJSON, _ := json.MarshalIndent(out, "", "  ")
-	fmt.Println("\n--- incident_context (loki down, partial) ---")
+	fmt.Println("\n--- incident_context (Loki error, results from other sources) ---")
 	fmt.Println(truncate(string(partialJSON), 1500))
 	ps := string(partialJSON)
 	assert(strings.Contains(ps, "gatus") || strings.Contains(ps, "docker"), "other sources present")
@@ -188,7 +213,7 @@ func main() {
 }
 
 func callDirectIncident(app *mcpserver.App) (*mcp.CallToolResult, any, error) {
-	// Open a new in-memory session to call the exported tools.
+	// Use a new in-memory session with the exported tools.
 	server := app.Server()
 	st, ct := mcp.NewInMemoryTransports()
 	ctx := context.Background()
@@ -216,7 +241,7 @@ func callDirectIncident(app *mcpserver.App) (*mcp.CallToolResult, any, error) {
 	return res, out, nil
 }
 
-func writeCfg(gatusURL, dockerURL, lokiURL, hcURL string) string {
+func writeCfg(gatusURL, dockerURL, lokiURL, hcURL, beszelURL, ntfyURL string) string {
 	raw := fmt.Sprintf(`
 version: 1
 limits:
@@ -241,6 +266,12 @@ sources:
     kind: healthchecks
     base_url: %s
     token_env: HC_DEMO_TOKEN
+  beszel:
+    kind: beszel
+    base_url: %s
+  ntfy:
+    kind: ntfy
+    base_url: %s
 services:
   - id: media
     display_name: Media
@@ -257,7 +288,13 @@ services:
       healthchecks:
         source: healthchecks
         check_tags: [media]
-`, gatusURL, dockerURL, lokiURL, hcURL)
+      beszel:
+        source: beszel
+        system_name: media-host
+      ntfy:
+        source: ntfy
+        topic: media-alerts
+`, gatusURL, dockerURL, lokiURL, hcURL, beszelURL, ntfyURL)
 	dir, err := os.MkdirTemp("", "hem-demo-*")
 	must(err)
 	p := filepath.Join(dir, "config.yaml")
@@ -273,7 +310,7 @@ func must(err error) {
 
 func assert(cond bool, msg string) {
 	if !cond {
-		log.Fatalf("ASSERT FAIL: %s", msg)
+		log.Fatalf("ASSERTION ERROR: %s", msg)
 	}
 	fmt.Printf("assert ok: %s\n", msg)
 }

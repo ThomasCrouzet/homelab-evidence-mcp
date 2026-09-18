@@ -96,7 +96,7 @@ func TestHistory_InstructionLikeMarked(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("items=%d", len(items))
 	}
-	// The summary is the free-text channel returned to the client.
+	// The client gives the summary through the free-text channel.
 	if !strings.Contains(items[0].Summary, redaction.UntrustedDataMarker) {
 		t.Fatalf("expected untrusted marker in summary, got %q", items[0].Summary)
 	}
@@ -158,11 +158,11 @@ func TestHistory_SortsBeforeApplyingLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].SourceID != "earlier" {
-		t.Fatalf("items=%+v", items)
+	if len(items) != 1 || items[0].SourceID != "later" {
+		t.Fatalf("kept oldest instead of newest: %+v", items)
 	}
 	if !truncated {
-		t.Fatal("applied limit must be reported")
+		t.Fatal("result must show the limit in use")
 	}
 }
 
@@ -247,6 +247,10 @@ func TestItemFrom_SummaryTruncationIsReported(t *testing.T) {
 		t0, t0, 512,
 	)
 	if len([]rune(item.Summary)) != 200 || !item.Truncated {
-		t.Fatalf("summary truncation not reported: %+v", item)
+		t.Fatalf("summary truncation is missing: %+v", item)
+	}
+	body, _ := item.Attributes["message"].(string)
+	if body != strings.Repeat("x", 300) {
+		t.Fatalf("message body exceeds the limit: %q", body)
 	}
 }

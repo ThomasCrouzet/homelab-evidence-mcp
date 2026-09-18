@@ -2,6 +2,7 @@ package httpx
 
 import (
 	"context"
+	"crypto/x509"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,46 @@ import (
 	"testing"
 	"time"
 )
+
+func TestGet_TrustsExtraCA(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer ts.Close()
+	cert, err := x509.ParseCertificate(ts.TLS.Certificates[0].Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(cert)
+
+	untrusted := NewLockedClient(Options{Timeout: 2 * time.Second})
+	if err := untrusted.RegisterDestination("src", ts.URL); err != nil {
+		t.Fatal(err)
+	}
+	resp, _, err := untrusted.Get(context.Background(), "src", "/", nil)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected TLS failure without extra CA")
+	}
+
+	trusted := NewLockedClient(Options{Timeout: 2 * time.Second, RootCAs: pool})
+	if err := trusted.RegisterDestination("src", ts.URL); err != nil {
+		t.Fatal(err)
+	}
+	resp, body, err := trusted.Get(context.Background(), "src", "/", nil)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "ok") {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+}
 
 func TestGet_OK(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -26,7 +67,7 @@ func TestGet_OK(t *testing.T) {
 	if err := c.RegisterDestination("main", ts.URL); err != nil {
 		t.Fatal(err)
 	}
-	// LockedClient.Get closes the body before returning the response.
+	// LockedClient.Get closes the body before it gives the response.
 	resp, body, err := c.Get(context.Background(), "main", "/api/x", nil) //nolint:bodyclose
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +83,7 @@ func TestGet_OK(t *testing.T) {
 func TestGet_RejectsAbsolutePath(t *testing.T) {
 	c := NewLockedClient(Options{})
 	_ = c.RegisterDestination("main", "https://example.internal")
-	// LockedClient.Get closes the body before returning the response.
+	// LockedClient.Get closes the body before it gives the response.
 	_, _, err := c.Get(context.Background(), "main", "https://evil.example/x", nil) //nolint:bodyclose
 	if err == nil {
 		t.Fatal("expected error")
@@ -51,7 +92,7 @@ func TestGet_RejectsAbsolutePath(t *testing.T) {
 
 func TestGet_UnknownDest(t *testing.T) {
 	c := NewLockedClient(Options{})
-	// LockedClient.Get closes the body before returning the response.
+	// LockedClient.Get closes the body before it gives the response.
 	_, _, err := c.Get(context.Background(), "nope", "/x", nil) //nolint:bodyclose
 	if err == nil {
 		t.Fatal("expected error")
@@ -161,7 +202,7 @@ func TestGet_RejectsPathTraversal(t *testing.T) {
 	for _, path := range []string{
 		"/../admin", "/safe/../admin", "/safe/%2e/admin", "//evil.example/x",
 	} {
-		// LockedClient.Get closes the body before returning the response.
+		// LockedClient.Get closes the body before it gives the response.
 		//nolint:bodyclose
 		if _, _, err := c.Get(context.Background(), "main", path, nil); err == nil {
 			t.Fatalf("expected rejection for %q", path)
@@ -222,7 +263,7 @@ func TestStats_ExcludesExpiredEntries(t *testing.T) {
 	if err := c.RegisterDestination("main", ts.URL); err != nil {
 		t.Fatal(err)
 	}
-	// LockedClient.Get closes the body before returning the response.
+	// LockedClient.Get closes the body before it gives the response.
 	//nolint:bodyclose
 	if _, _, err := c.Get(context.Background(), "main", "/x", nil); err != nil {
 		t.Fatal(err)
@@ -241,6 +282,19 @@ func TestStats_ExcludesExpiredEntries(t *testing.T) {
 	}
 }
 
+func TestCachePut_EvictsOldestFirst(t *testing.T) {
+	c := NewLockedClient(Options{CacheTTL: time.Minute})
+	chunk := make([]byte, (maxCacheBytes/2)+1)
+	c.cachePut("oldest", http.StatusOK, chunk, time.Now())
+	c.cachePut("newest", http.StatusOK, chunk, time.Now())
+	if _, _, _, ok := c.cacheGet("oldest"); ok {
+		t.Fatal("oldest entry should be evicted first")
+	}
+	if _, _, _, ok := c.cacheGet("newest"); !ok {
+		t.Fatal("newest entry should remain")
+	}
+}
+
 func TestCachePut_BoundsCumulativeBytes(t *testing.T) {
 	c := NewLockedClient(Options{CacheTTL: time.Minute})
 	first := make([]byte, (maxCacheBytes/2)+1)
@@ -249,7 +303,7 @@ func TestCachePut_BoundsCumulativeBytes(t *testing.T) {
 	c.cachePut("second", http.StatusOK, second, time.Now())
 	stats := c.Stats()
 	if stats.Bytes > maxCacheBytes || stats.Size != 1 {
-		t.Fatalf("cache not bounded: %+v", stats)
+		t.Fatalf("cache exceeds its limits: %+v", stats)
 	}
 }
 
@@ -264,7 +318,7 @@ func TestGet_PreservesBasePathPrefix(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	// Simulate a mount behind a reverse proxy.
+	// Use a mount behind a reverse proxy.
 	base := strings.TrimRight(ts.URL, "/") + "/gatus"
 	c := NewLockedClient(Options{Timeout: 2 * time.Second})
 	if err := c.RegisterDestination("gatus", base); err != nil {
@@ -316,7 +370,7 @@ func TestHeaderFingerprint_RedactsSecretValues(t *testing.T) {
 	if strings.Contains(fp, "Bearer ") {
 		t.Fatalf("fingerprint embeds bearer material: %q", fp)
 	}
-	// All values are masked: token_header accepts arbitrary names.
+	// The client masks all values because token_header accepts all names.
 	if strings.Contains(fp, "lab-tenant") || strings.Contains(fp, "application/json") {
 		t.Fatalf("fingerprint embeds cleartext header value: %q", fp)
 	}
@@ -354,13 +408,13 @@ func TestGet_CacheKeyDoesNotLeakCustomTokenHeader(t *testing.T) {
 	c := NewLockedClient(Options{Timeout: time.Second, CacheTTL: time.Minute})
 	_ = c.RegisterDestination("main", ts.URL)
 	hdrs := map[string]string{"X-Auth-Token": secret}
-	// LockedClient.Get closes the body before returning the response.
+	// LockedClient.Get closes the body before it gives the response.
 	//nolint:bodyclose
 	if _, _, err := c.Get(context.Background(), "main", "/cached", hdrs); err != nil {
 		t.Fatal(err)
 	}
 	// The same path and headers must reuse the cache.
-	// LockedClient.Get closes the body before returning the response.
+	// LockedClient.Get closes the body before it gives the response.
 	//nolint:bodyclose
 	if _, _, err := c.Get(context.Background(), "main", "/cached", hdrs); err != nil {
 		t.Fatal(err)
@@ -368,7 +422,7 @@ func TestGet_CacheKeyDoesNotLeakCustomTokenHeader(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("expected cache hit (1 upstream), got %d", n)
 	}
-	// Verify no local cache key contains the secret in cleartext.
+	// Make sure that no local cache key contains the secret in cleartext.
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for k := range c.cache {

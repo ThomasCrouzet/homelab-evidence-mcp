@@ -19,7 +19,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Go
+      - name: Install Go
         uses: actions/setup-go@v6
         with:
           go-version: '1.25.x'
@@ -41,7 +41,7 @@ jobs:
             exit 1
           fi
 
-      - name: Verify
+      - name: Go checks
         run: |
           gofmt_output="$(gofmt -l .)"
           test -z "$gofmt_output"
@@ -63,7 +63,7 @@ jobs:
           "$(go env GOPATH)/bin/govulncheck" ./...
 
       - name: Secret scan
-        uses: gitleaks/gitleaks-action@v2.3.9
+        uses: gitleaks/gitleaks-action@v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -75,7 +75,7 @@ jobs:
           version_path="github.com/ThomasCrouzet/homelab-evidence-mcp"
           version_path+="/internal/version.Version"
           mkdir -p dist
-          for pair in linux/amd64 linux/arm64 darwin/arm64 windows/amd64; do
+          for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
             os="${pair%/*}"
             arch="${pair#*/}"
             ext=""
@@ -100,7 +100,7 @@ jobs:
             ./cmd/homelab-evidence-mcp |
             sed '/^[[:space:]]*$/d' | sort -u > "$module_list"
           if [ ! -s "$module_list" ]; then
-            echo "Empty embedded module graph" >&2
+            echo "No modules in the binary dependency graph" >&2
             exit 1
           fi
           {
@@ -111,7 +111,7 @@ jobs:
                 continue
               fi
               if [ -z "$dir" ]; then
-                echo "Module directory not found for" \
+                echo "No module directory for" \
                   "$module $version" >&2
                 exit 1
               fi
@@ -131,7 +131,7 @@ jobs:
                   -print | sort
               )
               if [ "$found" -eq 0 ]; then
-                echo "License not found for $module $version" >&2
+                echo "No license file for $module $version" >&2
                 exit 1
               fi
               echo

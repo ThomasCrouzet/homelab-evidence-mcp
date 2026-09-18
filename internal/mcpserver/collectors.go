@@ -36,9 +36,6 @@ func (a *App) collectGatusWindow(ctx context.Context, serviceID string, ref *con
 		if max <= 0 || max > a.Cfg.Limits.MaxEvidenceItems {
 			max = a.Cfg.Limits.MaxEvidenceItems
 		}
-		if max > 100 {
-			max = 100
-		}
 		var err error
 		var result []evidence.Item
 		result, truncated, err = cli.EvidenceInWindow(ctx, serviceID, ref.EndpointKey, start, end, max)
@@ -108,7 +105,11 @@ func (a *App) collectHCWindow(ctx context.Context, serviceID string, ref *config
 		if cli == nil {
 			return nil, fmt.Errorf("healthchecks client missing")
 		}
-		return cli.FailedInWindow(ctx, serviceID, healthchecks.FilterFromRef(ref), start, end)
+		f := healthchecks.FilterFromRef(ref)
+		// Incident paths and cron failure paths always select current down/grace/paused
+		// states. A binding status_filter of "up" must not hide failures.
+		f.Status = ""
+		return cli.FailedInWindow(ctx, serviceID, f, start, end)
 	})
 }
 
@@ -157,16 +158,16 @@ func (a *App) collectNtfy(ctx context.Context, serviceID string, ref *config.Ntf
 
 func (a *App) withSourceTimeout(ctx context.Context, sourceName string, kind evidence.SourceKind, fn func(context.Context) ([]evidence.Item, error)) (evidence.SourceOutcome, []evidence.Item) {
 	t0 := time.Now()
-	sctx, cancel := context.WithTimeout(ctx, a.Cfg.Limits.PerSourceTimeout)
-	defer cancel()
 	if a.sourceSem != nil {
 		select {
 		case a.sourceSem <- struct{}{}:
 			defer func() { <-a.sourceSem }()
-		case <-sctx.Done():
-			return a.sourceErrorOutcome(ctx, sctx, sourceName, kind, sctx.Err(), t0), nil
+		case <-ctx.Done():
+			return a.sourceErrorOutcome(ctx, ctx, sourceName, kind, ctx.Err(), t0), nil
 		}
 	}
+	sctx, cancel := context.WithTimeout(ctx, a.Cfg.Limits.PerSourceTimeout)
+	defer cancel()
 	items, err := fn(sctx)
 	if err != nil {
 		return a.sourceErrorOutcome(ctx, sctx, sourceName, kind, err, t0), nil
