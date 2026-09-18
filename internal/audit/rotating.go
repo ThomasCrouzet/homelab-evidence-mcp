@@ -8,8 +8,8 @@ import (
 	"sync"
 )
 
-// RotatingFile bounds size and performs numbered rotation.
-// Callers must never pass secrets to it.
+// RotatingFile sets a maximum size and does numbered rotation.
+// Callers must not pass secrets to it.
 type RotatingFile struct {
 	mu       sync.Mutex
 	path     string
@@ -19,7 +19,7 @@ type RotatingFile struct {
 	f        *os.File
 }
 
-// OpenRotating opens or creates path for append with rotation.
+// OpenRotating opens the path for appends and rotation. It makes the path if necessary.
 func OpenRotating(path string, maxBytes int64, maxFiles int) (*RotatingFile, error) {
 	if path == "" {
 		return nil, fmt.Errorf("audit file path required")
@@ -45,7 +45,7 @@ func OpenRotating(path string, maxBytes int64, maxFiles int) (*RotatingFile, err
 	return &RotatingFile{path: path, maxBytes: maxBytes, maxFiles: maxFiles, size: st.Size(), f: f}, nil
 }
 
-// Write implements io.Writer.
+// Write is the io.Writer implementation.
 func (r *RotatingFile) Write(p []byte) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -62,7 +62,7 @@ func (r *RotatingFile) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// Close closes the underlying file.
+// Close closes the output file.
 func (r *RotatingFile) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -82,7 +82,7 @@ func (r *RotatingFile) rotateLocked() error {
 			return err
 		}
 	}
-	// Shift older files before recreating the main file.
+	// The rotation moves older files before it makes the primary file again.
 	for i := r.maxFiles - 1; i >= 1; i-- {
 		from := r.path
 		if i > 1 {
@@ -134,7 +134,7 @@ func openRegularAuditFile(path string, appendMode bool) (*os.File, error) {
 		return closeOnError(err)
 	}
 	if !os.SameFile(pathInfo, fileInfo) {
-		return closeOnError(fmt.Errorf("audit file changed while opening"))
+		return closeOnError(fmt.Errorf("audit file changed during the open operation"))
 	}
 	if err := f.Chmod(0o600); err != nil {
 		return closeOnError(err)
@@ -147,7 +147,7 @@ func openRegularAuditFile(path string, appendMode bool) (*os.File, error) {
 	return f, nil
 }
 
-// MultiWriter duplicates writes to all outputs.
+// MultiWriter copies writes to all outputs.
 func MultiWriter(writers ...io.Writer) io.Writer {
 	return io.MultiWriter(writers...)
 }

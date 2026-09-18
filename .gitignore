@@ -17,6 +17,6 @@ coverage.html
 .idea/
 .vscode/
 
-# Configuration locale
+# Local configuration
 *.local.yaml
 config.local.yaml

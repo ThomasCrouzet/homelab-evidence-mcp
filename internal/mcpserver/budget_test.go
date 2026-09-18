@@ -77,7 +77,7 @@ func TestWithBudget_DeniesWhenConcurrentExceeded(t *testing.T) {
 		return nil, nil, nil
 	})
 	if err != nil {
-		t.Fatalf("withBudget should return tool error result, not Go error: %v", err)
+		t.Fatalf("withBudget should give a tool error result, not a Go error: %v", err)
 	}
 	if res == nil || !res.IsError {
 		t.Fatalf("expected IsError budget result, got %+v", res)
@@ -131,7 +131,7 @@ func TestSanitizeErr_UsesRedaction(t *testing.T) {
 	if !strings.Contains(msg, "[REDACTED]") {
 		t.Fatalf("expected redaction marker: %s", msg)
 	}
-	// The path without an engine must also redact characteristic secrets.
+	// The path without an engine must redact built-in secret patterns.
 	msg2 := sanitizeErr(errString("request failed token=aaaaaaaaaaaaaaaaaaaa"), nil)
 	if strings.Contains(msg2, "aaaaaaaaaaaaaaaaaaaa") {
 		t.Fatalf("token leaked: %s", msg2)

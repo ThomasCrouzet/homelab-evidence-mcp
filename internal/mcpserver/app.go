@@ -1,4 +1,4 @@
-// Package mcpserver exposes MCP tools over stdio.
+// Package mcpserver gives access to MCP tools through stdio.
 package mcpserver
 
 import (
@@ -67,7 +67,7 @@ type App struct {
 	sourceSem chan struct{}
 }
 
-// NewApp builds adapters and resolves tokens.
+// NewApp makes adapters and gets tokens.
 func NewApp(cfg *config.Config, log *slog.Logger, aud *audit.Logger) (*App, error) {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -151,54 +151,54 @@ func NewApp(cfg *config.Config, log *slog.Logger, aud *audit.Logger) (*App, erro
 	return app, nil
 }
 
-// Server builds the MCP server and registers tools.
+// Server makes the MCP server and adds tools.
 func (a *App) Server() *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: serverName, Version: version.Version}, nil)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "evidence_capabilities",
-		Description: "Return server version, active adapters, covered services, limits, and compatibility notes. Never includes base URLs or secrets.",
+		Description: "Give the server version, active adapters, services with adapters, limits, and compatibility notes. The response does not include base URLs or secrets.",
 		Annotations: readOnlyAnns(false),
 	}, a.toolCapabilities)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "list_services",
-		Description: "List canonical services with per-source coverage. Optional prefix filter and pagination.",
+		Description: "Give services from the registry with per-source coverage. Use the optional prefix filter and pagination.",
 		Annotations: readOnlyAnns(false),
 	}, a.toolListServices)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "service_status",
-		Description: "Multi-source status snapshot for one service_id (Gatus, Docker, Healthchecks, Beszel). Loki/ntfy are not queried.",
+		Description: "Get a multi-source status snapshot for one service_id (Gatus, Docker, Healthchecks, Beszel). The tool does not get data from Loki or ntfy.",
 		Annotations: readOnlyAnns(true),
 	}, a.toolServiceStatus)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "incident_context",
-		Description: "Collect bounded multi-source evidence timeline for a service_id. Deterministic correlation only; no root-cause claims.",
+		Description: "Collect a multi-source evidence timeline for a service_id with the limit from the configuration. The correlation does not identify a root cause.",
 		Annotations: readOnlyAnns(true),
 	}, a.toolIncidentContext)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "search_logs",
-		Description: "Search Loki logs for a service_id using the preconfigured selector. Optional text filter; caller cannot change URL or stream selector labels.",
+		Description: "Examine Loki logs for a service_id with the selector from the configuration. Use the optional text filter. The caller cannot change the URL or stream selector labels.",
 		Annotations: readOnlyAnns(true),
 	}, a.toolSearchLogs)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "failed_crons",
-		Description: "List Healthchecks checks that are currently down, in grace, or paused. Never returns ping URLs.",
+		Description: "Give Healthchecks checks with a current state of down, grace, or paused. The tool does not include ping URLs.",
 		Annotations: readOnlyAnns(true),
 	}, a.toolFailedCrons)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "get_evidence",
-		Description: "Return one previously emitted evidence item by opaque process-local id (short TTL cache).",
+		Description: "Give one cached evidence item by its opaque process-local id. The cache has a short TTL.",
 		Annotations: readOnlyAnns(false),
 	}, a.toolGetEvidence)
 	return s
 }
 
-// RunStdio serves MCP on stdin/stdout; logs stay on stderr.
+// RunStdio uses stdin and stdout for MCP. Logs stay on stderr.
 func RunStdio(ctx context.Context, app *App) error {
 	server := app.Server()
 	return server.Run(ctx, &mcp.StdioTransport{})
 }
 
-// toolBudget limits concurrent and per-minute tool calls.
+// toolBudget sets concurrent and per-minute tool call limits.
 type toolBudget struct {
 	mu     sync.Mutex
 	perMin int

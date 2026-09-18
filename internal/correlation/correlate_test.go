@@ -33,7 +33,7 @@ func TestBuildTimeline_OrderAndNoRootCause(t *testing.T) {
 	if strings.Contains(b.FactualSummary, "root cause is") {
 		t.Fatal(b.FactualSummary)
 	}
-	if !strings.Contains(b.FactualSummary, "does not establish root cause") {
+	if !strings.Contains(b.FactualSummary, "does not identify a root cause") {
 		t.Fatal(b.FactualSummary)
 	}
 	if len(b.Warnings) == 0 {
@@ -78,7 +78,7 @@ func TestBuildTimeline_SourceTruncation(t *testing.T) {
 
 func TestBuildTimeline_EmptyHonest(t *testing.T) {
 	b := BuildTimeline("s", time.Now().Add(-time.Hour), time.Now(), nil, nil, 10)
-	if !strings.Contains(b.FactualSummary, "Absence of evidence") {
+	if !strings.Contains(b.FactualSummary, "does not prove that no event occurred") {
 		t.Fatal(b.FactualSummary)
 	}
 }
@@ -90,7 +90,7 @@ func TestBuildTimeline_FactualSummaryGoldenPhrases(t *testing.T) {
 		ObservedAt: now, RetrievedAt: now, Summary: "fail", Severity: evidence.SeverityError,
 	}}
 	b := BuildTimeline("media", now.Add(-time.Hour), now, items, []evidence.SourceOutcome{{Status: "ok"}}, 10)
-	for _, w := range []string{"Timeline is ordered by observed_at", "correlation does not establish root cause"} {
+	for _, w := range []string{"timeline uses observed_at order", "Correlation does not identify a root cause"} {
 		if !strings.Contains(b.FactualSummary, w) {
 			t.Fatalf("missing %q in %s", w, b.FactualSummary)
 		}

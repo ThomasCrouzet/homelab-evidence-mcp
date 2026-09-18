@@ -24,26 +24,36 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          # Full history so gitleaks can resolve parent ranges on PRs.
+          # Get the full Git history.
+          # This gives gitleaks the parent commits for pull request scans.
           fetch-depth: 0
 
-      - name: Set up Go
+      - name: Install Go
         uses: actions/setup-go@v6
         with:
           go-version: '1.25.x'
           check-latest: true
           cache-dependency-path: go.sum
 
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Markdown format
+        run: make lint-docs
+
       - name: gofmt
         run: |
           unformatted="$(gofmt -l .)"
           if [ -n "$unformatted" ]; then
-            echo "Unformatted files:"
+            echo "Files to format:"
             echo "$unformatted"
             exit 1
           fi
 
-      - name: Public repository hygiene
+      - name: Private address scan
         shell: bash
         run: |
           status=0
@@ -51,7 +61,7 @@ jobs:
           tailscale_dns='[[:alnum:].-]+\.ts\.net'
           if git grep -nIE "$tailscale_ip" -- . ':(exclude).git' ||
             git grep -nIE "$tailscale_dns" -- . ':(exclude).git'; then
-            echo "Potential private Tailscale address or domain" >&2
+            echo "Possible private Tailscale address or domain" >&2
             status=1
           fi
           exit "$status"
@@ -94,7 +104,7 @@ jobs:
           "$(go env GOPATH)/bin/govulncheck" ./...
 
       - name: Secret scan
-        uses: gitleaks/gitleaks-action@v2.3.9
+        uses: gitleaks/gitleaks-action@v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -111,9 +121,9 @@ jobs:
             ext=""
             if [ "$os" = "windows" ]; then ext=".exe"; fi
             out="dist/homelab-evidence-mcp_${os}_${arch}${ext}"
-            echo "Building $out"
+            echo "Build output: $out"
             GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath \
-              -ldflags="-s -w -X ${version_path}=0.1.0" \
+              -ldflags="-s -w -X ${version_path}=0.1.2" \
               -o "$out" ./cmd/homelab-evidence-mcp
           done
           ls -la dist

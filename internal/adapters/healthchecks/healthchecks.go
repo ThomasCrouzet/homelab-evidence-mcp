@@ -1,4 +1,4 @@
-// Package healthchecks implements the read-only Management API v3 client.
+// Package healthchecks contains the read-only Management API v3 client.
 package healthchecks
 
 import (
@@ -15,11 +15,11 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 )
 
-// Client uses a read-only key in the configured header.
+// Client uses a read-only key in the header from the configuration.
 type Client struct {
 	HTTP     *httpx.LockedClient
 	DestName string
-	Headers  map[string]string // holds authentication; never log values
+	Headers  map[string]string // holds authentication. Do not log the values.
 	Redact   *redaction.Engine
 	Now      func() time.Time
 }
@@ -34,14 +34,14 @@ type check struct {
 	LastPing string `json:"last_ping"`
 	NextPing string `json:"next_ping"`
 	UUID     string `json:"uuid"` // used only for internal filtering
-	// Fields intentionally omitted: ping_url, update_url, pause_url, and badge_url.
+	// The client omits ping_url, update_url, pause_url, and badge_url.
 }
 
 type listResponse struct {
 	Checks *[]check `json:"checks"`
 }
 
-// Filter selects checks associated with a service.
+// Filter selects checks for a service.
 type Filter struct {
 	Name   string
 	Tags   []string
@@ -49,7 +49,7 @@ type Filter struct {
 	Status string // optional status filter
 }
 
-// FilterFromRef builds a filter from configuration.
+// FilterFromRef makes a filter from the configuration.
 func FilterFromRef(ref *config.HealthchecksRef) Filter {
 	if ref == nil {
 		return Filter{}
@@ -57,7 +57,7 @@ func FilterFromRef(ref *config.HealthchecksRef) Filter {
 	return Filter{Name: ref.CheckName, Tags: ref.CheckTags, UUID: ref.CheckUUID, Status: ref.StatusFilter}
 }
 
-// Status returns the current state of matching checks.
+// Status gives the current state of the selected checks.
 func (c *Client) Status(ctx context.Context, serviceID string, f Filter) ([]evidence.Item, error) {
 	retrievedAt := c.now()
 	checks, observedAt, err := c.list(ctx, retrievedAt)
@@ -72,7 +72,7 @@ func (c *Client) Status(ctx context.Context, serviceID string, f Filter) ([]evid
 	return out, nil
 }
 
-// FailedInWindow returns checks that are currently down, grace, or paused.
+// FailedInWindow gives checks with a current state of down, grace, or paused.
 // The list route cannot prove a past incident or recovery.
 func (c *Client) FailedInWindow(ctx context.Context, serviceID string, f Filter, start, end time.Time) ([]evidence.Item, error) {
 	retrievedAt := c.now()
@@ -86,8 +86,8 @@ func (c *Client) FailedInWindow(ctx context.Context, serviceID string, f Filter,
 	} else {
 		matched = checks
 	}
-	// Tolerate collection time slightly past an end bound computed just before
-	// the network call, without projecting current state into a historical window.
+	// Allow collection time to be at most 30 seconds after the end time that the caller set before the request.
+	// Do not use the current state as proof of a historical state.
 	if observedAt.Before(start) || observedAt.After(end.Add(30*time.Second)) {
 		return []evidence.Item{}, nil
 	}
@@ -110,9 +110,9 @@ func (c *Client) list(ctx context.Context, fallback time.Time) ([]check, time.Ti
 	if len(c.Headers) == 0 {
 		return nil, time.Time{}, fmt.Errorf("healthchecks token not configured")
 	}
-	// Management API v3 exposes the list at GET /api/v3/checks/.
+	// Management API v3 gives access to the list at GET /api/v3/checks/.
 	path := "/api/v3/checks/"
-	// LockedClient.Get closes the body before returning the response.
+	// LockedClient.Get closes the body before it gives the response.
 	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
 	if err != nil {
 		return nil, time.Time{}, err
@@ -128,7 +128,7 @@ func (c *Client) list(ctx context.Context, fallback time.Time) ([]check, time.Ti
 	if err := json.Unmarshal(body, &lr); err == nil && lr.Checks != nil {
 		return *lr.Checks, observedAt, nil
 	}
-	// Some deployments return a bare array.
+	// Some deployments give a JSON array without a wrapper.
 	var arr []check
 	if err := json.Unmarshal(body, &arr); err != nil || arr == nil {
 		return nil, time.Time{}, fmt.Errorf("healthchecks decode: expected checks array")
@@ -151,7 +151,7 @@ func filterChecks(checks []check, f Filter) []check {
 		if f.Status != "" && !strings.EqualFold(strings.TrimSpace(ch.Status), f.Status) {
 			continue
 		}
-		// An empty filter matches nothing; global failed_crons handles that case.
+		// An empty filter matches nothing. The global failed_crons path processes this case.
 		if f.UUID == "" && f.Name == "" && len(f.Tags) == 0 && f.Status == "" {
 			continue
 		}
@@ -221,7 +221,7 @@ func (c *Client) itemFrom(serviceID string, ch check, observedAt, retrievedAt ti
 		}
 		attrs["tags"] = tags
 	}
-	// Never expose the UUID or ping URLs.
+	// Do not give the UUID or ping URLs.
 
 	if lp, ok := parseTS(ch.LastPing); ok {
 		attrs["last_ping"] = lp.Format(time.RFC3339)
