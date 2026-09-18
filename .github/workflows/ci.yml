@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Get the full Git history.
           # This gives gitleaks the parent commits for pull request scans.
