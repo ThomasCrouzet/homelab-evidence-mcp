@@ -1,5 +1,5 @@
-// Package ntfy implements read-only history for an ntfy topic.
-// The compatible route returns NDJSON or a JSON array.
+// Package ntfy contains read-only history for an ntfy topic.
+// The compatible route gives NDJSON or a JSON array.
 // Topics come only from configuration.
 package ntfy
 
@@ -21,7 +21,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 )
 
-// Client queries history for a predefined topic.
+// Client gets history for a topic from the configuration.
 type Client struct {
 	HTTP         *httpx.LockedClient
 	DestName     string
@@ -41,7 +41,7 @@ type message struct {
 	Tags     []string `json:"tags"`
 }
 
-// History returns notifications between start and end, bounded by limit.
+// History gives notifications between start and end with the specified limit.
 func (c *Client) History(ctx context.Context, serviceID, topic string, start, end time.Time, limit int) ([]evidence.Item, bool, error) {
 	now := c.now()
 	if topic == "" {
@@ -53,12 +53,12 @@ func (c *Client) History(ctx context.Context, serviceID, topic string, start, en
 	if !start.Before(end) {
 		return nil, false, fmt.Errorf("invalid time window")
 	}
-	// poll=1 returns retained messages without opening a stream.
+	// poll=1 gives messages from storage and does not open a stream.
 	q := url.Values{}
 	q.Set("poll", "1")
 	q.Set("since", strconv.FormatInt(start.Unix(), 10))
 	path := "/" + url.PathEscape(topic) + "/json?" + q.Encode()
-	// LockedClient.Get closes the body before returning the response.
+	// LockedClient.Get closes the body before it gives the response.
 	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
 	if err != nil {
 		return nil, false, err
@@ -133,7 +133,7 @@ func decodeMessages(body []byte) ([]message, error) {
 	// NDJSON stream.
 	var out []message
 	sc := bufio.NewScanner(bytes.NewReader(body))
-	// Raise the scanner limit while remaining bounded by the HTTP body.
+	// Increase the scanner limit. The HTTP body limit sets the maximum input size.
 	buf := make([]byte, 0, 64*1024)
 	sc.Buffer(buf, 1024*1024)
 	for sc.Scan() {

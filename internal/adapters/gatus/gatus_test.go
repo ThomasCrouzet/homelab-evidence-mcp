@@ -51,7 +51,7 @@ func TestStatus_LatestByTimestampNotOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	if item.Severity != evidence.SeverityError {
-		t.Fatalf("want error latest, got %s attrs=%v", item.Severity, item.Attributes)
+		t.Fatalf("want error with maximum timestamp, got %s attrs=%v", item.Severity, item.Attributes)
 	}
 	if item.Attributes["http_status"] != 503 {
 		t.Fatalf("%v", item.Attributes)
@@ -173,7 +173,7 @@ func TestEvidenceInWindow_MissingEndpointIsAbsence(t *testing.T) {
 		t.Fatalf("items=%d truncated=%v", len(items), truncated)
 	}
 	if items[0].Freshness != evidence.FreshnessMissing || items[0].Attributes["found"] != false {
-		t.Fatalf("want explicit absence, got %+v", items[0])
+		t.Fatalf("want a missing item, got %+v", items[0])
 	}
 }
 
@@ -251,6 +251,6 @@ func TestStatus_RedactsAllTextAttributes(t *testing.T) {
 		t.Fatalf("attribute not redacted: %s", raw)
 	}
 	if item.RedactionsApplied == 0 {
-		t.Fatal("no redaction reported")
+		t.Fatal("redaction data is missing")
 	}
 }

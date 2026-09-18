@@ -1,4 +1,4 @@
-// Package correlation builds deterministic timelines without claiming causality.
+// Package correlation makes timelines with stable evidence order. It does not identify causal relations.
 package correlation
 
 import (
@@ -9,7 +9,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/evidence"
 )
 
-// BuildTimeline sorts evidence and produces a strictly factual summary.
+// BuildTimeline puts evidence in order and gives a summary that contains facts only.
 func BuildTimeline(serviceID string, start, end time.Time, items []evidence.Item, sources []evidence.SourceOutcome, maxItems int) evidence.Bundle {
 	now := time.Now().UTC()
 	cp := append([]evidence.Item(nil), items...)
@@ -67,7 +67,7 @@ func factualSummary(serviceID string, start, end time.Time, items []evidence.Ite
 	var b strings.Builder
 	fmt.Fprintf(&b, "Service %s: %d evidence item(s) between %s and %s UTC.",
 		serviceID, len(items), start.UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339))
-	fmt.Fprintf(&b, " Sources ok=%d failed=%d.", sourcesOK, sourcesFailed)
+	fmt.Fprintf(&b, " Sources with status ok=%d. Sources with status error or timeout=%d.", sourcesOK, sourcesFailed)
 
 	var gatusFail, dockerBad, logErr, cronDown, beszelBad, ntfyBad int
 	for _, it := range items {
@@ -99,12 +99,12 @@ func factualSummary(serviceID string, start, end time.Time, items []evidence.Ite
 		}
 	}
 	if gatusFail+dockerBad+logErr+cronDown+beszelBad+ntfyBad == 0 {
-		b.WriteString(" No error-severity items in the collected set.")
-		b.WriteString(" Absence of evidence is not evidence of absence.")
-		b.WriteString(" Timeline is ordered by observed_at; correlation does not establish root cause.")
+		b.WriteString(" The collected set has no error-severity items.")
+		b.WriteString(" If there is no evidence, this does not prove that no event occurred.")
+		b.WriteString(" The timeline uses observed_at order. Correlation does not identify a root cause.")
 		return b.String()
 	}
-	b.WriteString(" Counts by source with warning/error severity:")
+	b.WriteString(" These are the counts by source with warning/error severity:")
 	if gatusFail > 0 {
 		fmt.Fprintf(&b, " gatus=%d", gatusFail)
 	}
@@ -124,7 +124,7 @@ func factualSummary(serviceID string, start, end time.Time, items []evidence.Ite
 		fmt.Fprintf(&b, " ntfy=%d", ntfyBad)
 	}
 	b.WriteString(".")
-	b.WriteString(" Timeline is ordered by observed_at; correlation does not establish root cause.")
+	b.WriteString(" The timeline uses observed_at order. Correlation does not identify a root cause.")
 	return b.String()
 }
 

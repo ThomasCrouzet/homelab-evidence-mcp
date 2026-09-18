@@ -1,4 +1,4 @@
-// Package gatus implements the read-only Gatus adapter.
+// Package gatus contains the read-only Gatus adapter.
 package gatus
 
 import (
@@ -15,7 +15,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 )
 
-// Client queries the Gatus status route and compatible variants.
+// Client gets data from the Gatus status route and compatible variants.
 type Client struct {
 	HTTP     *httpx.LockedClient
 	DestName string
@@ -40,7 +40,7 @@ type endpointResult struct {
 	Errors    []string     `json:"errors"`
 }
 
-// flexDuration accepts Gatus nanosecond numbers and string durations.
+// flexDuration accepts Gatus nanosecond numbers and duration strings.
 type flexDuration string
 
 func (d *flexDuration) UnmarshalJSON(raw []byte) error {
@@ -68,7 +68,7 @@ func (d *flexDuration) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-// Status fetches the latest observation for endpointKey.
+// Status gets the observation with the maximum timestamp for endpointKey.
 func (c *Client) Status(ctx context.Context, serviceID, endpointKey string) (evidence.Item, error) {
 	retrievedAt := c.now()
 	list, snapshotAt, err := c.fetchAll(ctx, retrievedAt)
@@ -101,7 +101,7 @@ func (c *Client) missingItem(serviceID, endpointKey string, observedAt, retrieve
 	}
 }
 
-// EvidenceInWindow returns results between start and end.
+// EvidenceInWindow gives results between start and end.
 func (c *Client) EvidenceInWindow(ctx context.Context, serviceID, endpointKey string, start, end time.Time, max int) ([]evidence.Item, bool, error) {
 	retrievedAt := c.now()
 	list, snapshotAt, err := c.fetchAll(ctx, retrievedAt)
@@ -119,7 +119,7 @@ func (c *Client) EvidenceInWindow(ctx context.Context, serviceID, endpointKey st
 		max = 20
 	}
 	var items []evidence.Item
-	// Gatus may return unsorted history; order by timestamp.
+	// Put results in timestamp order because Gatus can give history out of order.
 	type pair struct {
 		r  endpointResult
 		ts time.Time
@@ -156,7 +156,7 @@ func (c *Client) fetchAll(ctx context.Context, fallback time.Time) ([]endpointSt
 	paths := []string{"/api/v1/endpoints/statuses", "/api/v1/endpoints/statuses/"}
 	var lastErr error
 	for _, p := range paths {
-		// LockedClient.Get closes the body before returning the response.
+		// LockedClient.Get closes the body before it gives the response.
 		resp, body, err := c.HTTP.Get(ctx, c.DestName, p, c.Headers) //nolint:bodyclose
 		if err != nil {
 			lastErr = err
@@ -190,7 +190,7 @@ func findEndpoint(list []endpointStatus, key string) (endpointStatus, bool) {
 		if ep.Key == key {
 			return ep, true
 		}
-		// Also accept the name or group_name composition used by some versions.
+		// Some versions use a name or group_name composition. The adapter can use these compositions.
 		if ep.Name == key {
 			return ep, true
 		}
@@ -233,8 +233,8 @@ func (c *Client) itemFromEndpoint(serviceID string, ep endpointStatus, snapshotA
 			Freshness:         evidence.FreshnessUnknown,
 		}
 	}
-	// Pick the latest valid timestamp, without relying on array order.
-	// Without a valid date, keep the first result at collection time.
+	// Select the maximum correct timestamp. Do not use the array order.
+	// Without a correct date, keep the first result at collection time.
 	best := ep.Results[0]
 	bestTS := snapshotAt
 	foundValid := false

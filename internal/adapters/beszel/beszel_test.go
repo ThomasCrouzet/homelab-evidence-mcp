@@ -198,6 +198,6 @@ func TestStatus_RedactsAllTextAttributes(t *testing.T) {
 		t.Fatalf("attribute not redacted: %s", raw)
 	}
 	if item.RedactionsApplied == 0 {
-		t.Fatal("no redaction reported")
+		t.Fatal("redaction data is missing")
 	}
 }

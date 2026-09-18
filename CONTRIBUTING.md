@@ -1,17 +1,21 @@
 # Contributing
 
-Thanks for your interest in the project.
-
 ## Rules
 
-- Code, comments, commits, and documentation are written in English.
-- Variable, function, type, and file names stay in English.
+Use these contribution rules:
+
+- Write code, comments, commits, and documentation in English.
+- Keep variable, function, type, and file names in English.
 - Do not add attribution or promotional lines to commit messages.
-- Do not reduce coverage, remove tests, or add convenience `nolint` directives.
-- Do not introduce mutation: start, stop, restart, exec, write, or delete.
-- Any new dependency must be justified in the pull request.
+- Do not decrease coverage, remove tests, or add convenience `nolint`
+  directives.
+- Do not add start, stop, restart, exec, write, or delete operations.
+- The pull request must give the cause for each new dependency.
+- Obey the repository-wide writing rules in [AGENTS.md](AGENTS.md).
 
 ## Setup
+
+Use these commands for setup:
 
 ```bash
 git clone https://github.com/ThomasCrouzet/homelab-evidence-mcp.git
@@ -21,27 +25,39 @@ go test -race ./...
 go run ./demo
 ```
 
-Go 1.25 or later is required.
+Go 1.25 is the minimum version.
+
+Node.js 22 is the minimum version for the Markdown check. `npx` must be
+available. The Go lint check uses golangci-lint 2.12.2. By default, it uses Go
+toolchain 1.25.14. Override `LINT_GOTOOLCHAIN` only when a compatible toolchain
+is necessary.
+
+Use `make lint-docs` to examine Markdown. Use `make lint` to examine Go source.
 
 ## Style
 
-- Apply `gofmt`.
-- Produce actionable errors without including secrets.
-- Prefer small packages under `internal/`.
+Use these code style rules:
+
+- Run `gofmt`.
+- Make sure that error text helps the operator correct the problem.
+- Do not include secrets in error messages.
+- If possible, use small packages in `internal/`.
 - Keep all adapter HTTP access behind `internal/httpx`.
 
 ## Tests
 
-Any adapter change must include contract tests with `httptest`. No standard test
-should depend on a real homelab. Add hostile cases when changing redaction,
+Add contract tests with `httptest` for each adapter change. Do not use a
+homelab for standard tests. Add hostile test cases when you change redaction,
 SSRF handling, or logs.
 
 ## Pull requests
 
-1. Limit each pull request to one coherent change.
-2. Include appropriate tests.
+Use these pull request rules:
+
+1. Limit each pull request to one change with one purpose.
+2. Include applicable tests.
 3. Update documentation if tools, configuration, or the security model change.
 4. Use short, imperative commit messages.
 
-For an unpatched vulnerability, follow [SECURITY.md](SECURITY.md) instead of
-opening a public issue.
+For an unpatched vulnerability, refer to [SECURITY.md](SECURITY.md). Do not open
+a public issue.
