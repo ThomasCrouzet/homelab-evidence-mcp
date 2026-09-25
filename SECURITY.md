@@ -83,6 +83,8 @@ The server and the operator use these controls for secrets:
   They use the logical source name.
 - Built-in redaction includes passwords, bearer tokens, cookies, usual keys,
   email addresses, and private-key headers. It also includes other secret forms.
+- Configured authentication tokens are exact redaction rules, including values
+  echoed without a label in source responses and cached evidence.
 - The server redacts source identifiers, text attributes, and summaries. It
   uses text size limits for all of them.
 - Source response cache keys use a process-local HMAC fingerprint for all
