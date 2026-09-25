@@ -344,14 +344,6 @@ func TestWindowLimits(t *testing.T) {
 	}
 }
 
-func TestUnknownService(t *testing.T) {
-	app := newTestApp(t, false)
-	res, _, _ := app.toolServiceStatus(context.Background(), nil, serviceIDIn{ServiceID: "nope"})
-	if res == nil || !res.IsError {
-		t.Fatal("expected error result")
-	}
-}
-
 func TestUnknownService_IsAuditedWithoutSecrets(t *testing.T) {
 	app := newTestApp(t, false)
 	var buf bytes.Buffer

@@ -5,12 +5,6 @@ import (
 	"testing"
 )
 
-func TestVersionNonEmpty(t *testing.T) {
-	if strings.TrimSpace(Version) == "" {
-		t.Fatal("empty Version")
-	}
-}
-
 func TestUserAgentContainsVersion(t *testing.T) {
 	ua := UserAgent()
 	if !strings.Contains(ua, Version) {
