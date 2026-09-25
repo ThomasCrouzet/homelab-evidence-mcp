@@ -9,7 +9,6 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/evidence"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 )
 
@@ -142,19 +141,6 @@ func TestSanitizeErr_UsesRedaction(t *testing.T) {
 	msg3 := sanitizeErr(errString(strings.Repeat("é", 301)), nil)
 	if !utf8.ValidString(msg3) || utf8.RuneCountInString(msg3) != 300 {
 		t.Fatalf("invalid UTF-8 truncation: %q", msg3)
-	}
-}
-
-func TestKeepNewest_UsedByTools(t *testing.T) {
-	t0 := time.Unix(100, 0).UTC()
-	items := []evidence.Item{
-		{ID: "1", ObservedAt: t0},
-		{ID: "2", ObservedAt: t0.Add(time.Second)},
-		{ID: "3", ObservedAt: t0.Add(2 * time.Second)},
-	}
-	got, truncated := evidence.KeepNewest(items, 2)
-	if len(got) != 2 || !truncated || got[0].ID != "2" || got[1].ID != "3" {
-		t.Fatalf("len=%d truncated=%v got=%+v", len(got), truncated, got)
 	}
 }
 

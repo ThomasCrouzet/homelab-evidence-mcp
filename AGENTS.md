@@ -47,3 +47,32 @@ For source changes, use the applicable checks from the Makefile and CI:
 `make lint`, `make test`, and `make build`.
 Give changes, check results, and exceptions in the conversation.
 Keep audit and review reports outside the repository. Do not commit them.
+
+## Testing policy
+
+- Never write unit tests after you write code.
+- Highly prefer E2E tests as the sole testing mechanism.
+- Use E2E tests to verify complex features through observable results.
+- At the end of each E2E run, produce a verifiable and repeatable artifact.
+- Record the command, source revision, environment, fixtures, and results
+  with the artifact.
+- Include the working diff identity when the source has uncommitted changes.
+- Examine assertions, fixtures, mocks, and skips before removing a test.
+- Do not treat disabled E2E tests or simulated boundaries as equivalent coverage.
+- If isolation is necessary, first document all identified failure modes.
+  Then write the tests and implementation.
+- Keep an isolated test only for a concrete failure that E2E tests cannot detect.
+- Do not add tests for coverage percentages, type contracts, dependency behavior,
+  or mocked call sequences alone.
+
+Run local checks with `GOMAXPROCS=2 GOFLAGS=-p=1 make test`.
+`go test ./internal/mcpserver -run TestToolsViaMCPSession -count=1` uses
+in-memory MCP and local HTTP fixtures.
+It does not test the executable's stdio transport or live upstream services.
+`go run ./demo` also checks fixture responses through in-memory MCP.
+The demo checks redaction, instruction markers, and GET-only upstream requests.
+Keep isolated checks for source decoding, freshness, truncation, budgets,
+cache isolation, configuration, redaction, and destination restrictions.
+The suite has no persistent E2E artifact directory.
+Save the test log and fixture references outside the repository with the
+required run metadata.
