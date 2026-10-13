@@ -1,9 +1,9 @@
 module github.com/ThomasCrouzet/homelab-evidence-mcp
 
-go 1.25.0
+go 1.26.9
 
 require (
-	github.com/modelcontextprotocol/go-sdk v1.7.0
+	github.com/modelcontextprotocol/go-sdk v1.8.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

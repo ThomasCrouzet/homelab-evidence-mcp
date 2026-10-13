@@ -2,7 +2,7 @@
 
 VERSION ?= 0.1.2
 BINARY ?= bin/homelab-evidence-mcp
-LINT_GOTOOLCHAIN ?= go1.25.14
+LINT_GOTOOLCHAIN ?= go1.26.9
 LDFLAGS := -s -w -X github.com/ThomasCrouzet/homelab-evidence-mcp/internal/version.Version=$(VERSION)
 
 build:
