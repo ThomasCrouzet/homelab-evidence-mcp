@@ -152,7 +152,7 @@ func (c *Client) EvidenceInWindow(ctx context.Context, serviceID, endpointKey st
 }
 
 func (c *Client) fetchAll(ctx context.Context, fallback time.Time) ([]endpointStatus, time.Time, error) {
-	// Try the primary route, then the variant only after a 404.
+	// Try the primary route, then the variant after a 404 or client error.
 	paths := []string{"/api/v1/endpoints/statuses", "/api/v1/endpoints/statuses/"}
 	var lastErr error
 	for _, p := range paths {

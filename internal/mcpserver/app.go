@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -75,7 +76,25 @@ func NewApp(cfg *config.Config, log *slog.Logger, aud *audit.Logger) (*App, erro
 	if aud == nil {
 		aud = audit.New(os.Stderr)
 	}
-	rules := make([]redaction.Rule, 0, len(cfg.Redact))
+	tokens := make(map[string]string, len(cfg.Sources))
+	rules := make([]redaction.Rule, 0, len(cfg.Redact)+len(cfg.Sources))
+	for name, src := range cfg.Sources {
+		token, err := config.ResolveToken(src)
+		if err != nil {
+			return nil, fmt.Errorf("source %s token: %w", name, err)
+		}
+		if src.Kind == "healthchecks" && token == "" {
+			return nil, fmt.Errorf("source %s: healthchecks token required", name)
+		}
+		tokens[name] = token
+		if token != "" {
+			rules = append(rules, redaction.Rule{Exact: token})
+			if scheme, value, ok := strings.Cut(token, " "); ok &&
+				(strings.EqualFold(scheme, "bearer") || strings.EqualFold(scheme, "basic")) {
+				rules = append(rules, redaction.Rule{Exact: strings.TrimSpace(value)})
+			}
+		}
+	}
 	for _, r := range cfg.Redact {
 		rules = append(rules, redaction.Rule{Exact: r.Exact, Regex: r.Regex})
 	}
@@ -115,14 +134,7 @@ func NewApp(cfg *config.Config, log *slog.Logger, aud *audit.Logger) (*App, erro
 		if err := hc.RegisterDestination(name, src.BaseURL); err != nil {
 			return nil, fmt.Errorf("source %s: %w", name, err)
 		}
-		tok, err := config.ResolveToken(src)
-		if err != nil {
-			return nil, fmt.Errorf("source %s token: %w", name, err)
-		}
-		if src.Kind == "healthchecks" && tok == "" {
-			return nil, fmt.Errorf("source %s: healthchecks token required", name)
-		}
-		headers := config.AuthHeaders(src, tok)
+		headers := config.AuthHeaders(src, tokens[name])
 		switch src.Kind {
 		case "gatus":
 			app.gatus[name] = &gatus.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng}

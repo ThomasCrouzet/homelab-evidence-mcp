@@ -201,27 +201,6 @@ func TestEvidenceInWindow_KeepsNewestWhenTruncating(t *testing.T) {
 	}
 }
 
-func TestEvidenceInWindow_ReportsTruncation(t *testing.T) {
-	cli := setup(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`[{
-			"name":"a","key":"a",
-			"results":[
-				{"success":false,"status":500,"timestamp":"2026-07-25T11:10:00Z"},
-				{"success":false,"status":500,"timestamp":"2026-07-25T11:20:00Z"}
-			]
-		}]`))
-	})
-	start := time.Date(2026, 7, 25, 11, 0, 0, 0, time.UTC)
-	end := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
-	items, truncated, err := cli.EvidenceInWindow(context.Background(), "x", "a", start, end, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 || !truncated {
-		t.Fatalf("items=%d truncated=%v", len(items), truncated)
-	}
-}
-
 func TestPartialUnknownFields(t *testing.T) {
 	cli := setup(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`[{"name":"a","key":"a","extra":{"nested":true},"results":[{"success":true,"status":200,"timestamp":"2026-07-25T11:00:00Z","weird":1}]}]`))

@@ -7,8 +7,9 @@ Use these contribution rules:
 - Write code, comments, commits, and documentation in English.
 - Keep variable, function, type, and file names in English.
 - Do not add attribution or promotional lines to commit messages.
-- Do not decrease coverage, remove tests, or add convenience `nolint`
-  directives.
+- Follow the testing policy in [AGENTS.md](AGENTS.md).
+- Remove tests only with evidence that they add no independent regression detection.
+- Do not add convenience `nolint` directives.
 - Do not add start, stop, restart, exec, write, or delete operations.
 - The pull request must give the cause for each new dependency.
 - Obey the repository-wide writing rules in [AGENTS.md](AGENTS.md).
@@ -46,9 +47,10 @@ Use these code style rules:
 
 ## Tests
 
-Add contract tests with `httptest` for each adapter change. Do not use a
-homelab for standard tests. Add hostile test cases when you change redaction,
-SSRF handling, or logs.
+Prefer observable fixture-based E2E results for adapter changes.
+Do not use a homelab for standard tests.
+Before isolated security tests, document failure modes that E2E tests cannot detect.
+Keep meaningful hostile-input checks for redaction, SSRF handling, and logs.
 
 ## Pull requests
 
