@@ -26,11 +26,11 @@ go test -race ./...
 go run ./demo
 ```
 
-Go 1.25 is the minimum version.
+Go 1.26.9 is the minimum version.
 
 Node.js 22 is the minimum version for the Markdown check. `npx` must be
 available. The Go lint check uses golangci-lint 2.12.2. By default, it uses Go
-toolchain 1.25.14. Override `LINT_GOTOOLCHAIN` only when a compatible toolchain
+toolchain 1.26.9. Override `LINT_GOTOOLCHAIN` only when a compatible toolchain
 is necessary.
 
 Use `make lint-docs` to examine Markdown. Use `make lint` to examine Go source.

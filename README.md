@@ -48,7 +48,7 @@ plane. It does not start containers again or identify root causes.
 
 ## Installation
 
-Prerequisite: Go 1.25 is the minimum version.
+Prerequisite: Go 1.26.9 is the minimum version.
 
 ```bash
 go install github.com/ThomasCrouzet/homelab-evidence-mcp/cmd/homelab-evidence-mcp@latest
