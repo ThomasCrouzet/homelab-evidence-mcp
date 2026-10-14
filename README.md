@@ -3,48 +3,16 @@
 [![CI](https://github.com/ThomasCrouzet/homelab-evidence-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/ThomasCrouzet/homelab-evidence-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-This local MCP server uses **stdio** transport. It collects incident evidence
-from a homelab. The server is a static Go binary. It has no mutation operations.
+Collect **read-only incident evidence** from six homelab sources through MCP.
+One Go binary uses **stdio** and joins source identities through a configured
+`service_id`.
 
-## Why
+![Six GET-only source adapters feed a service registry and a redacted, timestamped evidence timeline.](docs/diagrams/evidence-flow.svg)
 
-When a service has a failure, each source contains different signals:
-
-- Gatus gives an error.
-- Docker shows a container in the `restarting` state.
-- Loki contains a timeout from some moments before the failure.
-- Healthchecks gives a scheduled job failure.
-
-Each source tool gives data from one source. The tools do not use the same
-service identities, evidence formats, or timelines. This project correlates
-the data. It does not identify a cause.
-
-## Principles
-
-The project uses these principles:
-
-1. **Canonical service registry**: A `service_id` connects Gatus, Docker, Loki,
-   Healthchecks, Beszel, and ntfy identities.
-2. **Common evidence model**: The model adds a source and two timestamps to
-   each item. It also redacts data and uses limits. It shows truncation.
-3. **Deterministic correlation**: The timeline presents facts. It does not identify
-   a root cause.
-4. **Read-only operation**: The server sends only HTTP `GET` requests.
-   Destinations cannot change after startup.
-
-Short example:
-
-```text
-02:12 Loki  upstream timeout [REDACTED]
-02:13 Docker container media is restarting
-02:14 Gatus media/app failure status=503
-02:15 Healthchecks "media-cron" is down
-
-The timeline uses observed_at order. Correlation does not identify a root cause.
-```
-
-This server is not a dashboard, an HTTP proxy for general use, or a control
-plane. It does not start containers again or identify root causes.
+The server orders evidence by observation time. Each item includes its source,
+timestamps, freshness, redaction count, and truncation state.
+Correlation presents facts; it does not establish a root cause.
+Destinations remain fixed after startup, and every upstream request uses HTTP `GET`.
 
 ## Installation
 
@@ -63,25 +31,21 @@ make build
 
 ## Quick start
 
-Do these steps:
-
 1. Copy `config.example.yaml` to a directory that is not in the repository.
-2. Make sure that only its owner can access the file. On Unix, use
-   `chmod 600 /path/config.yaml`. On Windows, use a user-only ACL.
-3. Add URLs for the internal network and some pilot services.
-4. Set the necessary tokens as environment variables, for example
-   `HEALTHCHECKS_API_TOKEN`.
+2. Restrict access to the owner with `chmod 600 /path/config.yaml`.
+   On Windows, use a user-only ACL.
+3. Configure source URLs and service bindings.
+4. Set each required token through `token_env` or a private `token_file`.
 5. Validate the configuration before you add it to the MCP client.
 
 ```bash
 homelab-evidence-mcp --config /path/config.yaml --validate
 ```
 
-Validation loads tokens from the YAML settings. Destinations cannot change
-after this step. Validation sends no HTTP requests to these destinations.
-Validation gives an error for each unknown YAML key. A `base_url` cannot
-contain query strings, fragments, or userinfo.
-Authentication uses `token_env` or `token_file`.
+Validation resolves token references and checks destination settings.
+It sends no HTTP requests.
+Unknown YAML keys cause an error. A `base_url` cannot contain query strings,
+fragments, or userinfo. For Healthchecks, use a read-only API key.
 
 Registration with an MCP client:
 
@@ -90,17 +54,15 @@ Registration with an MCP client:
   "mcpServers": {
     "homelab-evidence": {
       "command": "/path/homelab-evidence-mcp",
-      "args": ["--config", "/path/config.yaml"],
-      "env": {
-        "HEALTHCHECKS_API_TOKEN": "readonly-key"
-      }
+      "args": ["--config", "/path/config.yaml"]
     }
   }
 }
 ```
 
-The server uses standard output only for the JSON-RPC protocol. It writes logs
-and audit events to standard error. See
+This example uses token files or inherited environment variables.
+The server reserves stdout for JSON-RPC and writes logs and audit events to stderr.
+It can also write a configured rotating audit file. See
 [MCP client configuration](docs/mcp-hosts.md) and the
 [integration example](docs/configuration-example.md).
 
@@ -129,19 +91,13 @@ You can use a path prefix in `base_url`. For example, use
 `https://proxy.example/gatus` for Gatus. The server keeps `/gatus` before each
 Gatus API route.
 
-The source response cache keeps responses to the same requests for a short
-time.
-Set the cache TTL with `limits.source_cache_ttl`. The default is `15s`. A value
-of `0` deactivates the cache.
-
-The cache does not store clear-text authentication values in its keys. A
-process-local HMAC fingerprint identifies each access secret. On a cache hit,
-`observed_at` keeps the initial collection time. The `retrieved_at` field gives
-the time of this read. Thus, freshness shows the age of the snapshot.
+Set the source cache TTL with `limits.source_cache_ttl`.
+The default is `15s`; `0` disables it.
+Cache keys use a process-local HMAC instead of clear-text authentication values.
+Cache hits retain `observed_at`; `retrieved_at` records the new read time.
+Thus, freshness reflects the snapshot's age.
 
 ## MCP tools
-
-The server has these MCP tools:
 
 - `evidence_capabilities` gives the version, active sources, limits, and
   statistics.
@@ -185,9 +141,9 @@ security controls are:
 go run ./demo
 ```
 
-The demo starts test HTTP servers and opens an in-memory MCP session. It
-examines results when sources have errors and examines redaction. It also
-makes sure that the server sends only `GET` requests. A homelab is not necessary.
+The demo uses local HTTP fixtures and an in-memory MCP session.
+It checks source errors, redaction, instruction markers, and GET-only requests.
+It does not start the stdio executable or contact a homelab.
 
 ## Development
 
@@ -202,6 +158,14 @@ make build
 
 CI builds Linux, macOS, and Windows binaries. The primary targets are headless
 Linux and macOS systems.
+
+## Documentation
+
+- [Configuration example](docs/configuration-example.md) and [YAML template](config.example.yaml)
+- [MCP clients](docs/mcp-hosts.md)
+- [Incident playbook](docs/playbook.md)
+- [Evidence model](docs/evidence-model.md) and [API compatibility](docs/api-compatibility.md)
+- [Contributing](CONTRIBUTING.md) and [Changelog](CHANGELOG.md)
 
 ## License
 
