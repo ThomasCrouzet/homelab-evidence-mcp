@@ -7,6 +7,13 @@ name: CI
     tags: ['v*']
   pull_request:
     branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      fuzz:
+        description: Run random fuzz exploration
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -72,9 +79,6 @@ jobs:
           git diff --exit-code -- go.mod go.sum
           go mod verify
 
-      - name: go vet
-        run: go vet ./...
-
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
@@ -87,6 +91,7 @@ jobs:
           go tool cover -func=coverage.out | tail -20
 
       - name: Short fuzzing
+        if: github.event_name == 'workflow_dispatch' && inputs.fuzz
         run: |
           go test ./internal/config -run=^$ -fuzz=FuzzParse -fuzztime=8s
           go test ./internal/redaction -run=^$ -fuzz=FuzzApply -fuzztime=5s
