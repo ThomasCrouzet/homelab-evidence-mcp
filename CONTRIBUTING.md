@@ -11,6 +11,7 @@ Use these contribution rules:
 - Remove tests only with evidence that they add no independent regression detection.
 - Do not add convenience `nolint` directives.
 - Do not add start, stop, restart, exec, write, or delete operations.
+- Do not upload CI reports or security scan results as GitHub Actions artifacts.
 - The pull request must give the cause for each new dependency.
 - Obey the repository-wide writing rules in [AGENTS.md](AGENTS.md).
 
