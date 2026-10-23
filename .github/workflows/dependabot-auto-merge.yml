@@ -95,8 +95,8 @@ jobs:
         run: |
           set -euo pipefail
           base_encoded="$(jq -rn --arg value "$BASE_REF" '$value | @uri')"
-          repository="$(python3 "$JOB_TEMP/github_api.py" GET "/repos/$REPOSITORY")"
-          test "$(jq -r '.allow_auto_merge' <<<"$repository")" = "true"
+          repository_json="$(python3 "$JOB_TEMP/github_api.py" GET "/repos/$REPOSITORY")"
+          test "$(jq -r '.allow_auto_merge' <<<"$repository_json")" = "true"
 
           rules_file="$JOB_TEMP/rules.json"
           python3 "$JOB_TEMP/github_api.py" GET \

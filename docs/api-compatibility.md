@@ -1,7 +1,9 @@
 # API compatibility
 
-Project support is only for data structures in `httptest` tests. Other
-versions can be compatible without project support.
+Project support covers the data structures in local `httptest` fixtures.
+The executable E2E suite connects the real stdio binary to all six adapters.
+It uses local fixtures and does not contact live upstream services.
+Other versions can be compatible without project support.
 
 The adapter gives an error when a JSON collection is `null`. It also gives an
 error when an envelope does not contain the expected array. For the two cases,
@@ -44,7 +46,10 @@ The Loki adapter has this behavior:
 
 - The adapter sends a `GET /loki/api/v1/query_range` request.
 - The request contains `query`, `start`, `end`, `limit`, and
-  `direction=forward`.
+  `direction=backward`.
+- The request asks for one more line than the requested limit.
+- The adapter sorts lines chronologically and keeps the newest requested lines.
+- The additional line sets `truncated` when the result reaches the limit.
 - The response contains streams with `[nanosecond_timestamp, line]` pairs.
 - If the response includes a result type, its value must be `streams`.
 - The adapter filters and redacts labels. It uses size limits for the labels.
@@ -74,12 +79,18 @@ The Beszel adapter has this behavior:
 
 - The adapter first sends a request to
   `/api/collections/systems/records` (PocketBase).
+- A PocketBase request uses `perPage=200` and a page number.
+- The adapter reads at most 32 consistent pages and 6,400 records.
+- Incomplete, changing, or excessive pagination causes a source error.
 - It then tries `/api/systems`, `/api/beszel/systems`, and the variants with a
   trailing slash.
 - The adapter accepts arrays and `systems`, `items`, or `data` envelopes. It
   also accepts empty arrays and envelopes.
+- An empty PocketBase collection is a complete result.
 - The adapter gets the identity from `name`, `system`, `host`, or `info.h`.
-- The `cpu` and `mem` values are optional. Their value can be zero.
+- The adapter reads current `info.cpu` and `info.mp` values.
+- It also reads the legacy top-level `cpu` and `mem` values.
+- CPU and memory values are optional. Their value can be zero.
 - The response contains only a snapshot.
 - A historical window does not include the current snapshot.
 

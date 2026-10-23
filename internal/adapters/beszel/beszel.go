@@ -7,12 +7,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/evidence"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/httpx"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
+)
+
+const (
+	beszelPageSize   = 200
+	maxBeszelPages   = 32
+	maxBeszelRecords = beszelPageSize * maxBeszelPages
 )
 
 // Client gets data from a Beszel-compatible API with GET only.
@@ -33,7 +41,9 @@ type systemRow struct {
 	// Some API variants use these alternative fields.
 	System string `json:"system"`
 	Info   struct {
-		Hostname string `json:"h"`
+		Hostname string   `json:"h"`
+		CPU      *float64 `json:"cpu"`
+		Mem      *float64 `json:"mp"`
 	} `json:"info"`
 }
 
@@ -84,6 +94,17 @@ func (c *Client) fetchSystems(ctx context.Context, fallback time.Time) ([]system
 	}
 	var lastErr error
 	for _, p := range paths {
+		if p == "/api/collections/systems/records" {
+			list, observedAt, tryAlternate, err := c.fetchPocketBaseSystems(ctx, p, fallback)
+			if tryAlternate {
+				lastErr = err
+				continue
+			}
+			if err != nil {
+				return nil, time.Time{}, err
+			}
+			return list, observedAt, nil
+		}
 		// LockedClient.Get closes the body before it gives the response.
 		resp, body, err := c.HTTP.Get(ctx, c.DestName, p, c.Headers) //nolint:bodyclose
 		if err != nil {
@@ -112,28 +133,157 @@ func (c *Client) fetchSystems(ctx context.Context, fallback time.Time) ([]system
 	return nil, time.Time{}, fmt.Errorf("beszel: no systems endpoint available")
 }
 
-func decodeSystems(body []byte) ([]systemRow, error) {
+func (c *Client) fetchPocketBaseSystems(ctx context.Context, path string, fallback time.Time) ([]systemRow, time.Time, bool, error) {
+	var all []systemRow
+	var observedAt time.Time
+	expectedPages := 1
+	expectedTotalItems := 0
+	expectedHasTotalItems := false
+	for pageNumber := 1; pageNumber <= expectedPages; pageNumber++ {
+		query := url.Values{}
+		query.Set("page", strconv.Itoa(pageNumber))
+		query.Set("perPage", strconv.Itoa(beszelPageSize))
+		requestPath := path + "?" + query.Encode()
+		// LockedClient.Get closes the body before it gives the response.
+		resp, body, err := c.HTTP.Get(ctx, c.DestName, requestPath, c.Headers) //nolint:bodyclose
+		if err != nil {
+			return nil, time.Time{}, pageNumber == 1, err
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, time.Time{}, pageNumber == 1, fmt.Errorf("beszel returned 404")
+		}
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return nil, time.Time{}, false, fmt.Errorf("beszel authentication failed")
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, time.Time{}, false, fmt.Errorf("beszel HTTP %d", resp.StatusCode)
+		}
+		if observedAt.IsZero() {
+			observedAt = httpx.CollectionTime(resp, fallback)
+		}
+		result, err := decodeSystemPage(body)
+		if err != nil {
+			return nil, time.Time{}, false, err
+		}
+		if result.HasTotalItems && result.TotalItems > maxBeszelRecords {
+			return nil, time.Time{}, false, fmt.Errorf("beszel collection exceeds %d records", maxBeszelRecords)
+		}
+		if len(result.Items) > maxBeszelRecords-len(all) {
+			return nil, time.Time{}, false, fmt.Errorf("beszel collection exceeds %d records", maxBeszelRecords)
+		}
+		all = append(all, result.Items...)
+		if !result.Paginated {
+			return all, observedAt, false, nil
+		}
+		if result.Page < 1 || result.TotalPages < 1 {
+			return nil, time.Time{}, false, fmt.Errorf("beszel pagination metadata is incomplete")
+		}
+		if pageNumber == 1 {
+			expectedPages = result.TotalPages
+			expectedTotalItems = result.TotalItems
+			expectedHasTotalItems = result.HasTotalItems
+			if expectedPages > maxBeszelPages {
+				return nil, time.Time{}, false, fmt.Errorf("beszel collection exceeds %d pages", maxBeszelPages)
+			}
+		}
+		if result.Page != pageNumber || result.TotalPages != expectedPages ||
+			result.HasTotalItems != expectedHasTotalItems ||
+			(result.HasTotalItems && result.TotalItems != expectedTotalItems) {
+			return nil, time.Time{}, false, fmt.Errorf("beszel pagination changed during collection")
+		}
+	}
+	if expectedHasTotalItems && len(all) != expectedTotalItems {
+		return nil, time.Time{}, false, fmt.Errorf("beszel collection item count does not match totalItems")
+	}
+	return all, observedAt, false, nil
+}
+
+type systemPage struct {
+	Items         []systemRow
+	Page          int
+	TotalItems    int
+	TotalPages    int
+	Paginated     bool
+	HasTotalItems bool
+}
+
+func decodeSystemPage(body []byte) (systemPage, error) {
 	var arr []systemRow
 	if err := json.Unmarshal(body, &arr); err == nil && arr != nil {
-		return arr, nil
+		return systemPage{Items: arr}, nil
 	}
 	var wrap struct {
-		Items   *[]systemRow `json:"items"`
-		Systems *[]systemRow `json:"systems"`
-		Data    *[]systemRow `json:"data"`
+		Items      *[]systemRow `json:"items"`
+		Systems    *[]systemRow `json:"systems"`
+		Data       *[]systemRow `json:"data"`
+		Page       *int         `json:"page"`
+		PerPage    *int         `json:"perPage"`
+		TotalItems *int         `json:"totalItems"`
+		TotalPages *int         `json:"totalPages"`
 	}
 	if err := json.Unmarshal(body, &wrap); err != nil {
-		return nil, fmt.Errorf("beszel decode: invalid JSON")
+		return systemPage{}, fmt.Errorf("beszel decode: invalid JSON")
 	}
 	switch {
 	case wrap.Systems != nil:
-		return *wrap.Systems, nil
-	case wrap.Items != nil:
-		return *wrap.Items, nil
+		return systemPage{Items: *wrap.Systems}, nil
 	case wrap.Data != nil:
-		return *wrap.Data, nil
+		return systemPage{Items: *wrap.Data}, nil
+	case wrap.Items != nil:
+		paginated := wrap.Page != nil || wrap.PerPage != nil || wrap.TotalItems != nil || wrap.TotalPages != nil
+		if !paginated {
+			return systemPage{Items: *wrap.Items}, nil
+		}
+		if wrap.Page == nil || wrap.PerPage == nil || *wrap.Page < 1 || *wrap.PerPage < 1 {
+			return systemPage{}, fmt.Errorf("beszel pagination metadata is incomplete")
+		}
+		if wrap.TotalItems != nil && *wrap.TotalItems < 0 {
+			return systemPage{}, fmt.Errorf("beszel pagination metadata is invalid")
+		}
+		if wrap.TotalPages != nil && *wrap.TotalPages < 0 {
+			return systemPage{}, fmt.Errorf("beszel pagination metadata is invalid")
+		}
+		totalPages := 0
+		switch {
+		case wrap.TotalPages != nil && *wrap.TotalPages > 0:
+			totalPages = *wrap.TotalPages
+		case wrap.TotalPages != nil && *wrap.TotalPages == 0:
+			if wrap.TotalItems == nil || *wrap.TotalItems != 0 || len(*wrap.Items) != 0 {
+				return systemPage{}, fmt.Errorf("beszel pagination metadata is incomplete")
+			}
+			totalPages = 1
+		case wrap.TotalItems != nil:
+			totalPages = *wrap.TotalItems / *wrap.PerPage
+			if *wrap.TotalItems%*wrap.PerPage != 0 {
+				totalPages++
+			}
+			if totalPages == 0 {
+				totalPages = 1
+			}
+		default:
+			return systemPage{}, fmt.Errorf("beszel pagination metadata is incomplete")
+		}
+		if *wrap.Page > totalPages {
+			return systemPage{}, fmt.Errorf("beszel pagination metadata is invalid")
+		}
+		totalItems := 0
+		if wrap.TotalItems != nil {
+			totalItems = *wrap.TotalItems
+			if totalItems < len(*wrap.Items) {
+				return systemPage{}, fmt.Errorf("beszel pagination metadata is invalid")
+			}
+		}
+		return systemPage{
+			Items: *wrap.Items, Page: *wrap.Page, TotalItems: totalItems,
+			TotalPages: totalPages, Paginated: true, HasTotalItems: wrap.TotalItems != nil,
+		}, nil
 	}
-	return nil, fmt.Errorf("beszel decode: empty systems list")
+	return systemPage{}, fmt.Errorf("beszel decode: empty systems list")
+}
+
+func decodeSystems(body []byte) ([]systemRow, error) {
+	result, err := decodeSystemPage(body)
+	return result.Items, err
 }
 
 func findSystem(list []systemRow, want string) (systemRow, bool) {
@@ -187,11 +337,19 @@ func (c *Client) itemFrom(serviceID string, row systemRow, observedAt, retrieved
 		"found":       true,
 		"snapshot":    true,
 	}
-	if row.CPU != nil {
-		attrs["cpu"] = *row.CPU
+	cpu := row.Info.CPU
+	if cpu == nil {
+		cpu = row.CPU
 	}
-	if row.Mem != nil {
-		attrs["mem"] = *row.Mem
+	if cpu != nil {
+		attrs["cpu"] = *cpu
+	}
+	mem := row.Info.Mem
+	if mem == nil {
+		mem = row.Mem
+	}
+	if mem != nil {
+		attrs["mem"] = *mem
 	}
 	sum, summaryRedactions, summaryCut := redaction.ApplyAndTruncate(c.Redact, rawSummary, 512)
 	return evidence.Item{

@@ -2,20 +2,6 @@
 
 These items extend the read-only contract in [SECURITY.md](SECURITY.md).
 
-## P1: Verify executable cancellation
-
-- Component: `cmd/homelab-evidence-mcp`, `internal/mcpserver/collectors.go`.
-- Benefit: prove that cancelled stdio requests release source and tool slots.
-- Completion: a child-process scenario cancels a blocked HTTP fixture.
-  A subsequent tool call completes, and the check retains its transcript.
-
-## P1: Report audit storage failures
-
-- Component: `internal/audit`, `internal/mcpserver/tools.go`.
-- Benefit: make failed or full audit storage visible to the operator.
-- Completion: a failing writer produces a bounded diagnostic without secrets.
-  Healthy tool responses follow a documented failure policy.
-
 ## P2: Bound evidence-cache memory by bytes
 
 - Component: `internal/evidence/cache.go`.

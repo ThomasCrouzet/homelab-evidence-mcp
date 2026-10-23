@@ -66,13 +66,19 @@ Keep audit and review reports outside the repository. Do not commit them.
   or mocked call sequences alone.
 
 Run local checks with `GOMAXPROCS=2 GOFLAGS=-p=1 make test`.
+`make test` runs isolated checks with race detection. It then runs the
+executable stdio E2E suite.
+`make test-e2e` starts the real binary against six local HTTP fixtures.
+It checks all seven MCP tools through stdio.
+The runner saves its log and repeatable metadata outside the repository.
+Set `HEM_E2E_ARTIFACT_DIR` to select the external artifact directory.
+Set `HEM_E2E_BINARY` to the absolute path of a release binary.
 `go test ./internal/mcpserver -run TestToolsViaMCPSession -count=1` uses
 in-memory MCP and local HTTP fixtures.
 It does not test the executable's stdio transport or live upstream services.
 `go run ./demo` also checks fixture responses through in-memory MCP.
 The demo checks redaction, instruction markers, and GET-only upstream requests.
+The executable E2E suite also uses local fixtures. It does not contact live
+upstream services.
 Keep isolated checks for source decoding, freshness, truncation, budgets,
 cache isolation, configuration, redaction, and destination restrictions.
-The suite has no persistent E2E artifact directory.
-Save the test log and fixture references outside the repository with the
-required run metadata.

@@ -22,16 +22,15 @@ Use these commands for setup:
 ```bash
 git clone https://github.com/ThomasCrouzet/homelab-evidence-mcp.git
 cd homelab-evidence-mcp
-go test ./...
-go test -race ./...
+GOMAXPROCS=2 GOFLAGS=-p=1 make test
 go run ./demo
 ```
 
-Go 1.26.9 is the minimum version.
+Go 1.26.10 is the minimum version.
 
 Node.js 22 is the minimum version for the Markdown check. `npx` must be
-available. The Go lint check uses golangci-lint 2.12.2. By default, it uses Go
-toolchain 1.26.9. Override `LINT_GOTOOLCHAIN` only when a compatible toolchain
+available. The Go lint check uses golangci-lint 2.15.0. By default, it uses Go
+toolchain 1.26.10. Override `LINT_GOTOOLCHAIN` only when a compatible toolchain
 is necessary.
 
 Use `make lint-docs` to examine Markdown. Use `make lint` to examine Go source.
@@ -50,6 +49,10 @@ Use these code style rules:
 
 Prefer observable fixture-based E2E results for adapter changes.
 Do not use a homelab for standard tests.
+Use `make test-e2e` to check the real stdio executable and all six adapters.
+The command saves its log and metadata outside the repository.
+Set `HEM_E2E_ARTIFACT_DIR` to select the external artifact directory.
+Set `HEM_E2E_BINARY` to the absolute path of a release binary.
 Before isolated security tests, document failure modes that E2E tests cannot detect.
 Keep meaningful hostile-input checks for redaction, SSRF handling, and logs.
 

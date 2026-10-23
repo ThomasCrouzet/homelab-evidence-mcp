@@ -22,16 +22,23 @@ type Event struct {
 
 // Logger serializes concurrent writes.
 type Logger struct {
-	mu  sync.Mutex
-	out io.Writer
+	mu              sync.Mutex
+	out             io.Writer
+	diagnostic      io.Writer
+	failureReported bool
 }
 
 // New makes a JSONL log to w, or stderr by default.
-func New(w io.Writer) *Logger {
+// The optional writer receives a fixed diagnostic after an audit write failure.
+func New(w io.Writer, diagnostics ...io.Writer) *Logger {
 	if w == nil {
 		w = os.Stderr
 	}
-	return &Logger{out: w}
+	diagnostic := io.Discard
+	if len(diagnostics) > 0 && diagnostics[0] != nil {
+		diagnostic = diagnostics[0]
+	}
+	return &Logger{out: w, diagnostic: diagnostic}
 }
 
 // Log writes an event.
@@ -46,8 +53,17 @@ func (l *Logger) Log(e Event) {
 	if err != nil {
 		return
 	}
+	b = append(b, '\n')
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	_, _ = l.out.Write(b)
-	_, _ = l.out.Write([]byte("\n"))
+	n, err := l.out.Write(b)
+	if err == nil && n == len(b) {
+		l.failureReported = false
+		return
+	}
+	if l.failureReported {
+		return
+	}
+	l.failureReported = true
+	_, _ = io.WriteString(l.diagnostic, "audit write failed\n")
 }

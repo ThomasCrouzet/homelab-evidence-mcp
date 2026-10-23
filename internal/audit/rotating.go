@@ -52,6 +52,9 @@ func (r *RotatingFile) Write(p []byte) (int, error) {
 	if r.f == nil {
 		return 0, io.ErrClosedPipe
 	}
+	if int64(len(p)) > r.maxBytes {
+		return 0, fmt.Errorf("audit record exceeds max_bytes")
+	}
 	if r.size+int64(len(p)) > r.maxBytes {
 		if err := r.rotateLocked(); err != nil {
 			return 0, err

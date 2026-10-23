@@ -110,6 +110,10 @@ func (c *Client) EvidenceInWindow(ctx context.Context, serviceID, endpointKey st
 	}
 	ep, ok := findEndpoint(list, endpointKey)
 	if !ok {
+		// A missing endpoint is a current snapshot, not a historical event.
+		if snapshotAt.Before(start) || snapshotAt.After(end.Add(30*time.Second)) {
+			return []evidence.Item{}, false, nil
+		}
 		item := c.missingItem(serviceID, endpointKey, snapshotAt, retrievedAt)
 		item.WindowStart = timePtr(start)
 		item.WindowEnd = timePtr(end)

@@ -61,17 +61,7 @@ jobs:
           fi
 
       - name: Private address scan
-        shell: bash
-        run: |
-          status=0
-          tailscale_ip='100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.'
-          tailscale_dns='[[:alnum:].-]+\.ts\.net'
-          if git grep -nIE "$tailscale_ip" -- . ':(exclude).git' ||
-            git grep -nIE "$tailscale_dns" -- . ':(exclude).git'; then
-            echo "Possible private Tailscale address or domain" >&2
-            status=1
-          fi
-          exit "$status"
+        run: make lint-private
 
       - name: Dependency consistency
         run: |
@@ -82,12 +72,13 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: v2.15.0
           args: --timeout=5m
 
       - name: Race detection and coverage
         run: |
-          go test ./... -race -coverprofile=coverage.out -covermode=atomic -count=1
+          go test ./... -race -coverprofile=coverage.out -covermode=atomic \
+            -count=1 -skip '^TestStdio'
           go tool cover -func=coverage.out | tail -20
 
       - name: Short fuzzing
@@ -100,9 +91,14 @@ jobs:
       - name: Demo
         run: go run ./demo
 
+      - name: Executable E2E
+        env:
+          HEM_E2E_ARTIFACT_DIR: ${{ runner.temp }}/homelab-evidence-mcp-e2e
+        run: make test-e2e
+
       - name: Go vulnerabilities
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
           "$(go env GOPATH)/bin/govulncheck" ./...
 
       - name: Secret scan
@@ -126,7 +122,7 @@ jobs:
             out="dist/homelab-evidence-mcp_${os}_${arch}${ext}"
             echo "Build output: $out"
             GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath \
-              -ldflags="-s -w -X ${version_path}=0.1.2" \
+              -ldflags="-s -w -X ${version_path}=0.1.3" \
               -o "$out" ./cmd/homelab-evidence-mcp
           done
           ls -la dist

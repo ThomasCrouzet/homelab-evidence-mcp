@@ -40,9 +40,9 @@ func New(rules []Rule) (*Engine, error) {
 	}
 	// Built-in patterns remain active. They do not replace a DLP system.
 	builtins := []string{
-		`(?i)"(password|passwd|pwd|secret|token|api[_-]?key|authorization|cookie|set-cookie)"\s*:\s*"[^"]*"`,
+		`(?i)"(password|passwd|pwd|secret|token|api[_-]?key|authorization|cookie|set-cookie)"\s*:\s*"(?:\\.|[^"\\])*"`,
 		`(?i)(((proxy-)?authorization)\s*[:=]\s*)?(bearer|basic)\s+[a-z0-9\-._~+/]+=*`,
-		`(?i)(password|passwd|pwd|secret|token|api[_-]?key|authorization|bearer)\s*[=:]\s*("[^"]*"|'[^']*'|\S+)`,
+		`(?i)(password|passwd|pwd|secret|token|api[_-]?key|authorization|bearer)\s*[=:]\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\S+)`,
 		`(?i)(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}`,
 		`(?i)sk-[A-Za-z0-9]{20,}`,
 		`(?i)AKIA[0-9A-Z]{16}`,
@@ -60,32 +60,82 @@ func New(rules []Rule) (*Engine, error) {
 	return e, nil
 }
 
-// Apply redacts s and gives the text plus the number of replacements.
+// Apply redacts s and gives the text plus the number of merged redacted regions.
 func (e *Engine) Apply(s string) (string, int) {
 	if e == nil || s == "" {
 		return s, 0
 	}
-	out := s
-	n := 0
+	// Match each rule against the original text. This prevents rules from
+	// processing replacement markers that earlier rules inserted.
+	redacted := make([]bool, len(s))
+	covered := 0
+	mark := func(start, end int) {
+		if start < 0 || end > len(redacted) || start >= end {
+			return
+		}
+		for i := start; i < end; i++ {
+			if !redacted[i] {
+				redacted[i] = true
+				covered++
+			}
+		}
+	}
 	for _, ex := range e.exact {
 		if ex == "" {
 			continue
 		}
-		if strings.Contains(out, ex) {
-			c := strings.Count(out, ex)
-			out = strings.ReplaceAll(out, ex, replacement)
-			n += c
+		for offset := 0; offset <= len(s)-len(ex); {
+			index := strings.Index(s[offset:], ex)
+			if index < 0 {
+				break
+			}
+			start := offset + index
+			end := start + len(ex)
+			mark(start, end)
+			offset = end
+		}
+		if covered == len(s) {
+			break
 		}
 	}
 	for _, re := range e.regexps {
-		locs := re.FindAllStringIndex(out, -1)
-		if len(locs) == 0 {
+		if covered == len(s) {
+			break
+		}
+		// Search the complete input once. Slicing changes the meaning of
+		// anchors and word boundaries at each new slice boundary.
+		for _, loc := range re.FindAllStringIndex(s, -1) {
+			start := loc[0]
+			end := loc[1]
+			if end > start {
+				mark(start, end)
+			}
+		}
+	}
+
+	var out strings.Builder
+	out.Grow(len(s))
+	regions := 0
+	last := 0
+	for i := 0; i < len(redacted); {
+		if !redacted[i] {
+			i++
 			continue
 		}
-		n += len(locs)
-		out = re.ReplaceAllString(out, replacement)
+		start := i
+		for i < len(redacted) && redacted[i] {
+			i++
+		}
+		out.WriteString(s[last:start])
+		out.WriteString(replacement)
+		last = i
+		regions++
 	}
-	return SanitizeControl(out), n
+	if regions == 0 {
+		return SanitizeControl(s), 0
+	}
+	out.WriteString(s[last:])
+	return SanitizeControl(out.String()), regions
 }
 
 // ApplyAndTruncate sanitizes and redacts the text. It then sets a maximum size.

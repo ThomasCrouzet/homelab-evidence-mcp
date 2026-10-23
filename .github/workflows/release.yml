@@ -26,6 +26,12 @@ jobs:
           check-latest: true
           cache-dependency-path: go.sum
 
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
       - name: Validate tag
         shell: bash
         run: |
@@ -41,6 +47,28 @@ jobs:
             exit 1
           fi
 
+          release_version="${GITHUB_REF_NAME#v}"
+          makefile_version="$(awk '/^VERSION \?= / { print $3; exit }' Makefile)"
+          source_version="$(sed -nE 's/^var Version = "([^"]+)"$/\1/p' \
+            internal/version/version.go)"
+          if [ "$release_version" != "$makefile_version" ] || \
+            [ "$release_version" != "$source_version" ]; then
+            echo "Tag, Makefile, and source versions must be equal." >&2
+            exit 1
+          fi
+          if ! awk -v heading="## [$release_version] - " \
+            'index($0, heading) == 1 { found = 1 } END { exit !found }' \
+            CHANGELOG.md; then
+            echo "CHANGELOG.md has no section for $release_version." >&2
+            exit 1
+          fi
+
+      - name: Markdown format
+        run: make lint-docs
+
+      - name: Private address scan
+        run: make lint-private
+
       - name: Go checks
         run: |
           gofmt_output="$(gofmt -l .)"
@@ -49,17 +77,20 @@ jobs:
           git diff --exit-code -- go.mod go.sum
           go mod verify
           go vet ./...
-          go test ./... -race -count=1
+          go test ./... -race -count=1 -skip '^TestStdio'
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: v2.15.0
           args: --timeout=5m
+
+      - name: Demo
+        run: go run ./demo
 
       - name: Go vulnerabilities
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
           "$(go env GOPATH)/bin/govulncheck" ./...
 
       - name: Secret scan
@@ -87,6 +118,12 @@ jobs:
               -o "$out" ./cmd/homelab-evidence-mcp
           done
           ls -la dist
+
+      - name: Release binary E2E
+        env:
+          HEM_E2E_ARTIFACT_DIR: ${{ runner.temp }}/homelab-evidence-mcp-e2e
+          HEM_E2E_BINARY: ${{ github.workspace }}/dist/homelab-evidence-mcp_linux_amd64
+        run: make test-e2e
 
       - name: Third-party licenses
         shell: bash
@@ -147,11 +184,29 @@ jobs:
             THIRD_PARTY_LICENSES.txt \
             > SHA256SUMS
 
+      - name: Prepare release notes
+        id: release-notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_version="${GITHUB_REF_NAME#v}"
+          notes_path="$RUNNER_TEMP/release-notes-${release_version}.md"
+          awk -v heading="## [$release_version] - " '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > "$notes_path"
+          if ! grep -q '[^[:space:]]' "$notes_path"; then
+            echo "The changelog section has no release notes." >&2
+            exit 1
+          fi
+          echo "path=$notes_path" >> "$GITHUB_OUTPUT"
+
       - name: Publish release
         uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/*
-          generate_release_notes: true
+          body_path: ${{ steps.release-notes.outputs.path }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

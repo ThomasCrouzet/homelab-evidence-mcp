@@ -74,7 +74,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if closer != nil {
 		defer func() { _ = closer.Close() }()
 	}
-	aud := audit.New(auditOut)
+	aud := audit.New(auditOut, stderr)
 
 	app, err := mcpserver.NewApp(cfg, log, aud)
 	if err != nil {
