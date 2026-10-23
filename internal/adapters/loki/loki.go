@@ -85,8 +85,11 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 	vals.Set("query", q)
 	vals.Set("start", strconv.FormatInt(opt.Start.UnixNano(), 10))
 	vals.Set("end", strconv.FormatInt(opt.End.UnixNano(), 10))
-	vals.Set("limit", strconv.Itoa(opt.Limit))
-	vals.Set("direction", "forward")
+	// Ask for one additional line so the response can report a reached limit.
+	vals.Set("limit", strconv.Itoa(opt.Limit+1))
+	// Loki applies the limit before this client can sort the response.
+	// Request the newest entries, then return them in chronological order.
+	vals.Set("direction", "backward")
 
 	path := "/loki/api/v1/query_range?" + vals.Encode()
 	// LockedClient.Get closes the body before it gives the response.

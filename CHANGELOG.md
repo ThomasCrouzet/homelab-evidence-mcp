@@ -4,6 +4,41 @@ This file records project changes. Its format uses
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.3] - 2026-10-23
+
+### Fixed
+
+- Get the newest Loki lines before the server applies its result limit.
+- Use an additional Loki line to identify truncated results.
+- Read multiple Beszel PocketBase pages with page and record limits.
+- Read current Beszel CPU and memory fields, including zero values.
+- Keep current missing Gatus endpoints out of historical timelines.
+- Redact ntfy topics, configured tokens, and MCP error audit fields.
+- Remove raw caller identifiers from unknown-service errors.
+- Redact complete JSON credentials that contain escaped quotes.
+- Apply redaction rules to the original text to prevent recursive output growth.
+- Keep complete JSONL audit records together during rotation.
+- Give a bounded diagnostic when an audit write fails.
+- Refuse audit records that exceed the file size limit.
+
+### Changed
+
+- Require Go 1.26.10 and update compatible Go dependencies.
+- Use MCP Go SDK 1.8.0 and current Go lint and vulnerability tools.
+- Align the configuration schema with parser defaults.
+- Use the same Markdown and private-address checks before CI and release builds.
+- Require equal tag, source, Makefile, and changelog versions before publication.
+- Use changelog entries as release notes.
+- Automate routine dependency updates behind required CI checks.
+- Keep test reports outside the repository and GitHub artifacts.
+
+### Added
+
+- Executable stdio checks for all seven MCP tools and six source adapters.
+- Executable checks for cancellation, partial results, redaction, and adapter regressions.
+- Repeatable E2E logs with source, fixture, environment, and binary identities.
+- E2E checks of the release binary before publication.
+
 ## [0.1.2] - 2026-09-06
 
 ### Fixed

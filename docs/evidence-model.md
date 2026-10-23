@@ -17,7 +17,8 @@ Each evidence item has these fields:
 - `severity` is `info`, `warning`, `error`, `critical`, or `unknown`.
 - `attributes` contains permitted fields with a defined structure.
 - `truncated` shows that the server truncated the item.
-- `redactions_applied` gives the number of redaction replacements.
+- `redactions_applied` gives the number of redacted text regions.
+  Overlapping or adjacent rule matches form one region.
 - `freshness` is `live`, `recent`, `stale`, `cached`, `missing`, or `unknown`.
 
 Before emission, the server cleans and redacts source identifiers, summaries,
@@ -49,6 +50,7 @@ Thus, the freshness continues to show the age of the observation.
 only when its collection time is in the requested window. The check allows a
 30-second tolerance for the request duration. Therefore, a historical window
 does not present the current state as historical data.
+The same rule applies when Gatus reports a missing endpoint.
 
 ## Multi-source envelope
 

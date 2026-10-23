@@ -154,12 +154,14 @@ func decodeMessages(body []byte) ([]message, error) {
 }
 
 func (c *Client) itemFrom(serviceID, topic string, m message, ts, now time.Time, maxLineBytes int) evidence.Item {
+	cleanTopic, topicRedactions, topicCut := redaction.ApplyAndTruncate(c.Redact, topic, 64)
 	text := m.Message
 	if m.Title != "" {
 		text = m.Title + ": " + m.Message
 	}
 	text = redaction.SanitizeControl(text)
 	cleaned, rn := c.redact(text)
+	rn += topicRedactions
 	// Free-form notifications are untrusted data, like Loki lines.
 	cleaned = redaction.NeutralizeInstructionLike(cleaned)
 	cleaned, trunc := redaction.TruncateBytes(cleaned, maxLineBytes)
@@ -179,7 +181,7 @@ func (c *Client) itemFrom(serviceID, topic string, m message, ts, now time.Time,
 		trunc = trunc || summaryCut
 	}
 	attrs := map[string]any{
-		"topic":    topic,
+		"topic":    cleanTopic,
 		"priority": m.Priority,
 		"message":  cleaned,
 	}
@@ -201,11 +203,15 @@ func (c *Client) itemFrom(serviceID, topic string, m message, ts, now time.Time,
 	}
 	sid := m.ID
 	if sid == "" {
-		sid = topic
+		sid = cleanTopic
+	} else {
+		var sidRedactions int
+		var sidCut bool
+		sid, sidRedactions, sidCut = redaction.ApplyAndTruncate(c.Redact, sid, 256)
+		rn += sidRedactions
+		trunc = trunc || sidCut
 	}
-	sid, sidRedactions, sidCut := redaction.ApplyAndTruncate(c.Redact, sid, 256)
-	rn += sidRedactions
-	trunc = trunc || sidCut
+	trunc = trunc || topicCut
 	return evidence.Item{
 		ID:                evidence.NewOpaqueID("ev"),
 		ServiceID:         serviceID,

@@ -68,13 +68,17 @@ func (a *App) withBudget(tool string, fn func() (*mcp.CallToolResult, any, error
 }
 
 func (a *App) toolError(tool, serviceID string, err error) (*mcp.CallToolResult, any, error) {
+	message := sanitizeErr(err, a.Redact)
 	if a != nil && a.Audit != nil {
+		serviceID, _, _ = redaction.ApplyAndTruncate(a.Redact, serviceID, 128)
 		a.Audit.Log(audit.Event{
 			Action: "tool", Tool: tool, ServiceID: serviceID, Status: "error",
-			Detail: sanitizeErr(err, a.Redact),
+			Detail: message,
 		})
 	}
-	return errResult(err), nil, nil
+	result := textResult(map[string]string{"error": message})
+	result.IsError = true
+	return result, nil, nil
 }
 
 func (a *App) toolCapabilities(ctx context.Context, _ *mcp.CallToolRequest, _ emptyIn) (*mcp.CallToolResult, any, error) {
@@ -408,13 +412,14 @@ func (a *App) toolSearchLogs(ctx context.Context, _ *mcp.CallToolRequest, in sea
 
 func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in failedCronsIn) (*mcp.CallToolResult, any, error) {
 	return a.withBudget("failed_crons", func() (*mcp.CallToolResult, any, error) {
+		serviceID := strings.TrimSpace(in.ServiceID)
 		cronDefault := 24 * time.Hour
 		if a.Cfg.Limits.MaxCronWindow > 0 && a.Cfg.Limits.MaxCronWindow < cronDefault {
 			cronDefault = a.Cfg.Limits.MaxCronWindow
 		}
 		winStart, winEnd, err := a.parseWindow(in.Start, in.End, in.Duration, cronDefault, a.Cfg.Limits.MaxCronWindow)
 		if err != nil {
-			return a.toolError("failed_crons", strings.TrimSpace(in.ServiceID), err)
+			return a.toolError("failed_crons", serviceID, err)
 		}
 		ctx, cancel := context.WithTimeout(ctx, a.Cfg.Limits.TotalTimeout)
 		defer cancel()
@@ -432,7 +437,7 @@ func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in fa
 			items = append(items, its...)
 		}
 
-		if sid := strings.TrimSpace(in.ServiceID); sid != "" {
+		if sid := serviceID; sid != "" {
 			svc, err := a.Registry.Require(sid)
 			if err != nil {
 				return a.toolError("failed_crons", sid, err)
@@ -470,7 +475,7 @@ func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in fa
 			"truncated":       truncated,
 			"note":            "The checks list API gives only the current down, grace, and paused states. It cannot prove past failures or recoveries. The response does not include ping URLs or API keys.",
 		}
-		a.Audit.Log(audit.Event{Action: "tool", Tool: "failed_crons", ServiceID: in.ServiceID, Status: "ok", Detail: fmt.Sprintf("items=%d", len(items))})
+		a.Audit.Log(audit.Event{Action: "tool", Tool: "failed_crons", ServiceID: serviceID, Status: "ok", Detail: fmt.Sprintf("items=%d", len(items))})
 		return textResult(out), out, nil
 	})
 }
@@ -502,15 +507,6 @@ func textResult(v any) *mcp.CallToolResult {
 	}
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(b)}},
-	}
-}
-
-func errResult(err error) *mcp.CallToolResult {
-	msg := sanitizeErr(err, nil)
-	b, _ := json.Marshal(map[string]string{"error": msg})
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: string(b)}},
-		IsError: true,
 	}
 }
 

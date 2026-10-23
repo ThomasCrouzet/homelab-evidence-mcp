@@ -85,6 +85,8 @@ The server and the operator use these controls for secrets:
   email addresses, and private-key headers. It also includes other secret forms.
 - Configured authentication tokens are exact redaction rules, including values
   echoed without a label in source responses and cached evidence.
+- MCP error responses use the configured redaction rules.
+- Audit error fields have size limits and use the same rules.
 - The server redacts source identifiers, text attributes, and summaries. It
   uses text size limits for all of them.
 - Source response cache keys use a process-local HMAC fingerprint for all
@@ -105,6 +107,18 @@ The server cleans and redacts Loki lines and ntfy notifications. It uses
 text size limits. It adds `[UNTRUSTED_LOG_DATA]` when the text contains an
 instruction pattern.
 The initial content is hostile data.
+Redaction rules examine the original text. They do not process replacement markers.
+Overlapping or adjacent matches form one redacted region. Empty matches add no text.
+
+### Audit storage failures
+
+Each audit write contains one complete JSONL record.
+The file writer refuses a record larger than `audit.max_bytes` before rotation.
+If an audit write fails, stderr receives the fixed diagnostic `audit write failed`.
+The server gives one diagnostic per continuous failure period.
+The diagnostic contains no writer error, path, or event data.
+Tool calls continue, and the server attempts subsequent audit writes.
+Audit file contents can be incomplete after a storage failure.
 
 ### Cardinality and denial of service
 

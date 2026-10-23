@@ -108,7 +108,7 @@ func (r *Registry) Len() int { return len(r.order) }
 func (r *Registry) Require(id string) (config.Service, error) {
 	s, ok := r.get(id)
 	if !ok {
-		return config.Service{}, fmt.Errorf("unknown service_id %q", id)
+		return config.Service{}, fmt.Errorf("unknown service_id; use list_services to find a configured service")
 	}
 	return s, nil
 }

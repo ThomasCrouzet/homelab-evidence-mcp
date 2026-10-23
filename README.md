@@ -16,7 +16,7 @@ Destinations remain fixed after startup, and every upstream request uses HTTP `G
 
 ## Installation
 
-Prerequisite: Go 1.26.9 is the minimum version.
+Prerequisite: Go 1.26.10 is the minimum version.
 
 ```bash
 go install github.com/ThomasCrouzet/homelab-evidence-mcp/cmd/homelab-evidence-mcp@latest
@@ -145,12 +145,21 @@ The demo uses local HTTP fixtures and an in-memory MCP session.
 It checks source errors, redaction, instruction markers, and GET-only requests.
 It does not start the stdio executable or contact a homelab.
 
+Use `make test-e2e` to start the real stdio executable against six local HTTP
+fixtures. This suite checks all seven MCP tools and all six adapters.
+It does not contact live upstream services.
+The runner saves a log and repeatable metadata outside the repository.
+Set `HEM_E2E_ARTIFACT_DIR` to select the external artifact directory.
+Set `HEM_E2E_BINARY` to the absolute path of a release binary.
+
 ## Development
 
 ```bash
-make test          # tests with race detection
+make test          # race detection and executable E2E tests
+make test-e2e      # executable stdio E2E tests
 make test-quick    # fast tests
 make lint-docs     # Markdown checks
+make lint-private  # private Tailscale address check
 make lint          # formatting, go vet, and golangci-lint
 make coverage
 make build
