@@ -301,14 +301,15 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "application/json")
 	for k, v := range headers {
-		lk := strings.ToLower(k)
+		canonical := http.CanonicalHeaderKey(strings.TrimSpace(k))
+		lk := strings.ToLower(canonical)
 		if lk == "host" {
 			continue
 		}
 		if lk == "authorization" && strings.TrimSpace(v) == "" {
 			continue
 		}
-		req.Header.Set(k, v)
+		req.Header.Set(canonical, v)
 	}
 
 	resp, err := c.client.Do(req)

@@ -235,6 +235,9 @@ before each Gatus route.
 Use `headers` for non-secret static headers and `token_header` for authentication.
 The default `Authorization` header adds `Bearer` unless the token already
 starts with `Bearer` or `Basic`.
+A static `headers` name that equals the effective authentication header in any
+letter case is rejected.
+The server canonicalizes header names in each outbound request.
 
 ### Security
 
