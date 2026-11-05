@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,24 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/audit"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/version"
 )
+
+// lockedBuffer allows a test to read process stderr while the process runs.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 // This test detects an audit writer that stays closed after a real rotation
 // failure, partial records, and repeated or missing diagnostics.
@@ -70,7 +89,7 @@ services: []
 		t.Fatal(err)
 	}
 
-	var stderr bytes.Buffer
+	var stderr lockedBuffer
 	command := exec.CommandContext(ctx, stdioTestBinary(t, ctx), "--config", configPath)
 	command.Stderr = &stderr
 	client := mcp.NewClient(&mcp.Implementation{Name: "audit-recovery-e2e", Version: "1"}, nil)
@@ -122,6 +141,7 @@ services: []
 	call()
 
 	obstruct()
+	call()
 	call()
 	if got := diagnostics(); got != 2 {
 		t.Fatalf("a later independent failure produced %d diagnostics, want 2:\n%s", got, stderr.String())
