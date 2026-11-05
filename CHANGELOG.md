@@ -38,6 +38,8 @@ This file records project changes. Its format uses
   in any letter case, and canonicalize outbound header names.
 - Preserve the ntfy `X-Messages-Truncated` signal on source cache hits without
   retaining other response headers.
+- Make Loki equal-timestamp order and truncation depend on stable source
+  position instead of opaque evidence identifiers.
 
 ## [0.1.3] - 2026-10-23
 

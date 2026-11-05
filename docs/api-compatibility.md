@@ -58,6 +58,10 @@ The Loki adapter has this behavior:
   `direction=backward`.
 - The request asks for one more line than the requested limit.
 - The adapter sorts lines chronologically and keeps the newest requested lines.
+- Equal timestamps in one stream keep their response position. Across streams,
+  the allowlisted stream identity is the stable tie-break. Opaque evidence ids
+  do not decide order or truncation.
+- Duplicate lines are preserved.
 - The additional line sets `truncated` when the result reaches the limit.
 - The response contains streams with `[nanosecond_timestamp, line]` pairs.
 - If the response includes a result type, its value must be `streams`.

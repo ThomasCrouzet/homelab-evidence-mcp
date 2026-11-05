@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/evidence"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/httpx"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 )
@@ -240,6 +241,64 @@ func TestSearch_RedactsBeforeTruncation(t *testing.T) {
 	line := items[0].Attributes["line"].(string)
 	if strings.Contains(line, "ghp_") {
 		t.Fatalf("secret prefix leaked after truncation: %q", line)
+	}
+}
+
+func TestSearch_EqualTimestampOrderIndependentOfOpaqueIDs(t *testing.T) {
+	t0 := time.Date(2026, 7, 25, 11, 12, 0, 0, time.UTC)
+	cli := setup(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "success",
+			"data": map[string]any{
+				"resultType": "streams",
+				"result": []map[string]any{
+					{
+						"stream": map[string]string{"container": "one"},
+						"values": [][]string{
+							{nano(t0), "first-same-time"},
+							{nano(t0), "second-same-time"},
+							{nano(t0), "second-same-time"},
+						},
+					},
+					{
+						"stream": map[string]string{"container": "two"},
+						"values": [][]string{{nano(t0), "other-stream"}},
+					},
+				},
+			},
+		})
+	})
+	// Cross several opaque id counter boundaries.
+	for i := 0; i < 120; i++ {
+		_ = evidence.NewOpaqueID("ev")
+	}
+	start, end := t0.Add(-time.Minute), t0.Add(time.Minute)
+	firstLine := ""
+	for attempt := 0; attempt < 30; attempt++ {
+		items, truncated, err := cli.Search(context.Background(), QueryOptions{
+			ServiceID: "svc", Selector: `{container="one"}`, Start: start, End: end, Limit: 1,
+		})
+		if err != nil || !truncated || len(items) != 1 {
+			t.Fatalf("attempt %d: items=%d truncated=%v err=%v", attempt, len(items), truncated, err)
+		}
+		line, _ := items[0].Attributes["line"].(string)
+		if attempt == 0 {
+			firstLine = line
+		} else if line != firstLine {
+			t.Fatalf("attempt %d selected %q, first selected %q", attempt, line, firstLine)
+		}
+	}
+	items, truncated, err := cli.Search(context.Background(), QueryOptions{
+		ServiceID: "svc", Selector: `{container="one"}`, Start: start, End: end, Limit: 10,
+	})
+	if err != nil || truncated || len(items) != 4 {
+		t.Fatalf("items=%d truncated=%v err=%v", len(items), truncated, err)
+	}
+	want := []string{"first-same-time", "second-same-time", "second-same-time", "other-stream"}
+	for index, item := range items {
+		if line, _ := item.Attributes["line"].(string); line != want[index] {
+			t.Fatalf("position %d=%q, want=%q", index, line, want[index])
+		}
 	}
 }
 

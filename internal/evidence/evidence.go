@@ -70,6 +70,9 @@ type Item struct {
 	Truncated         bool           `json:"truncated"`
 	RedactionsApplied int            `json:"redactions_applied"`
 	Freshness         Freshness      `json:"freshness"`
+	// Order is an internal stable position for equal observation times.
+	// It does not appear in MCP output or cached evidence.
+	Order int `json:"-"`
 }
 
 // SourceOutcome gives the result of a source query.
@@ -109,7 +112,8 @@ func KeepNewest(items []Item, max int) ([]Item, bool) {
 	return items[len(items)-max:], true
 }
 
-// SortItems puts evidence in order by time, source, source identity, and then id.
+// SortItems puts evidence in order by time, source, source identity, stable
+// source position, and then id. An opaque id must not decide equal-time order.
 func SortItems(items []Item) {
 	sort.SliceStable(items, func(i, j int) bool {
 		a, b := items[i], items[j]
@@ -121,6 +125,9 @@ func SortItems(items []Item) {
 		}
 		if a.SourceID != b.SourceID {
 			return a.SourceID < b.SourceID
+		}
+		if a.Order != b.Order {
+			return a.Order < b.Order
 		}
 		return a.ID < b.ID
 	})

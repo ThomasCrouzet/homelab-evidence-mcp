@@ -125,6 +125,7 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 	}
 
 	var items []evidence.Item
+	position := 0
 	for _, stream := range raw.Data.Result {
 		labels, labelRedactions, labelsTruncated := c.filterLabels(stream.Stream)
 		for _, pair := range stream.Values {
@@ -173,16 +174,13 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 				Truncated:         lineTruncated || summaryTruncated || labelsTruncated,
 				RedactionsApplied: rn + labelRedactions,
 				Freshness:         evidence.ComputeFreshness(ts, now),
+				Order:             position,
 			})
+			position++
 		}
 	}
-	// Put the items in the same order for the same input.
-	sort.SliceStable(items, func(i, j int) bool {
-		if !items[i].ObservedAt.Equal(items[j].ObservedAt) {
-			return items[i].ObservedAt.Before(items[j].ObservedAt)
-		}
-		return items[i].ID < items[j].ID
-	})
+	// KeepNewest sorts by timestamp, source, identity, and then the stable
+	// response position. Opaque ids never decide which equal-time line survives.
 	kept, truncated := evidence.KeepNewest(items, opt.Limit)
 	return kept, truncated, nil
 }
