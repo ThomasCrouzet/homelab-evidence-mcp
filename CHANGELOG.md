@@ -13,6 +13,8 @@ This file records project changes. Its format uses
 - Add a versioned upstream fixture corpus with provenance, offline replay tests,
   auth-failure checks, and a compatibility matrix that distinguishes replay from
   live verification.
+- Publish typed output schemas for all seven tools, keep empty collections as
+  arrays, and document the compatibility policy.
 
 ### Changed
 
