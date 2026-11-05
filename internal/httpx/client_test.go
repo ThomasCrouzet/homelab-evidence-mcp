@@ -300,6 +300,48 @@ func TestCollectionTime_StableAcrossCacheHits(t *testing.T) {
 	}
 }
 
+func TestCache_RetainsOnlyUpstreamTruncationSignal(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/truncated" {
+			w.Header().Set(UpstreamTruncatedHeader, "1")
+			w.Header().Set("Set-Cookie", "sid=secret")
+			w.Header().Set("Authorization", "Bearer secret")
+			w.Header().Set("X-Private", "private-value")
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+	c := NewLockedClient(Options{Timeout: time.Second, CacheTTL: time.Minute})
+	if err := c.RegisterDestination("ntfy", ts.URL); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := c.Get(context.Background(), "ntfy", "/truncated", nil); err != nil { //nolint:bodyclose
+		t.Fatal(err)
+	}
+	cached, _, err := c.Get(context.Background(), "ntfy", "/truncated", nil) //nolint:bodyclose
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !UpstreamTruncated(cached) {
+		t.Fatal("cache hit lost the upstream truncation signal")
+	}
+	for _, name := range []string{"Set-Cookie", "Authorization", "X-Private"} {
+		if cached.Header.Get(name) != "" {
+			t.Fatalf("cache hit replayed header %s", name)
+		}
+	}
+	if _, _, err := c.Get(context.Background(), "ntfy", "/complete", nil); err != nil { //nolint:bodyclose
+		t.Fatal(err)
+	}
+	complete, _, err := c.Get(context.Background(), "ntfy", "/complete", nil) //nolint:bodyclose
+	if err != nil {
+		t.Fatal(err)
+	}
+	if UpstreamTruncated(complete) {
+		t.Fatal("complete response became truncated")
+	}
+}
+
 func TestStats_ExcludesExpiredEntries(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{}`))
@@ -331,12 +373,12 @@ func TestStats_ExcludesExpiredEntries(t *testing.T) {
 func TestCachePut_EvictsOldestFirst(t *testing.T) {
 	c := NewLockedClient(Options{CacheTTL: time.Minute})
 	chunk := make([]byte, (maxCacheBytes/2)+1)
-	c.cachePut("oldest", http.StatusOK, chunk, time.Now())
-	c.cachePut("newest", http.StatusOK, chunk, time.Now())
-	if _, _, _, ok := c.cacheGet("oldest"); ok {
+	c.cachePut("oldest", http.StatusOK, chunk, time.Now(), false)
+	c.cachePut("newest", http.StatusOK, chunk, time.Now(), false)
+	if _, _, _, _, ok := c.cacheGet("oldest"); ok {
 		t.Fatal("oldest entry should be evicted first")
 	}
-	if _, _, _, ok := c.cacheGet("newest"); !ok {
+	if _, _, _, _, ok := c.cacheGet("newest"); !ok {
 		t.Fatal("newest entry should remain")
 	}
 }
@@ -345,8 +387,8 @@ func TestCachePut_BoundsCumulativeBytes(t *testing.T) {
 	c := NewLockedClient(Options{CacheTTL: time.Minute})
 	first := make([]byte, (maxCacheBytes/2)+1)
 	second := make([]byte, (maxCacheBytes/2)+1)
-	c.cachePut("first", http.StatusOK, first, time.Now())
-	c.cachePut("second", http.StatusOK, second, time.Now())
+	c.cachePut("first", http.StatusOK, first, time.Now(), false)
+	c.cachePut("second", http.StatusOK, second, time.Now(), false)
 	stats := c.Stats()
 	if stats.Bytes > maxCacheBytes || stats.Size != 1 {
 		t.Fatalf("cache exceeds its limits: %+v", stats)

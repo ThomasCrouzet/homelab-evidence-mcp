@@ -108,6 +108,7 @@ func (c *Client) History(ctx context.Context, serviceID, topic string, start, en
 		return nil, false, fmt.Errorf("ntfy HTTP %d", resp.StatusCode)
 	}
 	snapshotAt := httpx.CollectionTime(resp, now)
+	upstreamTruncated := httpx.UpstreamTruncated(resp)
 	msgs, err := decodeMessages(body)
 	if err != nil {
 		return nil, false, err
@@ -142,7 +143,7 @@ func (c *Client) History(ctx context.Context, serviceID, topic string, start, en
 		items = append(items, item)
 	}
 	kept, truncated := evidence.KeepNewest(items, limit)
-	return kept, truncated, nil
+	return kept, truncated || upstreamTruncated, nil
 }
 
 func decodeMessages(body []byte) ([]message, error) {

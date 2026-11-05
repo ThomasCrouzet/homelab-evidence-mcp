@@ -222,6 +222,66 @@ func TestHistory_MissingTimeUsesCollectionWithoutInventingHistory(t *testing.T) 
 	}
 }
 
+func TestHistory_UpstreamTruncationSurvivesCache(t *testing.T) {
+	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
+	var calls int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set(httpx.UpstreamTruncatedHeader, "1")
+		_, _ = fmt.Fprintf(w, `{"id":"1","time":%d,"event":"message","message":"only retained"}`+"\n", t0.Unix())
+	}))
+	defer ts.Close()
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second, CacheTTL: time.Minute})
+	_ = hc.RegisterDestination("ntfy", ts.URL)
+	cli := &Client{HTTP: hc, DestName: "ntfy"}
+	start, end := t0.Add(-time.Hour), t0.Add(time.Hour)
+	for attempt := 0; attempt < 2; attempt++ {
+		items, truncated, err := cli.History(context.Background(), "media", "alerts", start, end, 10)
+		if err != nil || len(items) != 1 {
+			t.Fatalf("attempt %d: %v %+v", attempt, err, items)
+		}
+		if !truncated {
+			t.Fatalf("attempt %d lost upstream truncation", attempt)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("upstream calls=%d, want=1", calls)
+	}
+}
+
+func TestHistory_LocalLimitTruncationWithoutUpstreamSignal(t *testing.T) {
+	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `[
+			{"id":"1","time":%d,"event":"message","message":"first"},
+			{"id":"2","time":%d,"event":"message","message":"second"}
+		]`, t0.Unix(), t0.Add(time.Second).Unix())
+	}))
+	defer ts.Close()
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
+	_ = hc.RegisterDestination("ntfy", ts.URL)
+	cli := &Client{HTTP: hc, DestName: "ntfy"}
+	_, truncated, err := cli.History(context.Background(), "media", "alerts", t0.Add(-time.Hour), t0.Add(time.Hour), 1)
+	if err != nil || !truncated {
+		t.Fatalf("truncated=%v err=%v", truncated, err)
+	}
+}
+
+func TestHistory_NoFalseTruncation(t *testing.T) {
+	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"id":"1","time":%d,"event":"message","message":"complete"}`+"\n", t0.Unix())
+	}))
+	defer ts.Close()
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
+	_ = hc.RegisterDestination("ntfy", ts.URL)
+	cli := &Client{HTTP: hc, DestName: "ntfy"}
+	_, truncated, err := cli.History(context.Background(), "media", "alerts", t0.Add(-time.Hour), t0.Add(time.Hour), 10)
+	if err != nil || truncated {
+		t.Fatalf("truncated=%v err=%v", truncated, err)
+	}
+}
+
 func TestItemFrom_NormalizesDefaultPriority(t *testing.T) {
 	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
 	explicit := 3
