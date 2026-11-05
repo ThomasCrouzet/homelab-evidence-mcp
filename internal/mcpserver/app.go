@@ -118,7 +118,7 @@ func NewApp(cfg *config.Config, log *slog.Logger, aud *audit.Logger) (*App, erro
 		Registry:  registry.New(cfg),
 		HTTP:      hc,
 		Redact:    eng,
-		Cache:     evidence.NewCache(cfg.Limits.EvidenceCacheTTL, cfg.Limits.EvidenceCacheMax),
+		Cache:     evidence.NewCache(cfg.Limits.EvidenceCacheTTL, cfg.Limits.EvidenceCacheMax, cfg.Limits.EvidenceCacheMaxBytes),
 		Audit:     aud,
 		Log:       log,
 		gatus:     map[string]*gatus.Client{},

@@ -23,6 +23,12 @@
         "max_body_bytes": { "type": "integer", "minimum": 0, "maximum": 8388608, "description": "A value of 0 uses the default of 2 MiB. The maximum is 8 MiB." },
         "evidence_cache_ttl": { "type": "string", "description": "Set the local cache TTL for get_evidence." },
         "evidence_cache_max": { "type": "integer", "minimum": 0, "maximum": 1000, "description": "A value of 0 deactivates the get_evidence cache." },
+        "evidence_cache_max_bytes": {
+          "type": "integer",
+          "minimum": 4096,
+          "maximum": 67108864,
+          "description": "Set the serialized evidence payload budget for get_evidence. The default is 8 MiB and the maximum is 64 MiB. This value is not exact process memory."
+        },
         "source_cache_ttl": {
           "type": "string",
           "description": "The source response cache keeps the same GET responses for a short time. The default is 15s. A value of 0 deactivates this cache. The source or collection time supplies the evidence timestamp."

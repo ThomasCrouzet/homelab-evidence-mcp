@@ -143,8 +143,10 @@ The server uses these controls:
 - A maximum of eight concurrent source requests. This maximum includes fan-out
   requests.
 - A source response cache limit of 128 entries, 32 MiB, and a TTL.
-- An evidence cache limit of 1,000 entries and a TTL.
+- An evidence cache limit of 1,000 entries, a TTL, and a serialized-payload
+  byte budget. The byte budget defaults to 8 MiB and cannot exceed 64 MiB.
 - The value `evidence_cache_max: 0` deactivates the evidence cache.
+- An item larger than the whole evidence byte budget is not retained.
 - A `max_log_line_bytes` limit for hostile log and notification text. The
   maximum value is 16 KiB.
 - Responses with data from other sources when a source has an error. The

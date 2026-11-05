@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/evidence"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 	"gopkg.in/yaml.v3"
 )
@@ -59,6 +60,7 @@ type Limits struct {
 	MaxBodyBytes          int64
 	EvidenceCacheTTL      time.Duration
 	EvidenceCacheMax      int
+	EvidenceCacheMaxBytes int64
 	SourceCacheTTL        time.Duration
 	MaxToolCallsPerMinute int
 	MaxConcurrentTools    int
@@ -175,6 +177,7 @@ type fileLimits struct {
 	MaxBodyBytes          int    `yaml:"max_body_bytes"`
 	EvidenceCacheTTL      string `yaml:"evidence_cache_ttl"`
 	EvidenceCacheMax      *int   `yaml:"evidence_cache_max"`
+	EvidenceCacheMaxBytes *int64 `yaml:"evidence_cache_max_bytes"`
 	SourceCacheTTL        string `yaml:"source_cache_ttl"`
 	MaxToolCallsPerMinute int    `yaml:"max_tool_calls_per_minute"`
 	MaxConcurrentTools    int    `yaml:"max_concurrent_tools"`
@@ -533,6 +536,21 @@ func parseLimits(f fileLimits) (Limits, ValidationErrors) {
 		errs = append(errs, ValidationError{"limits.evidence_cache_max", "must be <= 1000"})
 	} else {
 		l.EvidenceCacheMax = *f.EvidenceCacheMax
+	}
+	if f.EvidenceCacheMaxBytes == nil {
+		l.EvidenceCacheMaxBytes = evidence.DefaultCacheMaxBytes
+	} else if *f.EvidenceCacheMaxBytes < evidence.MinCacheBytes {
+		errs = append(errs, ValidationError{
+			"limits.evidence_cache_max_bytes",
+			fmt.Sprintf("must be >= %d", evidence.MinCacheBytes),
+		})
+	} else if *f.EvidenceCacheMaxBytes > evidence.MaxCacheBytes {
+		errs = append(errs, ValidationError{
+			"limits.evidence_cache_max_bytes",
+			fmt.Sprintf("must be <= %d", evidence.MaxCacheBytes),
+		})
+	} else {
+		l.EvidenceCacheMaxBytes = *f.EvidenceCacheMaxBytes
 	}
 	if l.MaxToolCallsPerMinute <= 0 {
 		if l.MaxToolCallsPerMinute < 0 {

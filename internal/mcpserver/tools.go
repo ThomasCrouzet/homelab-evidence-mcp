@@ -124,8 +124,12 @@ func (a *App) toolCapabilities(ctx context.Context, _ *mcp.CallToolRequest, _ em
 				"max_tool_calls_per_minute": a.Cfg.Limits.MaxToolCallsPerMinute,
 				"max_concurrent_tools":      a.Cfg.Limits.MaxConcurrentTools,
 				"max_concurrent_sources":    maxConcurrentSourceRequests,
+				"evidence_cache_ttl":        a.Cfg.Limits.EvidenceCacheTTL.String(),
+				"evidence_cache_max":        a.Cfg.Limits.EvidenceCacheMax,
+				"evidence_cache_max_bytes":  a.Cfg.Limits.EvidenceCacheMaxBytes,
 			},
-			"source_cache": stats,
+			"source_cache":   stats,
+			"evidence_cache": a.Cache.Stats(),
 			"features": []string{
 				"canonical_service_registry",
 				"deterministic_timeline",

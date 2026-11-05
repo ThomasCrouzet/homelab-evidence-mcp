@@ -6,6 +6,11 @@ This file records project changes. Its format uses
 
 ## [Unreleased]
 
+### Added
+
+- Add a serialized-payload byte budget to the evidence cache, with counters in
+  `evidence_capabilities`. The default is 8 MiB and the maximum is 64 MiB.
+
 ### Changed
 
 - Keep one authoritative version in `internal/version/version.txt`, embed it for

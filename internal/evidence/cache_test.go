@@ -1,12 +1,13 @@
 package evidence
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestCache_TTLAndEvict(t *testing.T) {
-	c := NewCache(50*time.Millisecond, 2)
+	c := NewCache(50*time.Millisecond, 2, DefaultCacheMaxBytes)
 	c.Put(Item{ID: "a", Summary: "1"})
 	c.Put(Item{ID: "b", Summary: "2"})
 	c.Put(Item{ID: "c", Summary: "3"})
@@ -26,7 +27,7 @@ func TestCache_TTLAndEvict(t *testing.T) {
 }
 
 func TestNewCache_ZeroDisables(t *testing.T) {
-	c := NewCache(time.Minute, 0)
+	c := NewCache(time.Minute, 0, DefaultCacheMaxBytes)
 	c.Put(Item{ID: "a", Summary: "1"})
 	if _, ok := c.Get("a"); ok {
 		t.Fatal("max 0 must deactivate storage")
@@ -34,9 +35,73 @@ func TestNewCache_ZeroDisables(t *testing.T) {
 }
 
 func TestNewCache_EnforcesHardLimit(t *testing.T) {
-	c := NewCache(time.Minute, maxCacheItems+1)
+	c := NewCache(time.Minute, maxCacheItems+1, DefaultCacheMaxBytes)
 	if c.max != maxCacheItems {
 		t.Fatalf("limit=%d", c.max)
+	}
+}
+
+func TestCache_ByteBudgetEvictsOldest(t *testing.T) {
+	a := Item{ID: "a", Summary: strings.Repeat("a", 400)}
+	size := serializedItemSize(a)
+	c := NewCache(time.Minute, 10, size*2)
+	c.Put(a)
+	c.Put(Item{ID: "b", Summary: strings.Repeat("b", 400)})
+	c.Put(Item{ID: "c", Summary: strings.Repeat("c", 400)})
+	stats := c.Stats()
+	if stats.Items != 2 || stats.Bytes > stats.MaxBytes || stats.Evictions != 1 {
+		t.Fatalf("stats=%+v", stats)
+	}
+	if _, ok := c.Get("a"); ok {
+		t.Fatal("oldest item survived the byte budget")
+	}
+	if _, ok := c.Get("c"); !ok {
+		t.Fatal("newest item was evicted")
+	}
+}
+
+func TestCache_ReplacementAdjustsBytes(t *testing.T) {
+	a := Item{ID: "a", Summary: strings.Repeat("a", 100)}
+	c := NewCache(time.Minute, 10, 4096)
+	c.Put(a)
+	first := c.Stats().Bytes
+	replacement := a
+	replacement.Summary = strings.Repeat("z", 200)
+	c.Put(replacement)
+	stats := c.Stats()
+	if stats.Items != 1 || stats.Bytes == first {
+		t.Fatalf("replacement accounting failed: first=%d stats=%+v", first, stats)
+	}
+	got, ok := c.Get("a")
+	if !ok || got.Summary != replacement.Summary {
+		t.Fatalf("replacement not retained: %+v", got)
+	}
+}
+
+func TestCache_OversizedItemCannotBypassBudget(t *testing.T) {
+	item := Item{ID: "large", Summary: strings.Repeat("x", 500)}
+	size := serializedItemSize(item)
+	c := NewCache(time.Minute, 10, size-1)
+	c.Put(item)
+	stats := c.Stats()
+	if stats.Items != 0 || stats.Bytes != 0 || stats.Oversized != 1 {
+		t.Fatalf("stats=%+v", stats)
+	}
+	if _, ok := c.Get("large"); ok {
+		t.Fatal("oversized item was stored")
+	}
+}
+
+func TestCache_ExpiryAdjustsBytes(t *testing.T) {
+	c := NewCache(20*time.Millisecond, 10, 4096)
+	c.Put(Item{ID: "a", Summary: "value"})
+	if c.Stats().Bytes == 0 {
+		t.Fatal("item was not accounted")
+	}
+	time.Sleep(30 * time.Millisecond)
+	stats := c.Stats()
+	if stats.Items != 0 || stats.Bytes != 0 || stats.Expired != 1 {
+		t.Fatalf("stats=%+v", stats)
 	}
 }
 

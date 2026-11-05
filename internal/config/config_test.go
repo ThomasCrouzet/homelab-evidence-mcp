@@ -431,6 +431,37 @@ func TestParse_RejectsUnsafeUniqueKey(t *testing.T) {
 	}
 }
 
+func TestParse_EvidenceCacheByteBudget(t *testing.T) {
+	base := func(value string) []byte {
+		return []byte(`
+version: 1
+limits:
+` + value + `
+sources:
+  gatus:
+    kind: gatus
+    base_url: https://gatus.example.internal
+services: []
+`)
+	}
+	cfg, err := Parse(base("  evidence_cache_ttl: 5m"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Limits.EvidenceCacheMaxBytes != 8<<20 {
+		t.Fatalf("default=%d", cfg.Limits.EvidenceCacheMaxBytes)
+	}
+	cfg, err = Parse(base("  evidence_cache_max_bytes: 4096"))
+	if err != nil || cfg.Limits.EvidenceCacheMaxBytes != 4096 {
+		t.Fatalf("value=%d err=%v", cfg.Limits.EvidenceCacheMaxBytes, err)
+	}
+	for _, value := range []string{"  evidence_cache_max_bytes: 4095", "  evidence_cache_max_bytes: 67108865"} {
+		if _, err := Parse(base(value)); err == nil {
+			t.Fatalf("%s was accepted", value)
+		}
+	}
+}
+
 func TestParse_RejectsOversizedPublicFields(t *testing.T) {
 	raw := []byte(`
 version: 1
