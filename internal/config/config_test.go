@@ -738,3 +738,34 @@ func FuzzParse(f *testing.F) {
 		_, _ = Parse(raw)
 	})
 }
+
+func TestParse_IncidentResponseByteBudget(t *testing.T) {
+	base := func(value string) []byte {
+		return []byte(`
+version: 1
+limits:
+` + value + `
+sources:
+  gatus:
+    kind: gatus
+    base_url: https://gatus.example.internal
+services: []
+`)
+	}
+	cfg, err := Parse(base("  default_window: 1h"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Limits.MaxIncidentBytes != 256<<10 {
+		t.Fatalf("default=%d", cfg.Limits.MaxIncidentBytes)
+	}
+	cfg, err = Parse(base("  max_incident_response_bytes: 8192"))
+	if err != nil || cfg.Limits.MaxIncidentBytes != 8192 {
+		t.Fatalf("value=%d err=%v", cfg.Limits.MaxIncidentBytes, err)
+	}
+	for _, value := range []string{"  max_incident_response_bytes: 8191", "  max_incident_response_bytes: 4194305"} {
+		if _, err := Parse(base(value)); err == nil {
+			t.Fatalf("%s was accepted", value)
+		}
+	}
+}

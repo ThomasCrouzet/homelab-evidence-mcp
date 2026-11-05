@@ -38,6 +38,7 @@ type incidentIn struct {
 	End       string `json:"end,omitempty" jsonschema:"Set the RFC3339 end time in UTC."`
 	Duration  string `json:"duration,omitempty" jsonschema:"Set a Go duration that ends at the current time, for example 1h."`
 	MaxItems  int    `json:"max_items,omitempty" jsonschema:"Set an optional limit below the server max_evidence_items value."`
+	Compact   bool   `json:"compact,omitempty" jsonschema:"Reserve one item per contributing source and enforce the configured response byte budget."`
 }
 
 type searchLogsIn struct {
@@ -123,20 +124,21 @@ func (a *App) toolCapabilities(ctx context.Context, _ *mcp.CallToolRequest, _ em
 				"incident_context", "search_logs", "failed_crons", "get_evidence",
 			},
 			Limits: map[string]any{
-				"default_window":            a.Cfg.Limits.DefaultWindow.String(),
-				"max_incident_window":       a.Cfg.Limits.MaxIncidentWindow.String(),
-				"max_cron_window":           a.Cfg.Limits.MaxCronWindow.String(),
-				"max_log_lines":             a.Cfg.Limits.MaxLogLines,
-				"max_evidence_items":        a.Cfg.Limits.MaxEvidenceItems,
-				"per_source_timeout":        a.Cfg.Limits.PerSourceTimeout.String(),
-				"total_timeout":             a.Cfg.Limits.TotalTimeout.String(),
-				"source_cache_ttl":          a.Cfg.Limits.SourceCacheTTL.String(),
-				"max_tool_calls_per_minute": a.Cfg.Limits.MaxToolCallsPerMinute,
-				"max_concurrent_tools":      a.Cfg.Limits.MaxConcurrentTools,
-				"max_concurrent_sources":    maxConcurrentSourceRequests,
-				"evidence_cache_ttl":        a.Cfg.Limits.EvidenceCacheTTL.String(),
-				"evidence_cache_max":        a.Cfg.Limits.EvidenceCacheMax,
-				"evidence_cache_max_bytes":  a.Cfg.Limits.EvidenceCacheMaxBytes,
+				"default_window":              a.Cfg.Limits.DefaultWindow.String(),
+				"max_incident_window":         a.Cfg.Limits.MaxIncidentWindow.String(),
+				"max_cron_window":             a.Cfg.Limits.MaxCronWindow.String(),
+				"max_log_lines":               a.Cfg.Limits.MaxLogLines,
+				"max_evidence_items":          a.Cfg.Limits.MaxEvidenceItems,
+				"max_incident_response_bytes": a.Cfg.Limits.MaxIncidentBytes,
+				"per_source_timeout":          a.Cfg.Limits.PerSourceTimeout.String(),
+				"total_timeout":               a.Cfg.Limits.TotalTimeout.String(),
+				"source_cache_ttl":            a.Cfg.Limits.SourceCacheTTL.String(),
+				"max_tool_calls_per_minute":   a.Cfg.Limits.MaxToolCallsPerMinute,
+				"max_concurrent_tools":        a.Cfg.Limits.MaxConcurrentTools,
+				"max_concurrent_sources":      maxConcurrentSourceRequests,
+				"evidence_cache_ttl":          a.Cfg.Limits.EvidenceCacheTTL.String(),
+				"evidence_cache_max":          a.Cfg.Limits.EvidenceCacheMax,
+				"evidence_cache_max_bytes":    a.Cfg.Limits.EvidenceCacheMaxBytes,
 			},
 			SourceCache:   a.HTTP.Stats(),
 			EvidenceCache: a.Cache.Stats(),
@@ -148,6 +150,7 @@ func (a *App) toolCapabilities(ctx context.Context, _ *mcp.CallToolRequest, _ em
 				"locked_destinations",
 				"get_only_http",
 				"source_response_cache",
+				"compact_incident_context",
 				"tool_budgets",
 				"beszel",
 				"ntfy",
@@ -392,20 +395,35 @@ func (a *App) toolIncidentContext(ctx context.Context, _ *mcp.CallToolRequest, i
 		evidence.SortOutcomes(sources)
 		normalizeOutcomes(sources)
 		complete, anyOK, configured := outcomeCoverage(sources)
-		bundle := correlation.BuildTimeline(svc.ID, winStart, winEnd, items, sources, maxItems)
+		buildMax := maxItems
+		if in.Compact {
+			// Compact mode reserves per-source items before it applies max_items.
+			buildMax = 0
+		}
+		bundle := correlation.BuildTimeline(svc.ID, winStart, winEnd, items, sources, buildMax)
 		bundle.Complete = complete
+		if in.Compact {
+			bundle = compactIncident(bundle, maxItems, a.Cfg.Limits.MaxIncidentBytes)
+		} else {
+			bundle.ByteBudget = a.Cfg.Limits.MaxIncidentBytes
+			bundle.ByteSize = incidentWireSize(bundle)
+		}
 		if bundle.Items == nil {
 			bundle.Items = []evidence.Item{}
 		}
 		if bundle.Sources == nil {
 			bundle.Sources = []evidence.SourceOutcome{}
 		}
+		if bundle.OmittedSources == nil {
+			bundle.OmittedSources = []string{}
+		}
 		a.Cache.PutAll(bundle.Items)
 
 		a.Audit.Log(audit.Event{
 			Action: "tool", Tool: "incident_context", ServiceID: svc.ID, Status: auditStatus(complete, anyOK, configured),
 			DurationMS: time.Since(startAll).Milliseconds(),
-			Detail:     fmt.Sprintf("items=%d truncated=%v", len(bundle.Items), bundle.Truncated),
+			Detail: fmt.Sprintf("items=%d truncated=%v compact=%v bytes=%d",
+				len(bundle.Items), bundle.Truncated, bundle.Compact, bundle.ByteSize),
 		})
 		out := IncidentContextOut(bundle)
 		return textResult(out), out, nil

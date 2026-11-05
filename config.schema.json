@@ -17,6 +17,12 @@
         "max_cron_window": { "type": "string" },
         "max_log_lines": { "type": "integer", "minimum": 0, "maximum": 500, "description": "A value of 0 uses the default of 100." },
         "max_evidence_items": { "type": "integer", "minimum": 0, "maximum": 1000, "description": "A value of 0 uses the default of 200." },
+        "max_incident_response_bytes": {
+          "type": "integer",
+          "minimum": 8192,
+          "maximum": 4194304,
+          "description": "Set the compact incident response budget. The default is 262144 and the maximum is 4194304."
+        },
         "per_source_timeout": { "type": "string" },
         "total_timeout": { "type": "string" },
         "max_log_line_bytes": { "type": "integer", "minimum": 0, "maximum": 16384, "description": "A value of 0 uses the default of 2048 bytes." },

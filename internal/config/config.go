@@ -54,6 +54,7 @@ type Limits struct {
 	MaxCronWindow         time.Duration
 	MaxLogLines           int
 	MaxEvidenceItems      int
+	MaxIncidentBytes      int
 	PerSourceTimeout      time.Duration
 	TotalTimeout          time.Duration
 	MaxLogLineBytes       int
@@ -171,6 +172,7 @@ type fileLimits struct {
 	MaxCronWindow         string `yaml:"max_cron_window"`
 	MaxLogLines           int    `yaml:"max_log_lines"`
 	MaxEvidenceItems      int    `yaml:"max_evidence_items"`
+	MaxIncidentBytes      *int   `yaml:"max_incident_response_bytes"`
 	PerSourceTimeout      string `yaml:"per_source_timeout"`
 	TotalTimeout          string `yaml:"total_timeout"`
 	MaxLogLineBytes       int    `yaml:"max_log_line_bytes"`
@@ -509,6 +511,15 @@ func parseLimits(f fileLimits) (Limits, ValidationErrors) {
 	}
 	if l.MaxEvidenceItems > 1000 {
 		errs = append(errs, ValidationError{"limits.max_evidence_items", "must be <= 1000"})
+	}
+	if f.MaxIncidentBytes == nil {
+		l.MaxIncidentBytes = 256 << 10
+	} else if *f.MaxIncidentBytes < 8<<10 {
+		errs = append(errs, ValidationError{"limits.max_incident_response_bytes", "must be >= 8192"})
+	} else if *f.MaxIncidentBytes > 4<<20 {
+		errs = append(errs, ValidationError{"limits.max_incident_response_bytes", "must be <= 4194304"})
+	} else {
+		l.MaxIncidentBytes = *f.MaxIncidentBytes
 	}
 	if l.MaxLogLineBytes <= 0 {
 		if l.MaxLogLineBytes < 0 {

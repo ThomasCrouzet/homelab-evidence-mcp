@@ -97,18 +97,25 @@ type SourceOutcome struct {
 
 // Bundle contains a multi-source response.
 type Bundle struct {
-	ServiceID      string          `json:"service_id,omitempty"`
-	RequestedStart time.Time       `json:"requested_start,omitempty"`
-	RequestedEnd   time.Time       `json:"requested_end,omitempty"`
-	EffectiveStart time.Time       `json:"effective_start,omitempty"`
-	EffectiveEnd   time.Time       `json:"effective_end,omitempty"`
-	Items          []Item          `json:"items"`
-	Sources        []SourceOutcome `json:"sources"`
-	Complete       bool            `json:"complete"`
-	Truncated      bool            `json:"truncated"`
-	Warnings       []string        `json:"warnings,omitempty"`
-	FactualSummary string          `json:"factual_summary,omitempty"`
-	RetrievedAt    time.Time       `json:"retrieved_at"`
+	ServiceID           string          `json:"service_id,omitempty"`
+	RequestedStart      time.Time       `json:"requested_start,omitempty"`
+	RequestedEnd        time.Time       `json:"requested_end,omitempty"`
+	EffectiveStart      time.Time       `json:"effective_start,omitempty"`
+	EffectiveEnd        time.Time       `json:"effective_end,omitempty"`
+	Items               []Item          `json:"items"`
+	Sources             []SourceOutcome `json:"sources"`
+	Complete            bool            `json:"complete"`
+	Truncated           bool            `json:"truncated"`
+	Compact             bool            `json:"compact"`
+	ByteBudget          int             `json:"byte_budget"`
+	ByteSize            int             `json:"byte_size"`
+	SelectionTruncated  bool            `json:"selection_truncated"`
+	ByteBudgetTruncated bool            `json:"byte_budget_truncated"`
+	OmittedItems        int             `json:"omitted_items"`
+	OmittedSources      []string        `json:"omitted_sources"`
+	Warnings            []string        `json:"warnings,omitempty"`
+	FactualSummary      string          `json:"factual_summary,omitempty"`
+	RetrievedAt         time.Time       `json:"retrieved_at"`
 }
 
 // KeepNewest puts items in order and keeps the newest max entries.

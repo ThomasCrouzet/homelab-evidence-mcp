@@ -13,6 +13,8 @@ limits:
   max_cron_window: 168h
   max_log_lines: 100
   max_evidence_items: 200
+  # Compact incident_context mode enforces this response budget. Default 256 KiB, min 8 KiB, max 4 MiB.
+  max_incident_response_bytes: 262144
   per_source_timeout: 3s
   total_timeout: 10s
   max_log_line_bytes: 2048

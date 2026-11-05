@@ -186,7 +186,7 @@ func (a *App) Server() *mcp.Server {
 	}, a.toolServiceStatus)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:         "incident_context",
-		Description:  "Collect a multi-source evidence timeline for a service_id with the limit from the configuration. The correlation does not identify a root cause.",
+		Description:  "Collect a multi-source evidence timeline for a service_id with the limit from the configuration. Use compact mode to reserve one item per source and enforce the response byte budget. The correlation does not identify a root cause.",
 		Annotations:  readOnlyAnns(true),
 		OutputSchema: incidentContextSchema,
 	}, a.toolIncidentContext)
