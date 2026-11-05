@@ -3,6 +3,7 @@ package gatus
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -211,6 +212,97 @@ func TestPartialUnknownFields(t *testing.T) {
 	}
 	if item.Severity != evidence.SeverityInfo {
 		t.Fatal(item.Severity)
+	}
+}
+
+func TestStatus_ExactKeyBeatsEarlierAlias(t *testing.T) {
+	cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[
+			{"name":"prod_api","group":"dev","key":"dev_prod_api","results":[{"success":true,"status":200,"timestamp":"2026-07-25T11:00:00Z"}]},
+			{"name":"api","group":"prod","key":"prod_api","results":[{"success":false,"status":503,"timestamp":"2026-07-25T11:00:00Z"}]}
+		]`))
+	})
+	item, err := cli.Status(context.Background(), "x", "prod_api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Attributes["http_status"] != 503 || item.Attributes["endpoint_key"] != "prod_api" {
+		t.Fatalf("alias masked the exact key: %+v", item.Attributes)
+	}
+}
+
+func TestStatus_RowOrderDoesNotChangeExactSelection(t *testing.T) {
+	rows := []string{
+		`{"name":"prod_api","group":"dev","key":"dev_prod_api","results":[{"success":true,"status":200,"timestamp":"2026-07-25T11:00:00Z"}]}`,
+		`{"name":"api","group":"prod","key":"prod_api","results":[{"success":false,"status":503,"timestamp":"2026-07-25T11:00:00Z"}]}`,
+	}
+	for _, order := range [][]string{{rows[0], rows[1]}, {rows[1], rows[0]}} {
+		body := "[" + strings.Join(order, ",") + "]"
+		cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(body))
+		})
+		item, err := cli.Status(context.Background(), "x", "prod_api")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if item.Attributes["http_status"] != 503 {
+			t.Fatalf("order changed the selected endpoint: %+v", item.Attributes)
+		}
+	}
+}
+
+func TestStatus_LegacyAliasResolves(t *testing.T) {
+	cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"name":"api","group":"prod","key":"dev_prod_api","results":[{"success":false,"status":503,"timestamp":"2026-07-25T11:00:00Z"}]}]`))
+	})
+	item, err := cli.Status(context.Background(), "x", "prod_api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Attributes["endpoint_key"] != "dev_prod_api" || item.Attributes["http_status"] != 503 {
+		t.Fatalf("group/name alias did not resolve: %+v", item.Attributes)
+	}
+}
+
+func TestStatus_DuplicateExactKeyIsAmbiguous(t *testing.T) {
+	cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[
+			{"name":"one","key":"api","results":[{"success":true,"status":200,"timestamp":"2026-07-25T11:00:00Z"}]},
+			{"name":"two","key":"api","results":[{"success":false,"status":503,"timestamp":"2026-07-25T11:00:00Z"}]}
+		]`))
+	})
+	if _, err := cli.Status(context.Background(), "x", "api"); !errors.Is(err, errEndpointAmbiguous) {
+		t.Fatalf("err=%v, want ambiguity", err)
+	}
+}
+
+func TestStatus_MultipleAliasesAreAmbiguous(t *testing.T) {
+	cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[
+			{"name":"api","key":"first","results":[{"success":true,"status":200,"timestamp":"2026-07-25T11:00:00Z"}]},
+			{"name":"api","key":"second","results":[{"success":false,"status":503,"timestamp":"2026-07-25T11:00:00Z"}]}
+		]`))
+	})
+	if _, err := cli.Status(context.Background(), "x", "api"); !errors.Is(err, errEndpointAmbiguous) {
+		t.Fatalf("err=%v, want ambiguity", err)
+	}
+}
+
+func TestEvidenceInWindow_ExactKeyBeatsEarlierAlias(t *testing.T) {
+	cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[
+			{"name":"prod_api","group":"dev","key":"dev_prod_api","results":[{"success":true,"status":200,"timestamp":"2026-07-25T11:00:00Z"}]},
+			{"name":"api","group":"prod","key":"prod_api","results":[{"success":false,"status":503,"timestamp":"2026-07-25T11:00:00Z"}]}
+		]`))
+	})
+	start := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	items, _, err := cli.EvidenceInWindow(context.Background(), "x", "prod_api", start, end, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Attributes["http_status"] != 503 {
+		t.Fatalf("window used an alias: %+v", items)
 	}
 }
 

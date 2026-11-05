@@ -21,6 +21,12 @@ The Gatus adapter has this behavior:
 - The adapter accepts `duration` as a nanosecond number (stock Gatus) or a
   string.
 - The adapter selects the most recent state by the greatest correct timestamp.
+- Endpoint resolution uses exact `key` values across the complete collection
+  before compatibility aliases. A `name` or `group_name` alias is used only
+  when no exact key exists.
+- Duplicate exact keys and multiple matching aliases give an explicit ambiguity
+  source error. The adapter does not select an arbitrary row.
+- Row order does not change the selected endpoint.
 - Tests include empty arrays, empty results, unknown fields, and unordered
   history.
 
