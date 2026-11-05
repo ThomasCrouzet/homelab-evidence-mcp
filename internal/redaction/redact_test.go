@@ -40,6 +40,95 @@ func TestApply_RedactsCompleteAuthorizationCredentials(t *testing.T) {
 	}
 }
 
+func TestApply_RedactsCompleteCookieHeaders(t *testing.T) {
+	e, err := New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name    string
+		in      string
+		want    string
+		regions int
+		secrets []string
+	}{
+		{
+			name:    "multiple cookies",
+			in:      "Cookie: sid=alpha; refresh=bravo",
+			want:    replacement,
+			regions: 1,
+			secrets: []string{"alpha", "bravo"},
+		},
+		{
+			name:    "mixed case set-cookie",
+			in:      "sEt-CoOkIe: sid=alpha; refresh=bravo; HttpOnly",
+			want:    replacement,
+			regions: 1,
+			secrets: []string{"alpha", "bravo"},
+		},
+		{
+			name:    "whitespace variants",
+			in:      "set-cookie:\t  sid=alpha ;   refresh=bravo",
+			want:    replacement,
+			regions: 1,
+			secrets: []string{"alpha", "bravo"},
+		},
+		{
+			name:    "quoted value",
+			in:      `Cookie: sid="alpha beta"; refresh="bravo charlie"`,
+			want:    replacement,
+			regions: 1,
+			secrets: []string{"alpha", "beta", "bravo", "charlie"},
+		},
+		{
+			name:    "equals separator",
+			in:      "cookie=sid=alpha; refresh=bravo",
+			want:    replacement,
+			regions: 1,
+			secrets: []string{"alpha", "bravo"},
+		},
+		{
+			name:    "line boundaries",
+			in:      "before line\nCookie: sid=alpha; refresh=bravo\nafter line",
+			want:    "before line\n" + replacement + "\nafter line",
+			regions: 1,
+			secrets: []string{"alpha", "bravo"},
+		},
+		{
+			name:    "prefix text on the same line",
+			in:      "upstream sent Cookie: sid=alpha; refresh=bravo",
+			want:    "upstream sent " + replacement,
+			regions: 1,
+			secrets: []string{"alpha", "bravo"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			out, n := e.Apply(test.in)
+			if n != test.regions || out != test.want {
+				t.Fatalf("out=%q regions=%d, want %q regions=%d", out, n, test.want, test.regions)
+			}
+			for _, secret := range test.secrets {
+				if strings.Contains(out, secret) {
+					t.Fatalf("cookie value %q exposed: %q", secret, out)
+				}
+			}
+		})
+	}
+}
+
+func TestApply_CookieProseDoesNotMatch(t *testing.T) {
+	e, err := New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := "the cookie: tasty"
+	out, n := e.Apply(in)
+	if n != 0 || out != in {
+		t.Fatalf("out=%q regions=%d, want unchanged", out, n)
+	}
+}
+
 func TestApply_RedactsJSONCredentials(t *testing.T) {
 	e, err := New(nil)
 	if err != nil {

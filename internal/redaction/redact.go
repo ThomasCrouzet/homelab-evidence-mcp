@@ -48,7 +48,11 @@ func New(rules []Rule) (*Engine, error) {
 		`(?i)AKIA[0-9A-Z]{16}`,
 		`(?is)-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----.*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----`,
 		`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`,
-		`(?i)(cookie|set-cookie)\s*[:=]\s*\S+`,
+		// A Cookie or Set-Cookie header value continues to the end of its line.
+		// The pattern requires a name=value pair, so prose such as
+		// "the cookie: tasty" does not match. CR and LF end the header, which
+		// keeps adjacent lines intact.
+		`(?i)\b(set-cookie|cookie)\s*[:=][ \t]*[^=\s;\r\n]+=[^\r\n]*`,
 	}
 	for _, p := range builtins {
 		re, err := regexp.Compile(p)

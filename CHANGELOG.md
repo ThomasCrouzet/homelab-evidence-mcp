@@ -4,6 +4,13 @@ This file records project changes. Its format uses
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Redact complete `Cookie` and `Set-Cookie` header values instead of the first
+  cookie pair only.
+
 ## [0.1.3] - 2026-10-23
 
 ### Fixed
