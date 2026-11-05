@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/audit"
@@ -30,6 +32,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	configPath := fs.String("config", "", "path to YAML configuration file")
 	showVersion := fs.Bool("version", false, "print version and exit")
 	validateOnly := fs.Bool("validate", false, "load and validate config (and tokens/destinations) then exit")
+	doctor := fs.Bool("doctor", false, "run bounded read-only source diagnostics then exit")
+	jsonOutput := fs.Bool("json", false, "use JSON output with --doctor")
 	logLevel := fs.String("log-level", "info", "log level: debug, info, warn, error")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -44,6 +48,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if *configPath == "" {
 		_, _ = fmt.Fprintln(stderr, "error: --config is necessary")
+		return 2
+	}
+	if *jsonOutput && !*doctor {
+		_, _ = fmt.Fprintln(stderr, "error: --json is only valid with --doctor")
+		return 2
+	}
+	if *doctor && *validateOnly {
+		_, _ = fmt.Fprintln(stderr, "error: use only one of --validate or --doctor")
 		return 2
 	}
 
@@ -62,7 +74,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	auditOut := io.Writer(stderr)
 	var closer io.Closer
-	if !*validateOnly && cfg.Audit.File != "" {
+	if !*validateOnly && !*doctor && cfg.Audit.File != "" {
 		rf, err := audit.OpenRotating(cfg.Audit.File, cfg.Audit.MaxBytes, cfg.Audit.MaxFiles)
 		if err != nil {
 			log.Error("audit file open failed", "err", err)
@@ -88,6 +100,26 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
+	if *doctor {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		report := app.Doctor(ctx)
+		if *jsonOutput {
+			encoder := json.NewEncoder(stdout)
+			encoder.SetIndent("", "  ")
+			if err := encoder.Encode(report); err != nil {
+				log.Error("doctor output failed", "err", err)
+				return 1
+			}
+		} else {
+			writeDoctorHuman(stdout, report)
+		}
+		if !report.Complete {
+			return 1
+		}
+		return 0
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -100,6 +132,24 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func writeDoctorHuman(out io.Writer, report mcpserver.DoctorReport) {
+	_, _ = fmt.Fprintf(out, "doctor: version=%s readonly=%v sources=%d services=%d complete=%v\n",
+		report.Version, report.ReadOnly, len(report.Sources), report.ServicesCount, report.Complete)
+	for _, source := range report.Sources {
+		_, _ = fmt.Fprintf(out, "source %s (%s): status=%s reason=%s complete=%v capabilities=%s\n",
+			source.Name, source.Kind, source.Status, source.Reason, source.Complete,
+			strings.Join(source.Capabilities, ","))
+		for _, binding := range source.Bindings {
+			_, _ = fmt.Fprintf(out, "  service %s: status=%s reason=%s complete=%v items=%d\n",
+				binding.ServiceID, binding.Status, binding.Reason, binding.Complete, binding.ItemCount)
+		}
+	}
+	for _, warning := range report.Warnings {
+		_, _ = fmt.Fprintf(out, "warning: %s\n", warning)
+	}
+	_, _ = fmt.Fprintln(out, mcpserver.DoctorSummary(report))
 }
 
 func parseLevel(s string) (slog.Level, bool) {

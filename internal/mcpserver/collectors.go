@@ -274,7 +274,8 @@ func reasonForError(err error) string {
 	}
 	message := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(message, "authentication"):
+	case strings.Contains(message, "authentication"),
+		strings.Contains(message, " 401"), strings.Contains(message, " 403"):
 		return "authentication_failed"
 	case strings.Contains(message, "timeout"):
 		return "timeout"
