@@ -53,7 +53,7 @@ All routes below use `GET`.
 | Gatus | `/api/v1/endpoints/statuses` | Endpoint checks |
 | Docker Engine | `/containers/json?all=true` | Container snapshot |
 | Loki | `/loki/api/v1/query_range` | Log lines |
-| Healthchecks | `/api/v3/checks/` and optional flips | Current states or dated transitions |
+| Healthchecks | `/api/v3/checks/`, optional flips | States or transitions |
 | Beszel | `/api/collections/systems/records` | Host snapshot |
 | ntfy | `/{topic}/json?poll=1&since=<unix>` | Notifications |
 
