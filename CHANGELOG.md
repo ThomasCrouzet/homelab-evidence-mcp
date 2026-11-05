@@ -29,6 +29,8 @@ This file records project changes. Its format uses
   for the same upstream response.
 - Reject a static header that collides with the effective authentication header
   in any letter case, and canonicalize outbound header names.
+- Preserve the ntfy `X-Messages-Truncated` signal on source cache hits without
+  retaining other response headers.
 
 ## [0.1.3] - 2026-10-23
 

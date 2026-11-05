@@ -28,6 +28,9 @@ const (
 	maxCacheBytes   = 32 << 20
 	maxCacheEntries = 128
 	cacheTimeHeader = "X-Homelab-Evidence-Cache-Time"
+	// UpstreamTruncatedHeader is the ntfy replay-limit signal. It is the only
+	// upstream header retained by the source cache.
+	UpstreamTruncatedHeader = "X-Messages-Truncated"
 )
 
 // destination contains a base URL set at startup.
@@ -49,6 +52,7 @@ type cacheEntry struct {
 	body        []byte
 	collectedAt time.Time
 	expiresAt   time.Time
+	truncated   bool
 }
 
 // LockedClient sends GET requests only to destinations in its registry.
@@ -280,14 +284,18 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 	cacheKey := destName + "\n" + keyedFingerprint("path", path, c.cacheKey[:]) +
 		"\n" + headerFingerprint(headers, c.cacheKey[:])
 	if c.cacheTTL > 0 {
-		if body, status, collectedAt, ok := c.cacheGet(cacheKey); ok {
+		if body, status, collectedAt, truncated, ok := c.cacheGet(cacheKey); ok {
 			c.hits.Add(1)
+			header := http.Header{
+				cacheTimeHeader: []string{collectedAt.Format(time.RFC3339Nano)},
+			}
+			if truncated {
+				header.Set(UpstreamTruncatedHeader, "1")
+			}
 			resp := &http.Response{
 				StatusCode: status,
-				Header: http.Header{
-					cacheTimeHeader: []string{collectedAt.Format(time.RFC3339Nano)},
-				},
-				Body: http.NoBody,
+				Header:     header,
+				Body:       http.NoBody,
 			}
 			return resp, body, nil
 		}
@@ -335,9 +343,20 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 	resp.Header.Set(cacheTimeHeader, collectedAt.Format(time.RFC3339Nano))
 
 	if c.cacheTTL > 0 && resp.StatusCode == http.StatusOK {
-		c.cachePut(cacheKey, resp.StatusCode, body, collectedAt)
+		c.cachePut(cacheKey, resp.StatusCode, body, collectedAt, headerFlag(resp.Header, UpstreamTruncatedHeader))
 	}
 	return resp, body, nil
+}
+
+func headerFlag(header http.Header, name string) bool {
+	value := strings.TrimSpace(header.Get(name))
+	return value == "1" || strings.EqualFold(value, "true")
+}
+
+// UpstreamTruncated reports the ntfy replay-limit signal on a direct or cached
+// response.
+func UpstreamTruncated(resp *http.Response) bool {
+	return resp != nil && headerFlag(resp.Header, UpstreamTruncatedHeader)
 }
 
 func headerFingerprint(h map[string]string, key []byte) string {
@@ -363,23 +382,23 @@ func keyedFingerprint(label, value string, key []byte) string {
 	return "<keyed:" + hex.EncodeToString(mac.Sum(nil)[:12]) + ">"
 }
 
-func (c *LockedClient) cacheGet(key string) ([]byte, int, time.Time, bool) {
+func (c *LockedClient) cacheGet(key string) ([]byte, int, time.Time, bool, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.cache[key]
 	if !ok {
-		return nil, 0, time.Time{}, false
+		return nil, 0, time.Time{}, false, false
 	}
 	if time.Now().After(e.expiresAt) {
 		c.removeCacheLocked(key)
-		return nil, 0, time.Time{}, false
+		return nil, 0, time.Time{}, false, false
 	}
 	body := make([]byte, len(e.body))
 	copy(body, e.body)
-	return body, e.status, e.collectedAt, true
+	return body, e.status, e.collectedAt, e.truncated, true
 }
 
-func (c *LockedClient) cachePut(key string, status int, body []byte, collectedAt time.Time) {
+func (c *LockedClient) cachePut(key string, status int, body []byte, collectedAt time.Time, truncated bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	bodyBytes := int64(len(body))
@@ -404,6 +423,7 @@ func (c *LockedClient) cachePut(key string, status int, body []byte, collectedAt
 		body:        cp,
 		collectedAt: collectedAt.UTC(),
 		expiresAt:   time.Now().Add(c.cacheTTL),
+		truncated:   truncated,
 	}
 	c.cacheOrder = append(c.cacheOrder, key)
 	c.cacheBytes += bodyBytes

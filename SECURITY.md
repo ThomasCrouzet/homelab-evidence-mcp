@@ -101,7 +101,8 @@ The server and the operator use these controls for secrets:
   again.
 - An HMAC fingerprint also replaces paths and query strings in cache keys.
 - The source response cache does not keep response headers. This includes
-  `Set-Cookie`.
+  `Set-Cookie` and authentication challenges. It keeps only the ntfy
+  `X-Messages-Truncated` signal as a boolean for cache hits.
 - Make sure that only the owner can access the YAML configuration.
 - On Unix, the server creates the audit file in mode `0600`.
 - On Windows, use a user-only ACL for the audit file path. The binary does not

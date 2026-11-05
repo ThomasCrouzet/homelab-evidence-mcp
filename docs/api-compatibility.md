@@ -129,4 +129,8 @@ The ntfy adapter has this behavior:
   `attributes.priority_valid` to `false`.
 - The adapter ignores events other than `message`.
 - An invalid or truncated NDJSON line gives an explicit source error.
+- `X-Messages-Truncated: 1` marks the source and grouped result as incomplete,
+  even when the local item limit is not reached. The signal survives a source
+  cache hit. Other response headers are not retained.
 - The adapter sorts messages before it uses the limit.
+- Local item truncation remains visible with or without the upstream signal.
