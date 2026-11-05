@@ -158,6 +158,9 @@ func (a *App) collectNtfy(ctx context.Context, serviceID string, ref *config.Ntf
 
 func (a *App) withSourceTimeout(ctx context.Context, sourceName string, kind evidence.SourceKind, fn func(context.Context) ([]evidence.Item, error)) (evidence.SourceOutcome, []evidence.Item) {
 	t0 := time.Now()
+	if err := ctx.Err(); err != nil {
+		return a.sourceErrorOutcome(ctx, ctx, sourceName, kind, err, t0), nil
+	}
 	if a.sourceSem != nil {
 		select {
 		case a.sourceSem <- struct{}{}:
@@ -183,8 +186,11 @@ func (a *App) withSourceTimeout(ctx context.Context, sourceName string, kind evi
 
 func (a *App) sourceErrorOutcome(ctx, sourceCtx context.Context, sourceName string, kind evidence.SourceKind, err error, started time.Time) evidence.SourceOutcome {
 	status := "error"
-	if errors.Is(sourceCtx.Err(), context.DeadlineExceeded) ||
-		errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	switch {
+	case errors.Is(ctx.Err(), context.Canceled) || errors.Is(sourceCtx.Err(), context.Canceled):
+		status = "canceled"
+	case errors.Is(sourceCtx.Err(), context.DeadlineExceeded) ||
+		errors.Is(ctx.Err(), context.DeadlineExceeded):
 		status = "timeout"
 	}
 	return evidence.SourceOutcome{

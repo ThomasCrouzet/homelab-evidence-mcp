@@ -66,10 +66,15 @@ A grouped response contains:
 
 - The requested and effective windows
 - Items sorted by date, source, identity, and identifier
-- The state and truncation of each source: `ok`, `error`, `timeout`, `skipped`,
-  or `absent`
+- The state and truncation of each source: `ok`, `error`, `timeout`,
+  `canceled`, `skipped`, or `absent`
 - The truncation indicator and warnings
 - A factual summary without causal claims
+
+A canceled request is not a successful collection, even when a warm source
+cache could answer it. The server checks the caller context before a cache read
+and before it starts network work. Cancellation releases the tool and source
+slots.
 
 ## Honesty rules
 

@@ -110,8 +110,9 @@ make build
   chat.
 - Keep `severity` as presentation, not diagnosis. Keep it and `factual_summary`
   causal-free.
-- Keep missing data missing. Report `ok`, `absent`, `skipped`, `error`, or
-  `timeout` per source, because an empty list must not look healthy.
+- Keep missing data missing. Report `ok`, `absent`, `skipped`, `error`,
+  `timeout`, or `canceled` per source, because an empty list must not look
+  healthy.
 - Do not add start, stop, restart, exec, write, or delete operations. The tool
   must stay unable to change the homelab.
 - Keep config and token files owner-only (mode `0600`, user ACL on Windows) and

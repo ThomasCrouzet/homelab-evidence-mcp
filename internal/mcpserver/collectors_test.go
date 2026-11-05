@@ -31,6 +31,45 @@ func TestFilterCurrentSnapshots(t *testing.T) {
 	}
 }
 
+func TestSourceErrorOutcomeDistinguishesCancellation(t *testing.T) {
+	app := &App{}
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	outcome := app.sourceErrorOutcome(canceledCtx, canceledCtx, "source", evidence.SourceGatus, context.Canceled, time.Now())
+	if outcome.Status != "canceled" {
+		t.Fatalf("canceled=%+v", outcome)
+	}
+
+	deadlineCtx, stop := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer stop()
+	outcome = app.sourceErrorOutcome(deadlineCtx, deadlineCtx, "source", evidence.SourceGatus, context.DeadlineExceeded, time.Now())
+	if outcome.Status != "timeout" {
+		t.Fatalf("deadline=%+v", outcome)
+	}
+
+	outcome = app.sourceErrorOutcome(context.Background(), context.Background(), "source", evidence.SourceGatus, context.Canceled, time.Now())
+	if outcome.Status != "error" {
+		t.Fatalf("plain error=%+v", outcome)
+	}
+}
+
+func TestWithSourceTimeoutSkipsCanceledWork(t *testing.T) {
+	app := &App{
+		Cfg:       &config.Config{Limits: config.Limits{PerSourceTimeout: time.Second}},
+		sourceSem: make(chan struct{}, 1),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	called := false
+	outcome, items := app.withSourceTimeout(ctx, "source", evidence.SourceGatus, func(context.Context) ([]evidence.Item, error) {
+		called = true
+		return nil, nil
+	})
+	if called || len(items) != 0 || outcome.Status != "canceled" {
+		t.Fatalf("called=%v items=%d outcome=%+v", called, len(items), outcome)
+	}
+}
+
 func TestWithSourceTimeoutLimitsConcurrency(t *testing.T) {
 	app := &App{
 		Cfg: &config.Config{Limits: config.Limits{

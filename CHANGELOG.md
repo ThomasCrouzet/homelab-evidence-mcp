@@ -20,6 +20,8 @@ This file records project changes. Its format uses
 
 - Redact complete `Cookie` and `Set-Cookie` header values instead of the first
   cookie pair only.
+- Check the caller context before a source cache read or network request, and
+  report a canceled source outcome instead of a successful cached collection.
 - Support Healthchecks `unique_key` bindings with read-only API keys, and
   report an unmatched binding as a source error instead of an empty success.
 - Resolve exact Gatus endpoint keys before compatibility aliases and report an

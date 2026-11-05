@@ -244,6 +244,10 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 	if ctx == nil {
 		return nil, nil, errors.New("nil context")
 	}
+	if err := ctx.Err(); err != nil {
+		// A canceled caller must not get a successful cached snapshot.
+		return nil, nil, err
+	}
 	if !strings.HasPrefix(path, "/") {
 		return nil, nil, fmt.Errorf("path must start with /")
 	}
