@@ -81,8 +81,11 @@ The server and the operator use these controls for secrets:
 - The server does not accept query strings, fragments, and userinfo in `base_url`.
 - Errors and capabilities do not show tokens, URLs, or destination hostnames.
   They use the logical source name.
-- Built-in redaction includes passwords, bearer tokens, cookies, usual keys,
-  email addresses, and private-key headers. It also includes other secret forms.
+- Built-in redaction includes passwords, bearer tokens, complete `Cookie` and
+  `Set-Cookie` header values, usual keys, email addresses, and private-key
+  headers. It also includes other secret forms.
+  A cookie header value continues to the end of its line. Content on other
+  lines is not part of the header and remains unchanged.
 - Configured authentication tokens are exact redaction rules, including values
   echoed without a label in source responses and cached evidence.
 - MCP error responses use the configured redaction rules.
