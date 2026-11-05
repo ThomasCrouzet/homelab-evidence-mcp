@@ -4,6 +4,7 @@ package gatus
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -14,6 +15,10 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/httpx"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 )
+
+// errEndpointAmbiguous reports a selector that identifies more than one endpoint.
+// The error omits the configured key.
+var errEndpointAmbiguous = errors.New("gatus endpoint selection is ambiguous")
 
 // Client gets data from the Gatus status route and compatible variants.
 type Client struct {
@@ -75,7 +80,10 @@ func (c *Client) Status(ctx context.Context, serviceID, endpointKey string) (evi
 	if err != nil {
 		return evidence.Item{}, err
 	}
-	ep, ok := findEndpoint(list, endpointKey)
+	ep, ok, err := findEndpoint(list, endpointKey)
+	if err != nil {
+		return evidence.Item{}, err
+	}
 	if !ok {
 		return c.missingItem(serviceID, endpointKey, snapshotAt, retrievedAt), nil
 	}
@@ -108,7 +116,10 @@ func (c *Client) EvidenceInWindow(ctx context.Context, serviceID, endpointKey st
 	if err != nil {
 		return nil, false, err
 	}
-	ep, ok := findEndpoint(list, endpointKey)
+	ep, ok, err := findEndpoint(list, endpointKey)
+	if err != nil {
+		return nil, false, err
+	}
 	if !ok {
 		// A missing endpoint is a current snapshot, not a historical event.
 		if snapshotAt.Before(start) || snapshotAt.After(end.Add(30*time.Second)) {
@@ -188,21 +199,43 @@ func (c *Client) fetchAll(ctx context.Context, fallback time.Time) ([]endpointSt
 	return nil, time.Time{}, fmt.Errorf("gatus: no statuses endpoint available")
 }
 
-func findEndpoint(list []endpointStatus, key string) (endpointStatus, bool) {
+func findEndpoint(list []endpointStatus, key string) (endpointStatus, bool, error) {
 	key = strings.TrimSpace(key)
+	// Exact keys take precedence over compatibility aliases. Check the complete
+	// collection first so that an earlier alias cannot mask a later exact key.
+	var exact []endpointStatus
 	for _, ep := range list {
 		if ep.Key == key {
-			return ep, true
-		}
-		// Some versions use a name or group_name composition. The adapter can use these compositions.
-		if ep.Name == key {
-			return ep, true
-		}
-		if ep.Group != "" && ep.Group+"_"+ep.Name == key {
-			return ep, true
+			exact = append(exact, ep)
 		}
 	}
-	return endpointStatus{}, false
+	switch len(exact) {
+	case 1:
+		return exact[0], true, nil
+	case 0:
+	default:
+		return endpointStatus{}, false, errEndpointAmbiguous
+	}
+	// Some versions use a name or group_name composition. An alias is valid
+	// only when it identifies one endpoint.
+	var aliases []endpointStatus
+	for _, ep := range list {
+		if ep.Name == key {
+			aliases = append(aliases, ep)
+			continue
+		}
+		if ep.Group != "" && ep.Group+"_"+ep.Name == key {
+			aliases = append(aliases, ep)
+		}
+	}
+	switch len(aliases) {
+	case 1:
+		return aliases[0], true, nil
+	case 0:
+		return endpointStatus{}, false, nil
+	default:
+		return endpointStatus{}, false, errEndpointAmbiguous
+	}
 }
 
 func (c *Client) itemFromEndpoint(serviceID string, ep endpointStatus, snapshotAt, retrievedAt time.Time) evidence.Item {
