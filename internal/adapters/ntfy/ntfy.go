@@ -37,8 +37,43 @@ type message struct {
 	Event    string   `json:"event"`
 	Title    string   `json:"title"`
 	Message  string   `json:"message"`
-	Priority int      `json:"priority"`
+	Priority *int     `json:"priority"`
 	Tags     []string `json:"tags"`
+}
+
+// ntfy priorities. Priority 3 is the source default for an omitted value.
+const (
+	ntfyDefaultPriority = 3
+	ntfyMinimumPriority = 1
+	ntfyMaximumPriority = 5
+)
+
+// severityForPriority maps notification urgency to presentation severity.
+// It does not prove an incident. Values outside 1..5 are not classified.
+func severityForPriority(priority int) (evidence.Severity, bool) {
+	switch priority {
+	case 1, 2, 3:
+		return evidence.SeverityInfo, true
+	case 4:
+		return evidence.SeverityError, true
+	case 5:
+		return evidence.SeverityCritical, true
+	default:
+		return evidence.SeverityUnknown, false
+	}
+}
+
+// effectivePriority returns the source value and whether it is valid.
+// An omitted priority uses the ntfy default. An explicit out-of-range value
+// stays visible as invalid.
+func effectivePriority(reported *int) (int, bool) {
+	if reported == nil {
+		return ntfyDefaultPriority, true
+	}
+	if *reported < ntfyMinimumPriority || *reported > ntfyMaximumPriority {
+		return *reported, false
+	}
+	return *reported, true
 }
 
 // History gives notifications between start and end with the specified limit.
@@ -165,14 +200,10 @@ func (c *Client) itemFrom(serviceID, topic string, m message, ts, now time.Time,
 	// Free-form notifications are untrusted data, like Loki lines.
 	cleaned = redaction.NeutralizeInstructionLike(cleaned)
 	cleaned, trunc := redaction.TruncateBytes(cleaned, maxLineBytes)
-	sev := evidence.SeverityInfo
-	switch {
-	case m.Priority >= 5:
-		sev = evidence.SeverityCritical
-	case m.Priority == 4:
-		sev = evidence.SeverityError
-	case m.Priority == 3:
-		sev = evidence.SeverityWarning
+	priority, priorityValid := effectivePriority(m.Priority)
+	sev, validMapping := severityForPriority(priority)
+	if !priorityValid || !validMapping {
+		sev = evidence.SeverityUnknown
 	}
 	sum := cleaned
 	if len([]rune(sum)) > 200 {
@@ -182,8 +213,11 @@ func (c *Client) itemFrom(serviceID, topic string, m message, ts, now time.Time,
 	}
 	attrs := map[string]any{
 		"topic":    cleanTopic,
-		"priority": m.Priority,
+		"priority": priority,
 		"message":  cleaned,
+	}
+	if !priorityValid {
+		attrs["priority_valid"] = false
 	}
 	if len(m.Tags) > 0 {
 		tagCount := len(m.Tags)

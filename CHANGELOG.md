@@ -14,6 +14,8 @@ This file records project changes. Its format uses
   report an unmatched binding as a source error instead of an empty success.
 - Resolve exact Gatus endpoint keys before compatibility aliases and report an
   ambiguous selection instead of choosing the first row.
+- Treat an omitted ntfy priority as the default `3` and map explicit
+  out-of-range priorities to `unknown`.
 
 ## [0.1.3] - 2026-10-23
 

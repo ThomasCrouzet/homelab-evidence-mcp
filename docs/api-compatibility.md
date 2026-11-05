@@ -119,6 +119,11 @@ The ntfy adapter has this behavior:
 - The adapter accepts NDJSON and JSON arrays.
 - The adapter reads `id`, `time`, `event`, `message`, `title`, `priority`, and
   `tags`.
+- An omitted priority uses the ntfy default of `3`. Priorities `1`, `2`, and `3`
+  map to `info`, `4` maps to `error`, and `5` maps to `critical`. These values
+  are presentation severity only and do not prove an incident.
+- An explicit priority outside `1` through `5` maps to `unknown` and sets
+  `attributes.priority_valid` to `false`.
 - The adapter ignores events other than `message`.
 - An invalid or truncated NDJSON line gives an explicit source error.
 - The adapter sorts messages before it uses the limit.
