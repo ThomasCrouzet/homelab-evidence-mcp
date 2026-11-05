@@ -50,6 +50,9 @@ The sources set `observed_at` as follows:
 When the source response cache supplies a current snapshot, `observed_at`
 keeps its initial time. `retrieved_at` contains the time of the current read.
 Thus, the freshness continues to show the age of the observation.
+The server assigns one collection time after it reads a successful response
+body. The direct response and every cache hit use that same time. A refresh
+after the TTL assigns a new collection time.
 
 `incident_context` includes a current Docker, Healthchecks, or Beszel snapshot
 only when its collection time is in the requested window. The check allows a
