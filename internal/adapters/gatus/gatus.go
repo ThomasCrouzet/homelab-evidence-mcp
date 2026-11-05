@@ -158,7 +158,7 @@ func (c *Client) EvidenceInWindow(ctx context.Context, serviceID, endpointKey st
 		pairs = pairs[len(pairs)-max:]
 	}
 	for _, p := range pairs {
-		item := c.itemFromResult(serviceID, ep, p.r, p.ts, retrievedAt)
+		item := c.itemFromResult(serviceID, ep, p.r, p.ts, retrievedAt, true)
 		item.WindowStart = timePtr(start)
 		item.WindowEnd = timePtr(end)
 		items = append(items, item)
@@ -271,9 +271,10 @@ func (c *Client) itemFromEndpoint(serviceID string, ep endpointStatus, snapshotA
 		}
 	}
 	// Select the maximum correct timestamp. Do not use the array order.
-	// Without a correct date, keep the first result at collection time.
+	// Without a correct date, keep the first result and mark the source time as
+	// unknown. observed_at then describes the snapshot collection, not the event.
 	best := ep.Results[0]
-	bestTS := snapshotAt
+	var bestTS time.Time
 	foundValid := false
 	for _, r := range ep.Results {
 		ts, ok := parseTS(r.Timestamp)
@@ -286,10 +287,14 @@ func (c *Client) itemFromEndpoint(serviceID string, ep endpointStatus, snapshotA
 			foundValid = true
 		}
 	}
-	return c.itemFromResult(serviceID, ep, best, bestTS, retrievedAt)
+	observedAt := snapshotAt
+	if foundValid {
+		observedAt = bestTS
+	}
+	return c.itemFromResult(serviceID, ep, best, observedAt, retrievedAt, foundValid)
 }
 
-func (c *Client) itemFromResult(serviceID string, ep endpointStatus, r endpointResult, ts, now time.Time) evidence.Item {
+func (c *Client) itemFromResult(serviceID string, ep endpointStatus, r endpointResult, ts, now time.Time, sourceTimeKnown bool) evidence.Item {
 	sev := evidence.SeverityInfo
 	rawSummary := fmt.Sprintf("gatus %s success status=%d", safeName(ep), r.Status)
 	if !r.Success {
@@ -300,12 +305,16 @@ func (c *Client) itemFromResult(serviceID string, ep endpointStatus, r endpointR
 	name, nameRedactions, nameCut := redaction.ApplyAndTruncate(c.Redact, ep.Name, 256)
 	group, groupRedactions, groupCut := redaction.ApplyAndTruncate(c.Redact, ep.Group, 256)
 	attrs := map[string]any{
-		"endpoint_key": key,
-		"name":         name,
-		"group":        group,
-		"success":      r.Success,
-		"http_status":  r.Status,
-		"found":        true,
+		"endpoint_key":      key,
+		"name":              name,
+		"group":             group,
+		"success":           r.Success,
+		"http_status":       r.Status,
+		"found":             true,
+		"source_time_known": sourceTimeKnown,
+	}
+	if !sourceTimeKnown {
+		attrs["collection_time_derived"] = true
 	}
 	redactions := keyRedactions + nameRedactions + groupRedactions
 	truncated := keyCut || nameCut || groupCut
@@ -333,6 +342,11 @@ func (c *Client) itemFromResult(serviceID string, ep endpointStatus, r endpointR
 	sum, rn, sumCut := redaction.ApplyAndTruncate(c.Redact, rawSummary, 512)
 	redactions += rn
 	truncated = truncated || sumCut
+	freshness := evidence.ComputeFreshness(ts, now)
+	if !sourceTimeKnown {
+		// A collection time must not imply that the source event is recent.
+		freshness = evidence.FreshnessUnknown
+	}
 	return evidence.Item{
 		ID:                evidence.NewOpaqueID("ev"),
 		ServiceID:         serviceID,
@@ -346,7 +360,7 @@ func (c *Client) itemFromResult(serviceID string, ep endpointStatus, r endpointR
 		Attributes:        attrs,
 		Truncated:         truncated,
 		RedactionsApplied: redactions,
-		Freshness:         evidence.ComputeFreshness(ts, now),
+		Freshness:         freshness,
 	}
 }
 

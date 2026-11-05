@@ -32,7 +32,12 @@ a size limit in
 
 The sources set `observed_at` as follows:
 
-- **Gatus**: `observed_at` contains the result timestamp.
+- **Gatus**: `observed_at` contains the result timestamp. If no result has a
+  valid timestamp, `observed_at` contains the snapshot collection time,
+  `attributes.source_time_known` is `false`,
+  `attributes.collection_time_derived` is `true`, and `freshness` is `unknown`.
+  A collection time does not prove that an undated event is recent. Historical
+  windows do not include undated results.
 - **Loki**: `observed_at` contains the nanosecond line timestamp.
 - **Healthchecks**: `observed_at` contains the current-state collection time.
   The `last_ping` value stays in an attribute.
