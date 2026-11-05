@@ -142,7 +142,7 @@ func (a *App) toolCapabilities(ctx context.Context, _ *mcp.CallToolRequest, _ em
 				"Gatus uses GET /api/v1/endpoints/statuses. It selects the result with the maximum timestamp, not by slice order.",
 				"Docker uses GET /containers/json?all=true. It gives filtered fields and does not include Config.Env. observed_at is the initial collection time.",
 				"Loki uses GET /loki/api/v1/query_range. The configuration supplies the selector.",
-				"Healthchecks uses GET /api/v3/checks/ with X-Api-Key. It does not include ping URLs.",
+				"Healthchecks uses GET /api/v3/checks/ with X-Api-Key. It accepts the unique_key from a read-only key. It does not include ping URLs, UUIDs, or unique keys.",
 				"Beszel uses GET /api/systems or /api/beszel/systems. It gives snapshot metrics.",
 				"ntfy uses GET /{topic}/json?poll=1. The configuration supplies the topic.",
 			},

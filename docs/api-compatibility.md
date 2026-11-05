@@ -65,10 +65,18 @@ The Healthchecks adapter has this behavior:
 - The adapter uses the authentication header in the configuration. The default
   header is
   `X-Api-Key`.
-- The adapter reads `name`, `slug`, `tags`, `status`, `grace`, `last_ping`, and
-  `next_ping`.
-- The adapter does not include ping URLs or UUIDs in its output.
+- The adapter reads `name`, `slug`, `tags`, `status`, `grace`, `last_ping`,
+  `next_ping`, `uuid`, and `unique_key`.
+- The adapter does not include ping URLs, UUIDs, or unique keys in its output.
 - The adapter accepts wrapped responses and raw arrays.
+- A read-only API key omits `uuid` and supplies `unique_key`. Bind the service
+  with `check_unique_key` in that case.
+- A full-access key can supply `uuid`. Existing `check_uuid` configurations keep
+  their behavior. The adapter does not derive one identity from the other.
+- `check_uuid` and `check_unique_key` cannot be set together. `check_name`,
+  `check_tags`, and one identity field combine with AND semantics.
+- A binding that selects no check gives a source error. It does not look like a
+  successful empty result.
 - The Healthchecks list API can show the current state. It cannot show a past
   incident.
 - A historical window does not include the current state.

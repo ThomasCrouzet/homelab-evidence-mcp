@@ -3,6 +3,7 @@ package healthchecks
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -129,6 +130,74 @@ func TestMissingChecksArrayIsAnError(t *testing.T) {
 	cli := setup(t, 200, map[string]any{})
 	if _, err := cli.Status(context.Background(), "s", Filter{Name: "a"}); err == nil {
 		t.Fatal("an incomplete object must not become an empty list")
+	}
+}
+
+func TestStatus_ReadOnlyUniqueKey(t *testing.T) {
+	const key = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	cli := setup(t, 200, map[string]any{
+		"checks": []map[string]any{
+			{
+				"name": "backup", "slug": "backup", "status": "down",
+				"unique_key": key,
+			},
+			{
+				"name": "other", "slug": "other", "status": "up",
+				"unique_key": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			},
+		},
+	})
+	items, err := cli.Status(context.Background(), "backup", Filter{UniqueKey: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Severity != "error" {
+		t.Fatalf("items=%+v", items)
+	}
+	raw, _ := json.Marshal(items)
+	if strings.Contains(string(raw), key) {
+		t.Fatalf("unique key must stay internal: %s", raw)
+	}
+}
+
+func TestStatus_UnknownUniqueKeyIsExplicit(t *testing.T) {
+	cli := setup(t, 200, map[string]any{
+		"checks": []map[string]any{{
+			"name": "backup", "slug": "backup", "status": "down",
+			"unique_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		}},
+	})
+	_, err := cli.Status(context.Background(), "backup", Filter{UniqueKey: "cccccccccccccccccccccccccccccccc"})
+	if !errors.Is(err, ErrNoMatch) {
+		t.Fatalf("err=%v, want ErrNoMatch", err)
+	}
+	if strings.Contains(err.Error(), "cccccccc") {
+		t.Fatalf("diagnostic disclosed the identity: %v", err)
+	}
+}
+
+func TestStatus_LegacyUUIDStillSelects(t *testing.T) {
+	const uuid = "11111111-1111-1111-1111-111111111111"
+	cli := setup(t, 200, map[string]any{
+		"checks": []map[string]any{{
+			"name": "backup", "slug": "backup", "status": "down", "uuid": uuid,
+		}},
+	})
+	items, err := cli.Status(context.Background(), "backup", Filter{UUID: uuid})
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items=%d err=%v", len(items), err)
+	}
+}
+
+func TestFailedInWindow_UnknownBindingIsExplicit(t *testing.T) {
+	cli := setup(t, 200, map[string]any{
+		"checks": []map[string]any{{"name": "backup", "status": "up", "tags": "ops"}},
+	})
+	start := time.Date(2026, 7, 25, 11, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	_, err := cli.FailedInWindow(context.Background(), "s", Filter{Tags: []string{"absent"}}, start, end)
+	if !errors.Is(err, ErrNoMatch) {
+		t.Fatalf("err=%v, want ErrNoMatch", err)
 	}
 }
 

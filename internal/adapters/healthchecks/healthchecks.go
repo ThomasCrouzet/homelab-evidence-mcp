@@ -4,6 +4,7 @@ package healthchecks
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -26,14 +27,15 @@ type Client struct {
 
 // check holds only the Healthchecks fields used.
 type check struct {
-	Name     string `json:"name"`
-	Slug     string `json:"slug"`
-	Tags     string `json:"tags"`
-	Grace    int    `json:"grace"`
-	Status   string `json:"status"`
-	LastPing string `json:"last_ping"`
-	NextPing string `json:"next_ping"`
-	UUID     string `json:"uuid"` // used only for internal filtering
+	Name      string `json:"name"`
+	Slug      string `json:"slug"`
+	Tags      string `json:"tags"`
+	Grace     int    `json:"grace"`
+	Status    string `json:"status"`
+	LastPing  string `json:"last_ping"`
+	NextPing  string `json:"next_ping"`
+	UUID      string `json:"uuid"`       // present only with a read-write key
+	UniqueKey string `json:"unique_key"` // present with a read-only key
 	// The client omits ping_url, update_url, pause_url, and badge_url.
 }
 
@@ -43,18 +45,33 @@ type listResponse struct {
 
 // Filter selects checks for a service.
 type Filter struct {
-	Name   string
-	Tags   []string
-	UUID   string
-	Status string // optional status filter
+	Name      string
+	Tags      []string
+	UUID      string
+	UniqueKey string
+	Status    string // optional status filter
 }
+
+// ErrNoMatch reports a configured binding that selected no check.
+// The error does not include the identity value.
+var ErrNoMatch = errors.New("healthchecks binding matched no check")
 
 // FilterFromRef makes a filter from the configuration.
 func FilterFromRef(ref *config.HealthchecksRef) Filter {
 	if ref == nil {
 		return Filter{}
 	}
-	return Filter{Name: ref.CheckName, Tags: ref.CheckTags, UUID: ref.CheckUUID, Status: ref.StatusFilter}
+	return Filter{
+		Name:      ref.CheckName,
+		Tags:      ref.CheckTags,
+		UUID:      ref.CheckUUID,
+		UniqueKey: ref.CheckUniqueKey,
+		Status:    ref.StatusFilter,
+	}
+}
+
+func (f Filter) selects() bool {
+	return f.Name != "" || f.UUID != "" || f.UniqueKey != "" || len(f.Tags) > 0 || f.Status != ""
 }
 
 // Status gives the current state of the selected checks.
@@ -65,6 +82,9 @@ func (c *Client) Status(ctx context.Context, serviceID string, f Filter) ([]evid
 		return nil, err
 	}
 	matched := filterChecks(checks, f)
+	if len(matched) == 0 && f.selects() {
+		return nil, ErrNoMatch
+	}
 	out := make([]evidence.Item, 0, len(matched))
 	for _, ch := range matched {
 		out = append(out, c.itemFrom(serviceID, ch, observedAt, retrievedAt))
@@ -81,8 +101,11 @@ func (c *Client) FailedInWindow(ctx context.Context, serviceID string, f Filter,
 		return nil, err
 	}
 	var matched []check
-	if serviceID != "" || f.Name != "" || f.UUID != "" || len(f.Tags) > 0 {
+	if serviceID != "" || f.selects() {
 		matched = filterChecks(checks, f)
+		if len(matched) == 0 && f.selects() {
+			return nil, ErrNoMatch
+		}
 	} else {
 		matched = checks
 	}
@@ -142,6 +165,9 @@ func filterChecks(checks []check, f Filter) []check {
 		if f.UUID != "" && !strings.EqualFold(ch.UUID, f.UUID) {
 			continue
 		}
+		if f.UniqueKey != "" && !strings.EqualFold(ch.UniqueKey, f.UniqueKey) {
+			continue
+		}
 		if f.Name != "" && !strings.EqualFold(ch.Name, f.Name) && !strings.EqualFold(ch.Slug, f.Name) {
 			continue
 		}
@@ -152,7 +178,7 @@ func filterChecks(checks []check, f Filter) []check {
 			continue
 		}
 		// An empty filter matches nothing. The global failed_crons path processes this case.
-		if f.UUID == "" && f.Name == "" && len(f.Tags) == 0 && f.Status == "" {
+		if !f.selects() {
 			continue
 		}
 		out = append(out, ch)
