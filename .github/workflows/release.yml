@@ -34,34 +34,7 @@ jobs:
 
       - name: Validate tag
         shell: bash
-        run: |
-          number='(0|[1-9][0-9]*)'
-          non_numeric='[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*'
-          prerelease="(${number}|${non_numeric})"
-          build='[0-9A-Za-z-]+'
-          semver="^v${number}\.${number}\.${number}"
-          semver+="(-${prerelease}(\.${prerelease})*)?"
-          semver+="(\+${build}(\.${build})*)?$"
-          if [[ ! "$GITHUB_REF_NAME" =~ $semver ]]; then
-            echo "Invalid version tag: $GITHUB_REF_NAME" >&2
-            exit 1
-          fi
-
-          release_version="${GITHUB_REF_NAME#v}"
-          makefile_version="$(awk '/^VERSION \?= / { print $3; exit }' Makefile)"
-          source_version="$(sed -nE 's/^var Version = "([^"]+)"$/\1/p' \
-            internal/version/version.go)"
-          if [ "$release_version" != "$makefile_version" ] || \
-            [ "$release_version" != "$source_version" ]; then
-            echo "Tag, Makefile, and source versions must be equal." >&2
-            exit 1
-          fi
-          if ! awk -v heading="## [$release_version] - " \
-            'index($0, heading) == 1 { found = 1 } END { exit !found }' \
-            CHANGELOG.md; then
-            echo "CHANGELOG.md has no section for $release_version." >&2
-            exit 1
-          fi
+        run: ./scripts/check-version.sh "$GITHUB_REF_NAME"
 
       - name: Markdown format
         run: make lint-docs
@@ -101,23 +74,7 @@ jobs:
 
       - name: Build matrix
         shell: bash
-        run: |
-          set -euo pipefail
-          ver="${GITHUB_REF_NAME#v}"
-          version_path="github.com/ThomasCrouzet/homelab-evidence-mcp"
-          version_path+="/internal/version.Version"
-          mkdir -p dist
-          for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
-            os="${pair%/*}"
-            arch="${pair#*/}"
-            ext=""
-            if [ "$os" = "windows" ]; then ext=".exe"; fi
-            out="dist/homelab-evidence-mcp_${os}_${arch}${ext}"
-            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath \
-              -ldflags="-s -w -X ${version_path}=${ver}" \
-              -o "$out" ./cmd/homelab-evidence-mcp
-          done
-          ls -la dist
+        run: make build-matrix VERSION="${GITHUB_REF_NAME#v}"
 
       - name: Release binary E2E
         env:

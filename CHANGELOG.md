@@ -6,6 +6,11 @@ This file records project changes. Its format uses
 
 ## [Unreleased]
 
+### Changed
+
+- Keep one authoritative version in `internal/version/version.txt`, embed it for
+  `go install`, and use the same Makefile build path in CI and release.
+
 ### Fixed
 
 - Redact complete `Cookie` and `Set-Cookie` header values instead of the first
