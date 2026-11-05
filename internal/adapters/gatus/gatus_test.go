@@ -19,12 +19,12 @@ func setup(t *testing.T, handler http.HandlerFunc) *Client {
 	t.Helper()
 	ts := httptest.NewServer(handler)
 	t.Cleanup(ts.Close)
-	hc := httpx.NewLockedClient(httpx.Options{Timeout: 2 * time.Second})
+	fixed := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: 2 * time.Second, Now: func() time.Time { return fixed }})
 	if err := hc.RegisterDestination("gatus", ts.URL); err != nil {
 		t.Fatal(err)
 	}
 	eng, _ := redaction.New(nil)
-	fixed := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
 	return &Client{HTTP: hc, DestName: "gatus", Redact: eng, Now: func() time.Time { return fixed }}
 }
 

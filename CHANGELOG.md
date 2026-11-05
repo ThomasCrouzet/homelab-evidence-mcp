@@ -20,6 +20,8 @@ This file records project changes. Its format uses
   instead of presenting the collection time as a recent observation.
 - Reopen the audit file after a recoverable rotation failure instead of leaving
   the writer closed until restart.
+- Keep one snapshot collection time across the direct response and cache hits
+  for the same upstream response.
 
 ## [0.1.3] - 2026-10-23
 

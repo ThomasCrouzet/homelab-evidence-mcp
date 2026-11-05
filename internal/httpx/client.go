@@ -65,6 +65,14 @@ type LockedClient struct {
 	cacheKey     [32]byte
 	hits         atomic.Uint64
 	misses       atomic.Uint64
+	now          func() time.Time
+}
+
+func (c *LockedClient) clock() time.Time {
+	if c.now != nil {
+		return c.now().UTC()
+	}
+	return time.Now().UTC()
 }
 
 // Options contains the client settings.
@@ -77,6 +85,8 @@ type Options struct {
 	// RootCAs contains the trust pool with additional certificates. TLS certificate verification is always active.
 	// The client does not give a skip-verify option.
 	RootCAs *x509.CertPool
+	// Now supplies the clock for snapshot collection times. Nil uses time.Now.
+	Now func() time.Time
 }
 
 // NewLockedClient makes a client with TLS certificate verification. Redirects cannot occur.
@@ -112,6 +122,7 @@ func NewLockedClient(opts Options) *LockedClient {
 		maxBody:      opts.MaxBody,
 		userAgent:    opts.UserAgent,
 		cacheTTL:     opts.CacheTTL,
+		now:          opts.Now,
 		cache:        make(map[string]cacheEntry),
 	}
 	if _, err := rand.Read(lc.cacheKey[:]); err != nil {
@@ -316,9 +327,14 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 	if int64(len(body)) > c.maxBody {
 		return resp, body[:c.maxBody], fmt.Errorf("response body exceeds %d bytes", c.maxBody)
 	}
+	// One collection time describes this snapshot for the direct response and
+	// every later cache hit. The header is internal and set after remote headers
+	// are removed. CollectionTime reads it in both paths.
+	collectedAt := c.clock()
+	resp.Header.Set(cacheTimeHeader, collectedAt.Format(time.RFC3339Nano))
 
 	if c.cacheTTL > 0 && resp.StatusCode == http.StatusOK {
-		c.cachePut(cacheKey, resp.StatusCode, body, time.Now().UTC())
+		c.cachePut(cacheKey, resp.StatusCode, body, collectedAt)
 	}
 	return resp, body, nil
 }
@@ -417,8 +433,10 @@ func (c *LockedClient) removeCacheLocked(key string) {
 	c.cacheOrder = c.cacheOrder[:n]
 }
 
-// CollectionTime gives the initial collection time of a cached response.
-// CollectionTime keeps fallback for a direct network response.
+// CollectionTime gives the collection time of a snapshot response.
+// A successful response carries the time of its body read. A cache hit carries
+// the initial time of the cached snapshot. Fallback applies only when the
+// response has no internal timestamp.
 func CollectionTime(resp *http.Response, fallback time.Time) time.Time {
 	fallback = fallback.UTC()
 	if resp == nil {

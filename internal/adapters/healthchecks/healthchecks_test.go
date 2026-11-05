@@ -30,11 +30,12 @@ func setup(t *testing.T, status int, body any) *Client {
 		}
 	}))
 	t.Cleanup(ts.Close)
-	hc := httpx.NewLockedClient(httpx.Options{Timeout: 2 * time.Second})
+	fixed := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: 2 * time.Second, Now: func() time.Time { return fixed }})
 	_ = hc.RegisterDestination("hc", ts.URL)
 	eng, _ := redaction.New(nil)
 	return &Client{HTTP: hc, DestName: "hc", Headers: map[string]string{"X-Api-Key": "readonly-test-token"}, Redact: eng, Now: func() time.Time {
-		return time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+		return fixed
 	}}
 }
 

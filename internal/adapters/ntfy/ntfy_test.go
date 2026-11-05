@@ -192,7 +192,7 @@ func TestHistory_MissingTimeUsesCollectionWithoutInventingHistory(t *testing.T) 
 		_, _ = w.Write([]byte(`{"id":"missing-time","event":"message","message":"ok"}` + "\n"))
 	}))
 	defer ts.Close()
-	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second, Now: func() time.Time { return t0 }})
 	_ = hc.RegisterDestination("ntfy", ts.URL)
 	cli := &Client{
 		HTTP: hc, DestName: "ntfy",

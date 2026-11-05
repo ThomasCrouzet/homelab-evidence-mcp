@@ -233,17 +233,17 @@ func TestGet_CacheHit(t *testing.T) {
 		t.Fatal(err)
 	}
 	fallback := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
-	if got := CollectionTime(firstResp, fallback); !got.Equal(fallback) {
-		t.Fatalf("direct response must not carry a cache time: %s", got)
+	firstTime := CollectionTime(firstResp, fallback)
+	if firstTime.Equal(fallback) || firstTime.Before(time.Now().UTC().Add(-time.Minute)) {
+		t.Fatalf("direct response must carry its collection time: %s", firstTime)
 	}
-	beforeHit := time.Now().UTC().Add(-time.Second)
 	cachedResp, _, err := c.Get(context.Background(), "main", "/x", nil) //nolint:bodyclose
 	if err != nil {
 		t.Fatal(err)
 	}
 	collectedAt := CollectionTime(cachedResp, fallback)
-	if collectedAt.Equal(fallback) || collectedAt.Before(beforeHit) || collectedAt.After(time.Now().UTC()) {
-		t.Fatalf("invalid cache time: %s", collectedAt)
+	if !collectedAt.Equal(firstTime) {
+		t.Fatalf("cache hit changed the observation time: %s != %s", collectedAt, firstTime)
 	}
 	if n != 1 {
 		t.Fatalf("expected 1 upstream call, got %d", n)
@@ -251,6 +251,52 @@ func TestGet_CacheHit(t *testing.T) {
 	st := c.Stats()
 	if st.Hits < 1 || st.Misses < 1 {
 		t.Fatalf("%+v", st)
+	}
+}
+
+func TestCollectionTime_StableAcrossCacheHits(t *testing.T) {
+	var calls int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		time.Sleep(40 * time.Millisecond)
+		w.Header().Set(cacheTimeHeader, "2001-01-01T00:00:00Z")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer ts.Close()
+	c := NewLockedClient(Options{Timeout: time.Second, CacheTTL: 200 * time.Millisecond})
+	if err := c.RegisterDestination("main", ts.URL); err != nil {
+		t.Fatal(err)
+	}
+	fallback := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	firstResp, _, err := c.Get(context.Background(), "main", "/x", nil) //nolint:bodyclose
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := CollectionTime(firstResp, fallback)
+	if first.Year() == 2001 {
+		t.Fatal("remote header forged the internal collection time")
+	}
+	secondResp, _, err := c.Get(context.Background(), "main", "/x", nil) //nolint:bodyclose
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second := CollectionTime(secondResp, fallback); !second.Equal(first) {
+		t.Fatalf("cache hit moved observed time: %s != %s", second, first)
+	}
+	if calls != 1 {
+		t.Fatalf("calls before expiry=%d, want=1", calls)
+	}
+	time.Sleep(220 * time.Millisecond)
+	thirdResp, _, err := c.Get(context.Background(), "main", "/x", nil) //nolint:bodyclose
+	if err != nil {
+		t.Fatal(err)
+	}
+	third := CollectionTime(thirdResp, fallback)
+	if !third.After(first) {
+		t.Fatalf("refresh did not record a new collection time: %s", third)
+	}
+	if calls != 2 {
+		t.Fatalf("calls after expiry=%d, want=2", calls)
 	}
 }
 
