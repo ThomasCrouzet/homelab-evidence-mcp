@@ -77,16 +77,23 @@ func effectivePriority(reported *int) (int, bool) {
 }
 
 // History gives notifications between start and end with the specified limit.
+// The boolean combines upstream and local truncation.
 func (c *Client) History(ctx context.Context, serviceID, topic string, start, end time.Time, limit int) ([]evidence.Item, bool, error) {
+	items, upstream, local, err := c.HistoryDetail(ctx, serviceID, topic, start, end, limit)
+	return items, upstream || local, err
+}
+
+// HistoryDetail also separates upstream and local truncation.
+func (c *Client) HistoryDetail(ctx context.Context, serviceID, topic string, start, end time.Time, limit int) ([]evidence.Item, bool, bool, error) {
 	now := c.now()
 	if topic == "" {
-		return nil, false, fmt.Errorf("ntfy topic is required")
+		return nil, false, false, fmt.Errorf("ntfy topic is required")
 	}
 	if limit <= 0 {
 		limit = 50
 	}
 	if !start.Before(end) {
-		return nil, false, fmt.Errorf("invalid time window")
+		return nil, false, false, fmt.Errorf("invalid time window")
 	}
 	// poll=1 gives messages from storage and does not open a stream.
 	q := url.Values{}
@@ -96,22 +103,22 @@ func (c *Client) History(ctx context.Context, serviceID, topic string, start, en
 	// LockedClient.Get closes the body before it gives the response.
 	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return nil, false, fmt.Errorf("ntfy authentication failed")
+		return nil, false, false, fmt.Errorf("ntfy authentication failed")
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, false, fmt.Errorf("ntfy topic not found")
+		return nil, false, false, fmt.Errorf("ntfy topic not found")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, false, fmt.Errorf("ntfy HTTP %d", resp.StatusCode)
+		return nil, false, false, fmt.Errorf("ntfy HTTP %d", resp.StatusCode)
 	}
 	snapshotAt := httpx.CollectionTime(resp, now)
 	upstreamTruncated := httpx.UpstreamTruncated(resp)
 	msgs, err := decodeMessages(body)
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 	maxLineBytes := c.MaxLineBytes
 	if maxLineBytes <= 0 {
@@ -142,8 +149,8 @@ func (c *Client) History(ctx context.Context, serviceID, topic string, start, en
 		item.WindowEnd = timePtr(end)
 		items = append(items, item)
 	}
-	kept, truncated := evidence.KeepNewest(items, limit)
-	return kept, truncated || upstreamTruncated, nil
+	kept, localTruncated := evidence.KeepNewest(items, limit)
+	return kept, upstreamTruncated, localTruncated, nil
 }
 
 func decodeMessages(body []byte) ([]message, error) {

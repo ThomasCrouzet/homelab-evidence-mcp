@@ -15,6 +15,10 @@ This file records project changes. Its format uses
   live verification.
 - Publish typed output schemas for all seven tools, keep empty collections as
   arrays, and document the compatibility policy.
+- Add source coverage fields (`reason`, `complete`, truncation split,
+  `discarded`, cache state and age) to every evidence result.
+- Return an MCP error for a failed single-source log search, including a stable
+  reason code. Valid empty searches remain successful.
 
 ### Changed
 

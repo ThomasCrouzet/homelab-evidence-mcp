@@ -77,6 +77,37 @@ cache could answer it. The server checks the caller context before a cache read
 and before it starts network work. Cancellation releases the tool and source
 slots.
 
+## Outcome and coverage
+
+Execution status and evidence coverage are separate:
+
+- `status` is `ok`, `error`, `timeout`, `canceled`, `skipped`, or `absent`.
+- `reason` is a stable coverage code:
+  `empty_result`, `no_binding`, `unmatched_binding`, `unsupported_history`,
+  `partial_invalid_records`, `truncated`, `timeout`, `canceled`,
+  `authentication_failed`, `upstream_error`, or `not_queried_by_tool`.
+- `complete` is true only when the source answered the requested coverage.
+- `truncated` combines `upstream_truncated` and `local_truncated`.
+- `discarded` counts unusable source records, such as a Loki line with an
+  invalid timestamp.
+- `cache_state` is `hit`, `miss`, or `disabled`. `cache_age_seconds` gives the
+  age of the oldest cached snapshot used. These fields do not change
+  `observed_at`.
+
+A multi-source result sets `complete` for the whole result. An `ok` source with
+`complete: false` means the source answered only part of the request. A
+snapshot-only source in a past window reports `unsupported_history`. An empty
+valid response reports `empty_result`, not an error.
+
+A mixed-source failure keeps the successful evidence and sets
+`complete: false`. An all-source failure also stays a successful MCP call, with
+`complete: false` and no `ok` source. A single-source `search_logs` failure
+uses MCP `isError: true` with a text envelope that contains `reason`. A valid
+empty log search stays successful.
+
+`absent` and `skipped` sources are outside request coverage. `absent` means the
+service has no binding. `skipped` means the tool does not query that source.
+
 ## Honesty rules
 
 Use these interpretation rules:

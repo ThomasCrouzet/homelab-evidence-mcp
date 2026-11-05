@@ -48,6 +48,7 @@ type ServiceStatusOut struct {
 	DisplayName string                   `json:"display_name"`
 	Items       []evidence.Item          `json:"items"`
 	Sources     []evidence.SourceOutcome `json:"sources"`
+	Complete    bool                     `json:"complete"`
 	Truncated   bool                     `json:"truncated"`
 	RetrievedAt string                   `json:"retrieved_at"`
 	Note        string                   `json:"note"`
@@ -63,6 +64,7 @@ type SearchLogsOut struct {
 	EffectiveEnd   string                 `json:"effective_end"`
 	Items          []evidence.Item        `json:"items"`
 	Source         evidence.SourceOutcome `json:"source"`
+	Complete       bool                   `json:"complete"`
 	Note           string                 `json:"note"`
 }
 
@@ -72,6 +74,7 @@ type FailedCronsOut struct {
 	EffectiveEnd   string                   `json:"effective_end"`
 	Items          []evidence.Item          `json:"items"`
 	Sources        []evidence.SourceOutcome `json:"sources"`
+	Complete       bool                     `json:"complete"`
 	Truncated      bool                     `json:"truncated"`
 	Note           string                   `json:"note"`
 }
@@ -112,8 +115,16 @@ func applyStatusEnum(schema *jsonschema.Schema) {
 		return
 	}
 	for name, property := range schema.Properties {
-		if name == "status" {
+		switch name {
+		case "status":
 			property.Enum = stringEnum("ok", "error", "skipped", "timeout", "absent", "canceled")
+		case "reason":
+			property.Enum = stringEnum("", "empty_result", "no_binding", "unmatched_binding",
+				"unsupported_history", "partial_invalid_records", "truncated",
+				"timeout", "canceled", "upstream_error", "authentication_failed",
+				"not_queried_by_tool")
+		case "cache_state":
+			property.Enum = stringEnum("", "hit", "miss", "disabled")
 		}
 		applyStatusEnum(property)
 	}

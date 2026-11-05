@@ -17,6 +17,12 @@ carries the same facts in pretty-printed JSON.
   `cron_check`, `metric_sample`, or `notification`.
 - Source `status` is `ok`, `error`, `skipped`, `timeout`, `absent`, or
   `canceled`.
+- Source `reason` is a coverage code. See the
+  [evidence model](evidence-model.md#outcome-and-coverage).
+- `complete` is required on every evidence result. `truncated` combines
+  `upstream_truncated` and `local_truncated`.
+- `discarded` counts unusable source records. `cache_state` is `hit`, `miss`,
+  or `disabled`; `cache_age_seconds` is optional.
 - Fields without `omitempty` are required. Optional fields can be absent.
 
 `attributes` stays an open object. Each adapter documents its allowlisted keys.
@@ -27,8 +33,12 @@ redacted before emission.
 
 A failed tool call sets `isError: true` and returns a text error envelope. It
 does not return `structuredContent`, so a client cannot treat an error as a
-successful typed result. A partial multi-source result remains a successful
-call while its source outcomes show the failed source.
+successful typed result. The envelope can contain a stable `reason` code.
+
+A multi-source collection failure is different: the call succeeds and the
+result has `complete: false` with per-source `status` and `reason`. A mixed
+failure keeps the evidence from successful sources. An all-source failure has
+no `ok` source. A single-source `search_logs` failure uses `isError: true`.
 
 ## Empty results
 
