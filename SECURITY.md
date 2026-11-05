@@ -140,6 +140,8 @@ failure.
 - Release validation and build run in a read-only job. A separate publication
   job receives `contents: write` only after validation, scans, the release
   binary E2E check, and checksum creation succeed.
+- Native smoke jobs execute each tested candidate binary on its target runner.
+  Publication needs the native smoke jobs.
 - The publication job downloads the tested binaries and verifies `SHA256SUMS`.
   It runs no repository code.
 - Release tags trigger publication. No pull-request event has publication

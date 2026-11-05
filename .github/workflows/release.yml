@@ -17,6 +17,8 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    outputs:
+      version: ${{ steps.version.outputs.value }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
@@ -38,8 +40,11 @@ jobs:
           package-manager-cache: false
 
       - name: Validate tag
+        id: version
         shell: bash
-        run: ./scripts/check-version.sh "$GITHUB_REF_NAME"
+        run: |
+          ./scripts/check-version.sh "$GITHUB_REF_NAME"
+          echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Markdown format
         run: make lint-docs
@@ -178,9 +183,63 @@ jobs:
           if-no-files-found: error
           retention-days: 2
 
+  native-smoke:
+    name: native smoke (${{ matrix.target }})
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux_amd64
+            binary: homelab-evidence-mcp_linux_amd64
+          - os: ubuntu-24.04-arm
+            target: linux_arm64
+            binary: homelab-evidence-mcp_linux_arm64
+          - os: macos-15-intel
+            target: darwin_amd64
+            binary: homelab-evidence-mcp_darwin_amd64
+          - os: macos-15
+            target: darwin_arm64
+            binary: homelab-evidence-mcp_darwin_arm64
+          - os: windows-latest
+            target: windows_amd64
+            binary: homelab-evidence-mcp_windows_amd64.exe
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
+        with:
+          go-version: '1.26.10'
+          check-latest: false
+          cache-dependency-path: go.sum
+
+      - name: Download release binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: release-dist
+          path: dist
+
+      - name: Execute native smoke suite
+        shell: bash
+        env:
+          HEM_NATIVE_SMOKE_BINARY: ${{ github.workspace }}/dist/${{ matrix.binary }}
+          HEM_NATIVE_SMOKE_VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          GOMAXPROCS=2 GOFLAGS=-p=1 \
+            go test ./internal/mcpserver -run '^TestNativeReleaseSmoke$' -count=1 -v
+
   publish:
     name: publish
-    needs: verify
+    needs: [verify, native-smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
