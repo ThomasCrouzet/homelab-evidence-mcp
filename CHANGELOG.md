@@ -18,6 +18,8 @@ This file records project changes. Its format uses
   out-of-range priorities to `unknown`.
 - Mark Gatus evidence with no valid source timestamp as `freshness: unknown`
   instead of presenting the collection time as a recent observation.
+- Reopen the audit file after a recoverable rotation failure instead of leaving
+  the writer closed until restart.
 
 ## [0.1.3] - 2026-10-23
 

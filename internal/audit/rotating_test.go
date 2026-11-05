@@ -3,6 +3,8 @@ package audit
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -52,6 +54,86 @@ func TestRotatingFile_WriteAndRotate(t *testing.T) {
 		if !json.Valid(bytes.TrimSpace(content)) {
 			t.Fatalf("%s does not contain complete JSON", path)
 		}
+	}
+}
+
+func TestRotatingFile_RecoversAfterRotationFailure(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "audit.jsonl")
+	rf, err := OpenRotating(p, 4, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rf.Close() }()
+	if _, err := rf.Write([]byte("one\n")); err != nil {
+		t.Fatal(err)
+	}
+	// Make the backup path an obstacle that is not empty.
+	if err := os.Mkdir(p+".1", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p+".1", "keep"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rf.Write([]byte("two\n")); !errors.Is(err, ErrStorageUnavailable) {
+		t.Fatalf("err=%v, want ErrStorageUnavailable", err)
+	}
+	if err := os.RemoveAll(p + ".1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rf.Write([]byte("two\n")); err != nil {
+		t.Fatalf("write after recovery: %v", err)
+	}
+	content, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "two\n" {
+		t.Fatalf("primary=%q", content)
+	}
+	backup, err := os.ReadFile(p + ".1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(backup) != "one\n" {
+		t.Fatalf("backup=%q", backup)
+	}
+	st, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode().Perm() != 0o600 {
+		t.Fatalf("mode=%o", st.Mode().Perm())
+	}
+}
+
+func TestRotatingFile_CloseStopsRecovery(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "audit.jsonl")
+	rf, err := OpenRotating(p, 4, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rf.Write([]byte("one\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(p+".1", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p+".1", "keep"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rf.Write([]byte("two\n")); !errors.Is(err, ErrStorageUnavailable) {
+		t.Fatalf("err=%v, want ErrStorageUnavailable", err)
+	}
+	if err := os.RemoveAll(p + ".1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := rf.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rf.Write([]byte("two\n")); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("err=%v, want io.ErrClosedPipe", err)
 	}
 }
 
