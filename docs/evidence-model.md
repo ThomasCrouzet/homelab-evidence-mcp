@@ -65,7 +65,8 @@ The same rule applies when Gatus reports a missing endpoint.
 A grouped response contains:
 
 - The requested and effective windows
-- Items sorted by date, source, identity, and identifier
+- Items sorted by date, source, identity, stable source position, and
+  identifier
 - The state and truncation of each source: `ok`, `error`, `timeout`,
   `canceled`, `skipped`, or `absent`
 - The truncation indicator and warnings
