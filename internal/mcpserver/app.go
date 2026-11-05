@@ -167,39 +167,46 @@ func NewApp(cfg *config.Config, log *slog.Logger, aud *audit.Logger) (*App, erro
 func (a *App) Server() *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: serverName, Version: version.Version}, nil)
 	mcp.AddTool(s, &mcp.Tool{
-		Name:        "evidence_capabilities",
-		Description: "Give the server version, active adapters, services with adapters, limits, and compatibility notes. The response does not include base URLs or secrets.",
-		Annotations: readOnlyAnns(false),
+		Name:         "evidence_capabilities",
+		Description:  "Give the server version, active adapters, services with adapters, limits, and compatibility notes. The response does not include base URLs or secrets.",
+		Annotations:  readOnlyAnns(false),
+		OutputSchema: capabilitiesSchema,
 	}, a.toolCapabilities)
 	mcp.AddTool(s, &mcp.Tool{
-		Name:        "list_services",
-		Description: "Give services from the registry with per-source coverage. Use the optional prefix filter and pagination.",
-		Annotations: readOnlyAnns(false),
+		Name:         "list_services",
+		Description:  "Give services from the registry with per-source coverage. Use the optional prefix filter and pagination.",
+		Annotations:  readOnlyAnns(false),
+		OutputSchema: listServicesSchema,
 	}, a.toolListServices)
 	mcp.AddTool(s, &mcp.Tool{
-		Name:        "service_status",
-		Description: "Get a multi-source status snapshot for one service_id (Gatus, Docker, Healthchecks, Beszel). The tool does not get data from Loki or ntfy.",
-		Annotations: readOnlyAnns(true),
+		Name:         "service_status",
+		Description:  "Get a multi-source status snapshot for one service_id (Gatus, Docker, Healthchecks, Beszel). The tool does not get data from Loki or ntfy.",
+		Annotations:  readOnlyAnns(true),
+		OutputSchema: serviceStatusSchema,
 	}, a.toolServiceStatus)
 	mcp.AddTool(s, &mcp.Tool{
-		Name:        "incident_context",
-		Description: "Collect a multi-source evidence timeline for a service_id with the limit from the configuration. The correlation does not identify a root cause.",
-		Annotations: readOnlyAnns(true),
+		Name:         "incident_context",
+		Description:  "Collect a multi-source evidence timeline for a service_id with the limit from the configuration. The correlation does not identify a root cause.",
+		Annotations:  readOnlyAnns(true),
+		OutputSchema: incidentContextSchema,
 	}, a.toolIncidentContext)
 	mcp.AddTool(s, &mcp.Tool{
-		Name:        "search_logs",
-		Description: "Examine Loki logs for a service_id with the selector from the configuration. Use the optional text filter. The caller cannot change the URL or stream selector labels.",
-		Annotations: readOnlyAnns(true),
+		Name:         "search_logs",
+		Description:  "Examine Loki logs for a service_id with the selector from the configuration. Use the optional text filter. The caller cannot change the URL or stream selector labels.",
+		Annotations:  readOnlyAnns(true),
+		OutputSchema: searchLogsSchema,
 	}, a.toolSearchLogs)
 	mcp.AddTool(s, &mcp.Tool{
-		Name:        "failed_crons",
-		Description: "Give Healthchecks checks with a current state of down, grace, or paused. The tool does not include ping URLs.",
-		Annotations: readOnlyAnns(true),
+		Name:         "failed_crons",
+		Description:  "Give Healthchecks checks with a current state of down, grace, or paused. The tool does not include ping URLs.",
+		Annotations:  readOnlyAnns(true),
+		OutputSchema: failedCronsSchema,
 	}, a.toolFailedCrons)
 	mcp.AddTool(s, &mcp.Tool{
-		Name:        "get_evidence",
-		Description: "Give one cached evidence item by its opaque process-local id. The cache has a short TTL.",
-		Annotations: readOnlyAnns(false),
+		Name:         "get_evidence",
+		Description:  "Give one cached evidence item by its opaque process-local id. The cache has a short TTL.",
+		Annotations:  readOnlyAnns(false),
+		OutputSchema: getEvidenceSchema,
 	}, a.toolGetEvidence)
 	return s
 }

@@ -349,7 +349,8 @@ See [Contributing](CONTRIBUTING.md) for the development and test rules.
 - [Configuration example](docs/configuration-example.md),
   [YAML template](config.example.yaml), and [JSON schema](config.schema.json)
 - [MCP clients](docs/mcp-hosts.md) and [incident playbook](docs/playbook.md)
-- [Evidence model](docs/evidence-model.md) and
+- [Evidence model](docs/evidence-model.md),
+  [tool output schemas](docs/tool-output-schemas.md), and
   [API compatibility](docs/api-compatibility.md)
 - [Contributing](CONTRIBUTING.md) and [security policy](SECURITY.md)
 - [Releases](https://github.com/ThomasCrouzet/homelab-evidence-mcp/releases)
