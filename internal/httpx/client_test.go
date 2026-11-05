@@ -3,6 +3,7 @@ package httpx
 import (
 	"context"
 	"crypto/x509"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -339,6 +340,40 @@ func TestCache_RetainsOnlyUpstreamTruncationSignal(t *testing.T) {
 	}
 	if UpstreamTruncated(complete) {
 		t.Fatal("complete response became truncated")
+	}
+}
+
+func TestGet_CanceledContextDoesNotUseCacheOrNetwork(t *testing.T) {
+	var calls int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer ts.Close()
+	c := NewLockedClient(Options{Timeout: time.Second, CacheTTL: time.Minute})
+	if err := c.RegisterDestination("main", ts.URL); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := c.Get(context.Background(), "main", "/warm", nil); err != nil { //nolint:bodyclose
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("warm-up calls=%d", calls)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	resp, body, err := c.Get(ctx, "main", "/warm", nil) //nolint:bodyclose
+	if !errors.Is(err, context.Canceled) || resp != nil || body != nil {
+		t.Fatalf("canceled warm read resp=%v body=%v err=%v", resp, body, err)
+	}
+	if _, _, err := c.Get(ctx, "main", "/cold", nil); !errors.Is(err, context.Canceled) { //nolint:bodyclose
+		t.Fatalf("canceled cold read err=%v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("canceled reads started %d extra requests", calls-1)
+	}
+	if hits := c.Stats().Hits; hits != 0 {
+		t.Fatalf("canceled read used the cache: hits=%d", hits)
 	}
 }
 

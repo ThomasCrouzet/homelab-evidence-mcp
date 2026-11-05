@@ -28,7 +28,7 @@ func BuildTimeline(serviceID string, start, end time.Time, items []evidence.Item
 		switch s.Status {
 		case "ok":
 			ok++
-		case "error", "timeout":
+		case "error", "timeout", "canceled":
 			failed++
 			warnings = append(warnings, fmt.Sprintf("source %s (%s): %s", s.SourceName, s.Kind, s.Status))
 		case "absent", "skipped":
@@ -67,7 +67,7 @@ func factualSummary(serviceID string, start, end time.Time, items []evidence.Ite
 	var b strings.Builder
 	fmt.Fprintf(&b, "Service %s: %d evidence item(s) between %s and %s UTC.",
 		serviceID, len(items), start.UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339))
-	fmt.Fprintf(&b, " Sources with status ok=%d. Sources with status error or timeout=%d.", sourcesOK, sourcesFailed)
+	fmt.Fprintf(&b, " Sources with status ok=%d. Sources with status error, timeout, or canceled=%d.", sourcesOK, sourcesFailed)
 
 	var gatusFail, dockerBad, logErr, cronDown, beszelBad, ntfyBad int
 	for _, it := range items {
