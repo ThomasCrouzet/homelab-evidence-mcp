@@ -55,6 +55,19 @@ type QueryOptions struct {
 	Text string
 	// Regex adds an optional regular expression filter with built-in limits. It must compile.
 	Regex string
+	// Stats receives source coverage counts when it is not nil.
+	Stats *QueryStats
+}
+
+// QueryStats counts source records that the adapter could not use.
+type QueryStats struct {
+	InvalidTimestamps int
+	IncompleteRecords int
+}
+
+// Discarded gives the number of unusable source records.
+func (s QueryStats) Discarded() int {
+	return s.InvalidTimestamps + s.IncompleteRecords
 }
 
 // Search sends a query_range request and gives lines as evidence items.
@@ -130,10 +143,16 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 		labels, labelRedactions, labelsTruncated := c.filterLabels(stream.Stream)
 		for _, pair := range stream.Values {
 			if len(pair) < 2 {
+				if opt.Stats != nil {
+					opt.Stats.IncompleteRecords++
+				}
 				continue
 			}
 			ts, ok := parseNano(pair[0])
 			if !ok {
+				if opt.Stats != nil {
+					opt.Stats.InvalidTimestamps++
+				}
 				continue
 			}
 			if ts.Before(opt.Start) || ts.After(opt.End) {

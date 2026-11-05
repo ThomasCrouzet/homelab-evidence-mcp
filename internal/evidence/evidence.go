@@ -79,11 +79,20 @@ type Item struct {
 type SourceOutcome struct {
 	SourceName string     `json:"source_name"`
 	Kind       SourceKind `json:"kind"`
-	Status     string     `json:"status"` // ok | error | skipped | timeout | absent
+	Status     string     `json:"status"` // ok | error | skipped | timeout | absent | canceled
+	Reason     string     `json:"reason,omitempty"`
 	Error      string     `json:"error,omitempty"`
 	ItemCount  int        `json:"item_count"`
+	Complete   bool       `json:"complete"`
 	Truncated  bool       `json:"truncated"`
-	DurationMS int64      `json:"duration_ms"`
+	// UpstreamTruncated and LocalTruncated explain Truncated.
+	UpstreamTruncated bool `json:"upstream_truncated"`
+	LocalTruncated    bool `json:"local_truncated"`
+	// Discarded counts invalid source records that the adapter skipped.
+	Discarded  int    `json:"discarded"`
+	CacheState string `json:"cache_state,omitempty"`
+	CacheAgeS  int64  `json:"cache_age_seconds,omitempty"`
+	DurationMS int64  `json:"duration_ms"`
 }
 
 // Bundle contains a multi-source response.
@@ -95,6 +104,7 @@ type Bundle struct {
 	EffectiveEnd   time.Time       `json:"effective_end,omitempty"`
 	Items          []Item          `json:"items"`
 	Sources        []SourceOutcome `json:"sources"`
+	Complete       bool            `json:"complete"`
 	Truncated      bool            `json:"truncated"`
 	Warnings       []string        `json:"warnings,omitempty"`
 	FactualSummary string          `json:"factual_summary,omitempty"`

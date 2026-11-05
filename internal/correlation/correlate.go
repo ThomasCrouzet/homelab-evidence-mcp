@@ -20,19 +20,39 @@ func BuildTimeline(serviceID string, start, end time.Time, items []evidence.Item
 	var warnings []string
 	failed := 0
 	ok := 0
+	incomplete := 0
 	for _, s := range sources {
 		if s.Truncated {
 			truncated = true
-			warnings = append(warnings, fmt.Sprintf("source %s (%s): truncated", s.SourceName, s.Kind))
+			warnings = append(warnings, fmt.Sprintf(
+				"source %s (%s): truncated upstream=%v local=%v",
+				s.SourceName, s.Kind, s.UpstreamTruncated, s.LocalTruncated,
+			))
+		}
+		if s.Discarded > 0 {
+			warnings = append(warnings, fmt.Sprintf(
+				"source %s (%s): %d unusable source record(s)", s.SourceName, s.Kind, s.Discarded,
+			))
 		}
 		switch s.Status {
 		case "ok":
 			ok++
+			if !s.Complete {
+				incomplete++
+			}
 		case "error", "timeout", "canceled":
 			failed++
-			warnings = append(warnings, fmt.Sprintf("source %s (%s): %s", s.SourceName, s.Kind, s.Status))
+			warnings = append(warnings, fmt.Sprintf(
+				"source %s (%s): %s (%s)", s.SourceName, s.Kind, s.Status, s.Reason,
+			))
 		case "absent", "skipped":
 			// This status does not count as a failure.
+		}
+		if s.Status == "ok" && !s.Complete && s.Reason != "" && s.Reason != "truncated" &&
+			s.Reason != "partial_invalid_records" {
+			warnings = append(warnings, fmt.Sprintf(
+				"source %s (%s): incomplete (%s)", s.SourceName, s.Kind, s.Reason,
+			))
 		}
 	}
 	if timelineTruncated {
@@ -46,7 +66,7 @@ func BuildTimeline(serviceID string, start, end time.Time, items []evidence.Item
 		}
 	}
 
-	summary := factualSummary(serviceID, start, end, cp, ok, failed)
+	summary := factualSummary(serviceID, start, end, cp, ok, failed, incomplete)
 
 	return evidence.Bundle{
 		ServiceID:      serviceID,
@@ -63,11 +83,13 @@ func BuildTimeline(serviceID string, start, end time.Time, items []evidence.Item
 	}
 }
 
-func factualSummary(serviceID string, start, end time.Time, items []evidence.Item, sourcesOK, sourcesFailed int) string {
+func factualSummary(serviceID string, start, end time.Time, items []evidence.Item, sourcesOK, sourcesFailed, sourcesIncomplete int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Service %s: %d evidence item(s) between %s and %s UTC.",
 		serviceID, len(items), start.UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339))
-	fmt.Fprintf(&b, " Sources with status ok=%d. Sources with status error, timeout, or canceled=%d.", sourcesOK, sourcesFailed)
+	fmt.Fprintf(&b, " Sources with status ok=%d. Sources with status error, timeout, or canceled=%d.",
+		sourcesOK, sourcesFailed)
+	fmt.Fprintf(&b, " Sources with incomplete coverage=%d.", sourcesIncomplete)
 
 	var gatusFail, dockerBad, logErr, cronDown, beszelBad, ntfyBad int
 	for _, it := range items {

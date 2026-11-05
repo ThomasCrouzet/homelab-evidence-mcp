@@ -287,9 +287,11 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 
 	cacheKey := destName + "\n" + keyedFingerprint("path", path, c.cacheKey[:]) +
 		"\n" + headerFingerprint(headers, c.cacheKey[:])
+	info := requestInfoFrom(ctx)
 	if c.cacheTTL > 0 {
 		if body, status, collectedAt, truncated, ok := c.cacheGet(cacheKey); ok {
 			c.hits.Add(1)
+			info.recordHit(collectedAt)
 			header := http.Header{
 				cacheTimeHeader: []string{collectedAt.Format(time.RFC3339Nano)},
 			}
@@ -304,6 +306,9 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 			return resp, body, nil
 		}
 		c.misses.Add(1)
+		info.recordMiss()
+	} else {
+		info.recordDisabled()
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, full.String(), nil)
