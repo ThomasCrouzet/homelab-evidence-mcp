@@ -5,6 +5,11 @@ The executable E2E suite connects the real stdio binary to all six adapters.
 It uses local fixtures and does not contact live upstream services.
 Other versions can be compatible without project support.
 
+The versioned corpus and its verification levels are in
+[upstream fixtures](upstream-fixtures.md). No combination is live verified.
+The read-only credential scope is an operator responsibility and a documented
+gap, not a result that HTTP GET alone provides.
+
 The adapter gives an error when a JSON collection is `null`. It also gives an
 error when an envelope does not contain the expected array. For the two cases,
 the adapter does not give an empty array without an error.

@@ -4,21 +4,17 @@ These items extend the read-only contract in [SECURITY.md](SECURITY.md).
 
 ## P2: Bound evidence-cache memory by bytes
 
-- Component: `internal/evidence/cache.go`.
-- Benefit: control memory when many evidence items contain large attributes.
-- Completion: large fixtures cause deterministic eviction within both limits,
-  without changing retrieval freshness.
+Status: implemented. The cache enforces an entry limit and a serialized-payload
+byte budget. See `internal/evidence/cache.go`.
 
 ## P2: Expand adapter compatibility fixtures
 
-- Component: `internal/adapters`, [API compatibility](docs/api-compatibility.md).
-- Benefit: detect differences between supported upstream response versions.
-- Completion: versioned fixtures verify missing fields, timestamps, partial
-  failures, and truncation for all six adapters.
+Status: implemented for documented replays. The versioned corpus, provenance,
+offline replay tests, and matrix are under `internal/adapters/upstream` and
+[docs/upstream-fixtures.md](docs/upstream-fixtures.md). Live verification is not
+implemented.
 
 ## P2: Define source-cache cancellation semantics
 
-- Component: `internal/httpx/client.go`.
-- Benefit: make cached and network responses consistent under request cancellation.
-- Completion: the documented contract has stdio checks for cancelled requests
-  with warm and cold caches.
+Status: implemented. The HTTP client and source collector check the caller
+context before a cache read or network request. See `internal/httpx/client.go`.

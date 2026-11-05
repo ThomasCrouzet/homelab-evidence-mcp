@@ -1,0 +1,10 @@
+[
+  {
+    "name": "legacy",
+    "slug": "legacy",
+    "tags": "ops",
+    "status": "up",
+    "grace": 60,
+    "uuid": "11111111-1111-1111-1111-111111111111"
+  }
+]

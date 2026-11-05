@@ -1,0 +1,20 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "streams",
+    "result": [
+      {
+        "stream": {
+          "job": "example",
+          "namespace": "prod",
+          "container": "api",
+          "pod": "api-0"
+        },
+        "values": [
+          ["1792490400000000000", "level=info request served"],
+          ["1792490700000000000", "level=error upstream timeout"]
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+[
+  {
+    "name": "api",
+    "group": "prod",
+    "key": "prod_api",
+    "results": [
+      {
+        "status": 200,
+        "success": true,
+        "timestamp": "2026-10-20T10:00:00Z",
+        "duration": 12500000,
+        "errors": []
+      },
+      {
+        "status": 503,
+        "success": false,
+        "timestamp": "2026-10-20T10:05:00Z",
+        "duration": 30000000,
+        "errors": ["upstream connect timeout"]
+      }
+    ]
+  },
+  {
+    "name": "legacy",
+    "group": "",
+    "key": "legacy",
+    "results": []
+  }
+]

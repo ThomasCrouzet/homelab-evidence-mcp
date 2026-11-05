@@ -1,0 +1,11 @@
+[
+  {
+    "id": "msg0003",
+    "time": 1792490400,
+    "event": "message",
+    "topic": "alerts",
+    "message": "Disk space below threshold.",
+    "priority": 4,
+    "tags": ["disk"]
+  }
+]

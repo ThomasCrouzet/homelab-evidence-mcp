@@ -1,0 +1,12 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "streams",
+    "result": [
+      {
+        "stream": {"container": "api"},
+        "values": [["invalid", "discarded line"]]
+      }
+    ]
+  }
+}
