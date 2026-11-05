@@ -5,29 +5,34 @@ name: Release
   push:
     tags: ['v*.*.*']
 
+# Validation and publication are separate jobs. Only the publication job gets
+# repository write permission, and it runs no repository code.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
-    name: verify, build, and publish
+  verify:
+    name: verify and build
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Install Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
         with:
           go-version: '1.26.10'
           check-latest: true
           cache-dependency-path: go.sum
 
       - name: Install Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7
         with:
           node-version: '24'
           package-manager-cache: false
@@ -53,7 +58,7 @@ jobs:
           go test ./... -race -count=1 -skip '^TestStdio'
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a  # v9
         with:
           version: v2.15.0
           args: --timeout=5m
@@ -67,7 +72,7 @@ jobs:
           "$(go env GOPATH)/bin/govulncheck" ./...
 
       - name: Secret scan
-        uses: gitleaks/gitleaks-action@v3.0.0
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e  # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
@@ -142,12 +147,11 @@ jobs:
             > SHA256SUMS
 
       - name: Prepare release notes
-        id: release-notes
         shell: bash
         run: |
           set -euo pipefail
           release_version="${GITHUB_REF_NAME#v}"
-          notes_path="$RUNNER_TEMP/release-notes-${release_version}.md"
+          notes_path="$RUNNER_TEMP/release-notes.md"
           awk -v heading="## [$release_version] - " '
             index($0, heading) == 1 { found = 1; next }
             found && /^## \[/ { exit }
@@ -157,13 +161,54 @@ jobs:
             echo "The changelog section has no release notes." >&2
             exit 1
           fi
-          echo "path=$notes_path" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release binaries
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: release-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/release-notes.md
+          if-no-files-found: error
+          retention-days: 2
+
+  publish:
+    name: publish
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download release binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: release-dist
+          path: dist
+
+      - name: Download release notes
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: release-notes
+          path: notes
+
+      - name: Verify transferred binaries
+        shell: bash
+        run: |
+          cd dist || exit 1
+          sha256sum -c SHA256SUMS
 
       - name: Publish release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3
         with:
           files: |
             dist/*
-          body_path: ${{ steps.release-notes.outputs.path }}
+          body_path: notes/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
