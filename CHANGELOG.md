@@ -10,6 +10,8 @@ This file records project changes. Its format uses
 
 - Redact complete `Cookie` and `Set-Cookie` header values instead of the first
   cookie pair only.
+- Support Healthchecks `unique_key` bindings with read-only API keys, and
+  report an unmatched binding as a source error instead of an empty success.
 
 ## [0.1.3] - 2026-10-23
 

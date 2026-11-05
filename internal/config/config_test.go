@@ -384,7 +384,49 @@ services:
         check_name: "   "
 `)
 	_, err := Parse(raw)
-	if err == nil || !strings.Contains(err.Error(), "check_name, check_uuid, or check_tags required") {
+	if err == nil || !strings.Contains(err.Error(), "check_name, check_uuid, check_unique_key, or check_tags required") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func healthchecksConfig(binding string) []byte {
+	return []byte(`
+version: 1
+sources:
+  hc:
+    kind: healthchecks
+    base_url: https://hc.example.internal
+    token_env: HC_TOKEN
+services:
+  - id: backup
+    sources:
+      healthchecks:
+        source: hc
+` + binding)
+}
+
+func TestParse_AcceptsReadOnlyUniqueKey(t *testing.T) {
+	cfg, err := Parse(healthchecksConfig("        check_unique_key: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Services[0].Sources.Healthchecks.CheckUniqueKey; got != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("unique key=%q", got)
+	}
+}
+
+func TestParse_RejectsConflictingHealthchecksIdentities(t *testing.T) {
+	_, err := Parse(healthchecksConfig(`        check_uuid: 11111111-1111-1111-1111-111111111111
+        check_unique_key: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+`))
+	if err == nil || !strings.Contains(err.Error(), "set only one of check_uuid or check_unique_key") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestParse_RejectsUnsafeUniqueKey(t *testing.T) {
+	_, err := Parse(healthchecksConfig("        check_unique_key: \"../other\"\n"))
+	if err == nil || !strings.Contains(err.Error(), "check_unique_key") {
 		t.Fatalf("got %v", err)
 	}
 }

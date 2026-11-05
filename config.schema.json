@@ -178,11 +178,19 @@
                     "items": { "type": "string", "minLength": 1, "maxLength": 128 }
                   },
                   "check_uuid": { "type": "string", "minLength": 1, "maxLength": 256 },
+                  "check_unique_key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^[A-Za-z0-9_-]+$",
+                    "description": "Use the unique_key from a read-only Healthchecks API key. Do not combine it with check_uuid."
+                  },
                   "status_filter": { "type": "string", "enum": ["up", "down", "grace", "paused", "new"] }
                 },
                 "anyOf": [
                   { "required": ["check_name"] },
                   { "required": ["check_uuid"] },
+                  { "required": ["check_unique_key"] },
                   { "required": ["check_tags"] }
                 ]
               },

@@ -124,10 +124,11 @@ type LokiRef struct {
 
 // HealthchecksRef connects a service to Healthchecks filters.
 type HealthchecksRef struct {
-	Source    string
-	CheckName string
-	CheckTags []string
-	CheckUUID string
+	Source         string
+	CheckName      string
+	CheckTags      []string
+	CheckUUID      string
+	CheckUniqueKey string
 	// StatusFilter selects one status. An empty value accepts all statuses.
 	StatusFilter string
 }
@@ -229,11 +230,12 @@ type fileLokiRef struct {
 }
 
 type fileHealthchecksRef struct {
-	Source       string   `yaml:"source"`
-	CheckName    string   `yaml:"check_name"`
-	CheckTags    []string `yaml:"check_tags"`
-	CheckUUID    string   `yaml:"check_uuid"`
-	StatusFilter string   `yaml:"status_filter"`
+	Source         string   `yaml:"source"`
+	CheckName      string   `yaml:"check_name"`
+	CheckTags      []string `yaml:"check_tags"`
+	CheckUUID      string   `yaml:"check_uuid"`
+	CheckUniqueKey string   `yaml:"check_unique_key"`
+	StatusFilter   string   `yaml:"status_filter"`
 }
 
 type fileBeszelRef struct {
@@ -281,7 +283,9 @@ var (
 	topicRe      = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 	envNameRe    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	headerNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$")
-	yamlScalarRe = regexp.MustCompile(`!![[:alnum:]_-]+\s+('[^']*'|"[^"]*")`)
+	// A Healthchecks unique key becomes a URL path segment in later reads.
+	healthcheckKeyRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,256}$`)
+	yamlScalarRe     = regexp.MustCompile(`!![[:alnum:]_-]+\s+('[^']*'|"[^"]*")`)
 	// A Loki selector accepts labels then simple |= or |~ filters.
 	lokiSelectorRe = regexp.MustCompile(`^\{[a-zA-Z_][a-zA-Z0-9_]*="[^"]*"(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*="[^"]*")*\}(?:\s*\|\s*[=~]\s*"[^"]*")*$`)
 )
@@ -777,6 +781,7 @@ func parseService(path string, f fileService, sources map[string]Source) (Servic
 		}
 		checkName := strings.TrimSpace(ref.CheckName)
 		checkUUID := strings.TrimSpace(ref.CheckUUID)
+		checkUniqueKey := strings.TrimSpace(ref.CheckUniqueKey)
 		checkTags := make([]string, 0, len(ref.CheckTags))
 		if len(ref.CheckTags) > maxHealthcheckTags {
 			errs = append(errs, ValidationError{path + ".sources.healthchecks.check_tags", "must contain at most 32 tags"})
@@ -798,8 +803,11 @@ func parseService(path string, f fileService, sources map[string]Source) (Servic
 			}
 			checkTags = append(checkTags, tag)
 		}
-		if checkName == "" && checkUUID == "" && len(checkTags) == 0 {
-			errs = append(errs, ValidationError{path + ".sources.healthchecks", "check_name, check_uuid, or check_tags required"})
+		if checkName == "" && checkUUID == "" && checkUniqueKey == "" && len(checkTags) == 0 {
+			errs = append(errs, ValidationError{path + ".sources.healthchecks", "check_name, check_uuid, check_unique_key, or check_tags required"})
+		}
+		if checkUUID != "" && checkUniqueKey != "" {
+			errs = append(errs, ValidationError{path + ".sources.healthchecks", "set only one of check_uuid or check_unique_key"})
 		}
 		if len([]rune(checkName)) > maxBindingRunes {
 			errs = append(errs, ValidationError{path + ".sources.healthchecks.check_name", "must be <= 256 characters"})
@@ -811,6 +819,9 @@ func parseService(path string, f fileService, sources map[string]Source) (Servic
 		} else if hasControl(checkUUID) {
 			errs = append(errs, ValidationError{path + ".sources.healthchecks.check_uuid", "must not contain control characters"})
 		}
+		if checkUniqueKey != "" && !healthcheckKeyRe.MatchString(checkUniqueKey) {
+			errs = append(errs, ValidationError{path + ".sources.healthchecks.check_unique_key", "must match " + healthcheckKeyRe.String()})
+		}
 		sf := strings.ToLower(strings.TrimSpace(ref.StatusFilter))
 		if sf != "" {
 			switch sf {
@@ -820,11 +831,12 @@ func parseService(path string, f fileService, sources map[string]Source) (Servic
 			}
 		}
 		ss.Healthchecks = &HealthchecksRef{
-			Source:       ref.Source,
-			CheckName:    checkName,
-			CheckTags:    checkTags,
-			CheckUUID:    checkUUID,
-			StatusFilter: sf,
+			Source:         ref.Source,
+			CheckName:      checkName,
+			CheckTags:      checkTags,
+			CheckUUID:      checkUUID,
+			CheckUniqueKey: checkUniqueKey,
+			StatusFilter:   sf,
 		}
 	}
 	if f.Sources.Beszel != nil {
