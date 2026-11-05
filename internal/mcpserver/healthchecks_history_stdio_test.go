@@ -44,6 +44,7 @@ func TestStdioHealthchecksTransitions(t *testing.T) {
 				{"name": "empty-check", "slug": "empty-check", "status": "up", "unique_key": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 				{"name": "invalid-check", "slug": "invalid-check", "status": "up", "unique_key": "cccccccccccccccccccccccccccccccc"},
 				{"name": "no-key", "slug": "no-key", "status": "up"},
+				{"name": "truncated", "slug": "truncated", "status": "up", "unique_key": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
 			}})
 			return
 		}
@@ -62,6 +63,15 @@ func TestStdioHealthchecksTransitions(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"flips": []map[string]any{
 					{"timestamp": "invalid", "up": 0},
 				}})
+			case "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee":
+				flips := make([]map[string]any, 0, 201)
+				for index := 0; index < 201; index++ {
+					flips = append(flips, map[string]any{
+						"timestamp": now.Add(-19*time.Minute + time.Duration(index)*time.Second).Format(time.RFC3339),
+						"up":        index % 2,
+					})
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"flips": flips})
 			default:
 				_ = json.NewEncoder(w).Encode(map[string]any{"flips": []map[string]any{}})
 			}
@@ -115,6 +125,9 @@ services:
   - id: missing
     sources:
       healthchecks: { source: hc, check_name: no-key, history_mode: transitions }
+  - id: truncated
+    sources:
+      healthchecks: { source: hc, check_name: truncated, history_mode: transitions }
   - id: mixed
     sources:
       healthchecks: { source: hc, check_name: backup, history_mode: transitions }
@@ -228,6 +241,13 @@ services:
 	if status, missingReason, missingComplete, _ := find(missing, "healthchecks"); status != "ok" ||
 		missingReason != "missing_identity" || missingComplete || len(missing.Items) != 0 {
 		t.Fatalf("missing identity status=%s reason=%s complete=%v items=%d", status, missingReason, missingComplete, len(missing.Items))
+	}
+
+	truncated := call("failed_crons", map[string]any{"service_id": "truncated", "start": windowStart, "end": windowEnd})
+	if status, truncatedReason, truncatedComplete, _ := find(truncated, "healthchecks"); status != "ok" ||
+		truncatedReason != "truncated" || truncatedComplete || len(truncated.Items) != 200 {
+		t.Fatalf("truncated history status=%s reason=%s complete=%v items=%d",
+			status, truncatedReason, truncatedComplete, len(truncated.Items))
 	}
 
 	mixed := call("incident_context", map[string]any{"service_id": "mixed", "start": windowStart, "end": windowEnd})

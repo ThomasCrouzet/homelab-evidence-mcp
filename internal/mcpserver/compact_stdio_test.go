@@ -47,7 +47,9 @@ func TestStdioCompactIncidentContext(t *testing.T) {
 		values := make([][]string, 0, 20)
 		for index := 0; index < 20; index++ {
 			line := fmt.Sprintf("line-%02d %s", index, strings.Repeat("é", 250))
-			if index >= 18 {
+			if index == 19 {
+				line = "level=error conflicting " + strings.Repeat("é", 250)
+			} else if index >= 17 {
 				line = "duplicate " + strings.Repeat("é", 250)
 			}
 			values = append(values, []string{
@@ -77,6 +79,7 @@ func TestStdioCompactIncidentContext(t *testing.T) {
 		Items               []struct {
 			ID         string `json:"id"`
 			Source     string `json:"source"`
+			Severity   string `json:"severity"`
 			Attributes struct {
 				Line string `json:"line"`
 			} `json:"attributes"`
@@ -165,9 +168,11 @@ services:
 		t.Fatalf("compact selection=%+v", compact)
 	}
 	sources := map[string]int{}
+	severities := map[string]bool{}
 	duplicates := 0
 	for _, item := range compact.Items {
 		sources[item.Source]++
+		severities[item.Severity] = true
 		if strings.HasPrefix(item.Attributes.Line, "duplicate ") {
 			duplicates++
 		}
@@ -177,6 +182,9 @@ services:
 	}
 	if duplicates != 2 {
 		t.Fatalf("repeated records were not preserved: %d", duplicates)
+	}
+	if !severities["info"] || !severities["error"] {
+		t.Fatalf("conflicting observations were hidden: %+v", severities)
 	}
 
 	tiny := run(8192, 30, true)
