@@ -32,7 +32,10 @@ node --version
 ```
 
 ```bash
-make build                  # bin/homelab-evidence-mcp with the Makefile version
+make build                  # bin/homelab-evidence-mcp with the source version
+make build-matrix           # five release targets in dist/
+make print-version          # resolved Makefile version
+./scripts/check-version.sh "v$(make -s print-version)"
 make test                   # race tests, then the executable stdio E2E suite
 make test-quick             # unit tests only: no race detection and no stdio E2E
 make test-e2e               # real binary against six local httptest fixtures
@@ -73,6 +76,8 @@ make build
 - `internal/httpx/client.go`: the only HTTP path. It locks destinations, refuses
   redirects, and caches responses.
 - `internal/evidence/`: item model, sort order, freshness, opaque identifiers.
+- `internal/version/version.txt`: authoritative release version. `version.go`
+  embeds it and accepts a linker override.
 - `internal/correlation/`, `internal/redaction/`, `internal/registry/`,
   `internal/config/`, and `internal/audit/` hold the remaining logic.
 - `scripts/test-e2e.sh` and `scripts/check-private-addresses.sh`: the E2E runner
@@ -112,8 +117,8 @@ make build
 - Keep config and token files owner-only (mode `0600`, user ACL on Windows) and
   take secrets from `token_env` or `token_file`. A `base_url` cannot hold a
   query, fragment, or userinfo.
-- Keep the tag, the Makefile `VERSION`, the source default in
-  `internal/version/version.go`, and the `CHANGELOG.md` section equal. The
+- Keep the tag, the Makefile `VERSION` default,
+  `internal/version/version.txt`, and the `CHANGELOG.md` section equal. The
   release workflow rejects a mismatch.
 - Do not use U+2014 in new content.
 - Keep audit and review reports outside the repository. Do not commit them.

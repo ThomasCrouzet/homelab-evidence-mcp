@@ -1,13 +1,35 @@
-.PHONY: build test test-e2e test-quick race lint lint-docs lint-private vet fmt fuzz demo clean coverage
+.PHONY: build build-matrix print-version test test-e2e test-quick race lint lint-docs lint-private vet fmt fuzz demo clean coverage
 
-VERSION ?= 0.1.3
+# The source file is authoritative. Override VERSION only for a local build.
+VERSION ?= $(shell tr -d '[:space:]' < internal/version/version.txt)
 BINARY ?= bin/homelab-evidence-mcp
+DIST ?= dist
+TARGETS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 LINT_GOTOOLCHAIN ?= go1.26.10
 LDFLAGS := -s -w -X github.com/ThomasCrouzet/homelab-evidence-mcp/internal/version.Version=$(VERSION)
 
 build:
 	mkdir -p bin
 	go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/homelab-evidence-mcp
+
+print-version:
+	@printf '%s\n' '$(VERSION)'
+
+# Build every release target from the same version and flags.
+build-matrix:
+	mkdir -p $(DIST)
+	set -euo pipefail; \
+	for pair in $(TARGETS); do \
+		os="$${pair%/*}"; \
+		arch="$${pair#*/}"; \
+		ext=""; \
+		if [ "$$os" = "windows" ]; then ext=".exe"; fi; \
+		out="$(DIST)/homelab-evidence-mcp_$${os}_$${arch}$${ext}"; \
+		echo "Build output: $$out"; \
+		GOOS="$$os" GOARCH="$$arch" CGO_ENABLED=0 go build -trimpath \
+			-ldflags="$(LDFLAGS)" -o "$$out" ./cmd/homelab-evidence-mcp; \
+	done
+	ls -la $(DIST)
 
 # Run isolated tests with race detection. Then run executable E2E tests.
 test: race test-e2e
