@@ -57,6 +57,9 @@ func compactIncident(bundle evidence.Bundle, maxItems, byteBudget int) evidence.
 	if trimmed {
 		bundle.ByteBudgetTruncated = true
 	}
+	if bundle.OmittedSources == nil {
+		bundle.OmittedSources = []string{}
+	}
 	bundle.ByteSize = incidentWireSize(bundle)
 	return bundle
 }
@@ -109,10 +112,10 @@ func trimToBudget(bundle *evidence.Bundle, budget int) bool {
 	for _, item := range bundle.Items {
 		selectedSources[item.Source] = true
 	}
-	var omitted []string
+	omitted := []string{}
 	seen := map[string]bool{}
 	for _, source := range bundle.Sources {
-		if _, ok := sourceItemsByKind(bundle, source.Kind); !ok {
+		if !sourceHadItems(bundle, source.Kind) {
 			continue
 		}
 		if !selectedSources[source.Kind] && !seen[string(source.Kind)] {
@@ -125,22 +128,14 @@ func trimToBudget(bundle *evidence.Bundle, budget int) bool {
 	return trimmed
 }
 
-// sourceItemsByKind is a small guard so omitted sources are only reported for
-// sources that originally contributed items.
-func sourceItemsByKind(bundle *evidence.Bundle, kind evidence.SourceKind) (struct{}, bool) {
-	for _, item := range bundle.Items {
-		if item.Source == kind {
-			return struct{}{}, true
-		}
-	}
-	// The items are already trimmed. Use the source outcome count, which the
-	// adapter set before selection.
+// sourceHadItems reports a source that contributed evidence before selection.
+func sourceHadItems(bundle *evidence.Bundle, kind evidence.SourceKind) bool {
 	for _, source := range bundle.Sources {
 		if source.Kind == kind && source.ItemCount > 0 {
-			return struct{}{}, true
+			return true
 		}
 	}
-	return struct{}{}, false
+	return false
 }
 
 func incidentWireSize(bundle evidence.Bundle) int {

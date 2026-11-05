@@ -406,7 +406,6 @@ func (a *App) toolIncidentContext(ctx context.Context, _ *mcp.CallToolRequest, i
 			bundle = compactIncident(bundle, maxItems, a.Cfg.Limits.MaxIncidentBytes)
 		} else {
 			bundle.ByteBudget = a.Cfg.Limits.MaxIncidentBytes
-			bundle.ByteSize = incidentWireSize(bundle)
 		}
 		if bundle.Items == nil {
 			bundle.Items = []evidence.Item{}
@@ -416,6 +415,9 @@ func (a *App) toolIncidentContext(ctx context.Context, _ *mcp.CallToolRequest, i
 		}
 		if bundle.OmittedSources == nil {
 			bundle.OmittedSources = []string{}
+		}
+		if !in.Compact {
+			bundle.ByteSize = incidentWireSize(bundle)
 		}
 		a.Cache.PutAll(bundle.Items)
 
