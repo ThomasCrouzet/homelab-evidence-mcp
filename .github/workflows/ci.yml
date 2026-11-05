@@ -49,6 +49,11 @@ jobs:
           node-version: '24'
           package-manager-cache: false
 
+      - name: Install Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: '3.12'
+
       - name: Markdown format
         run: make lint-docs
 
@@ -110,6 +115,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+
+      - name: Build interoperability binary
+        run: make build BINARY="$RUNNER_TEMP/homelab-evidence-mcp-interop"
+
+      - name: Install independent MCP client
+        run: python3 -m pip install --disable-pip-version-check --no-input mcp==2.3.0
+
+      - name: MCP interoperability
+        run: python3 scripts/interop_check.py "$RUNNER_TEMP/homelab-evidence-mcp-interop"
 
       - name: Build matrix
         shell: bash

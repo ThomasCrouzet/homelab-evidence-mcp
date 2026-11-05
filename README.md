@@ -310,8 +310,9 @@ Include the binary's `.exe` extension.
 Save the file and fully restart Claude Desktop.
 Inspect the server's tools, then follow
 [Collect your first evidence](#collect-your-first-evidence).
-The fixture suites exercise the Go SDK client; they do not certify Claude
-Desktop compatibility. See [client configuration notes](docs/mcp-hosts.md).
+The fixture suites use the Go SDK client and a separate Python MCP client. They
+do not certify a specific desktop host. See
+[client configuration notes](docs/mcp-hosts.md).
 
 <!-- readme:section operations -->
 ## Operations
