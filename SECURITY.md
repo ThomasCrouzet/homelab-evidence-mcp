@@ -131,6 +131,21 @@ Audit records can be missing during a storage failure, and retained backups can
 lag the primary file. Audit file contents can be incomplete after a storage
 failure.
 
+### Build and release supply chain
+
+- External GitHub Actions use full commit SHAs with a version comment.
+  Dependabot updates the pins.
+- The CI checkout does not persist credentials. The validation job has
+  `contents: read`.
+- Release validation and build run in a read-only job. A separate publication
+  job receives `contents: write` only after validation, scans, the release
+  binary E2E check, and checksum creation succeed.
+- The publication job downloads the tested binaries and verifies `SHA256SUMS`.
+  It runs no repository code.
+- Release tags trigger publication. No pull-request event has publication
+  credentials.
+- CI does not upload test reports or security scan results as artifacts.
+
 ### Cardinality and denial of service
 
 The server uses these controls:
