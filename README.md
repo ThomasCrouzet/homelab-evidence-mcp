@@ -53,7 +53,7 @@ All routes below use `GET`.
 | Gatus | `/api/v1/endpoints/statuses` | Endpoint checks |
 | Docker Engine | `/containers/json?all=true` | Container snapshot |
 | Loki | `/loki/api/v1/query_range` | Log lines |
-| Healthchecks | `/api/v3/checks/` | Current check states |
+| Healthchecks | `/api/v3/checks/`, optional flips | States or transitions |
 | Beszel | `/api/collections/systems/records` | Host snapshot |
 | ntfy | `/{topic}/json?poll=1&since=<unix>` | Notifications |
 
@@ -383,9 +383,10 @@ upstream version.
 
 Current limitations:
 
-- **Snapshots:** Docker, Healthchecks, and Beszel provide current state.
-  Historical windows exclude current snapshots outside their time window.
-  Healthchecks cannot establish past outages or recoveries.
+- **Snapshots:** Docker, Healthchecks, and Beszel provide current state by
+  default. Historical windows exclude current snapshots outside their time
+  window. Healthchecks `history_mode: transitions` reads dated up/down events,
+  but upstream retention is unknown, so coverage remains incomplete.
 - **Collection limits:** Responses can be truncated. Inspect source outcomes,
   `truncated`, and warnings before drawing conclusions.
 - **Hostile content:** Log and notification text remains untrusted after

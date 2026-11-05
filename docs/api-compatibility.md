@@ -95,9 +95,22 @@ The Healthchecks adapter has this behavior:
   `check_tags`, and one identity field combine with AND semantics.
 - A binding that selects no check gives a source error. It does not look like a
   successful empty result.
-- The Healthchecks list API can show the current state. It cannot show a past
-  incident.
-- A historical window does not include the current state.
+- `history_mode: snapshot` is the default. It keeps the current list behavior.
+- `history_mode: transitions` reads
+  `GET /api/v3/checks/<unique_key>/flips/?start=<RFC3339>&end=<RFC3339>` for
+  windowed `failed_crons` and `incident_context`.
+- Transition mode keeps both failure and recovery events, with source
+  timestamps, even when the current state is healthy.
+- A selection reads at most 32 checks and 200 flips per check. It reports
+  `omitted` and `truncated` when it applies those bounds.
+- A check without a validated `unique_key` is skipped and reported as
+  `missing_identity`.
+- Per-check history failures are reported as `partial_fetch`; successful
+  transitions from other checks remain available.
+- Healthchecks does not document complete transition retention. Transition
+  results therefore report `unknown_history_coverage` and `complete: false`.
+- `service_status` remains a current snapshot. A historical window in snapshot
+  mode does not include the current state.
 
 ## Beszel
 

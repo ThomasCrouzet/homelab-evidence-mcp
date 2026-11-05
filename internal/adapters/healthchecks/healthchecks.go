@@ -7,6 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,6 +29,33 @@ type Client struct {
 }
 
 // check holds only the Healthchecks fields used.
+const (
+	maxTransitionChecks = 32
+	maxFlipsPerCheck    = 200
+)
+
+var transitionKeyRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,256}$`)
+
+type flip struct {
+	Timestamp string `json:"timestamp"`
+	Up        *int   `json:"up"`
+}
+
+type flipsResponse struct {
+	Flips *[]flip `json:"flips"`
+}
+
+// TransitionResult gives dated state changes and coverage counters.
+type TransitionResult struct {
+	Items           []evidence.Item
+	Truncated       bool
+	Omitted         int
+	MissingIdentity int
+	Discarded       int
+	Requests        int
+	Failures        int
+}
+
 type check struct {
 	Name      string `json:"name"`
 	Slug      string `json:"slug"`
@@ -198,6 +228,151 @@ func tagsMatch(tagStr string, want []string) bool {
 		}
 	}
 	return true
+}
+
+// Transitions reads dated up/down transitions for the selected checks.
+// It keeps the service_status path as a current snapshot.
+func (c *Client) Transitions(ctx context.Context, serviceID string, f Filter, start, end time.Time) (TransitionResult, error) {
+	result := TransitionResult{}
+	retrievedAt := c.now()
+	checks, _, err := c.list(ctx, retrievedAt)
+	if err != nil {
+		return result, err
+	}
+	var matched []check
+	if serviceID != "" || f.selects() {
+		matched = filterChecks(checks, f)
+		if len(matched) == 0 && f.selects() {
+			return result, ErrNoMatch
+		}
+	} else {
+		matched = checks
+	}
+	sort.SliceStable(matched, func(i, j int) bool {
+		left, right := safeSourceID(matched[i]), safeSourceID(matched[j])
+		if left != right {
+			return left < right
+		}
+		return matched[i].UniqueKey < matched[j].UniqueKey
+	})
+	if len(matched) > maxTransitionChecks {
+		result.Omitted = len(matched) - maxTransitionChecks
+		result.Truncated = true
+		matched = matched[:maxTransitionChecks]
+	}
+
+	query := url.Values{}
+	query.Set("start", start.UTC().Format(time.RFC3339))
+	query.Set("end", end.UTC().Format(time.RFC3339))
+	for _, ch := range matched {
+		key := strings.TrimSpace(ch.UniqueKey)
+		if !transitionKeyRe.MatchString(key) {
+			result.MissingIdentity++
+			continue
+		}
+		path := "/api/v3/checks/" + url.PathEscape(key) + "/flips/?" + query.Encode()
+		// LockedClient.Get closes the body before it gives the response.
+		resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
+		result.Requests++
+		if err != nil {
+			result.Failures++
+			continue
+		}
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return result, fmt.Errorf("healthchecks authentication failed")
+		}
+		if resp.StatusCode != http.StatusOK {
+			result.Failures++
+			continue
+		}
+		flips, err := decodeFlips(body)
+		if err != nil {
+			result.Failures++
+			continue
+		}
+		var parsed []struct {
+			at time.Time
+			up int
+		}
+		for _, entry := range flips {
+			if entry.Up == nil || (*entry.Up != 0 && *entry.Up != 1) {
+				result.Discarded++
+				continue
+			}
+			at, ok := parseTS(entry.Timestamp)
+			if !ok {
+				result.Discarded++
+				continue
+			}
+			if at.Before(start) || at.After(end) {
+				continue
+			}
+			parsed = append(parsed, struct {
+				at time.Time
+				up int
+			}{at, *entry.Up})
+		}
+		sort.SliceStable(parsed, func(i, j int) bool { return parsed[i].at.Before(parsed[j].at) })
+		if len(parsed) > maxFlipsPerCheck {
+			result.Truncated = true
+			parsed = parsed[len(parsed)-maxFlipsPerCheck:]
+		}
+		for _, entry := range parsed {
+			result.Items = append(result.Items, c.transitionItem(serviceID, ch, entry.at, entry.up, retrievedAt, start, end))
+		}
+	}
+	if result.Requests > 0 && result.Failures == result.Requests && len(result.Items) == 0 {
+		return result, fmt.Errorf("healthchecks history requests failed")
+	}
+	return result, nil
+}
+
+func decodeFlips(body []byte) ([]flip, error) {
+	var arr []flip
+	if err := json.Unmarshal(body, &arr); err == nil && arr != nil {
+		return arr, nil
+	}
+	var wrapped flipsResponse
+	if err := json.Unmarshal(body, &wrapped); err != nil || wrapped.Flips == nil {
+		return nil, fmt.Errorf("healthchecks history decode: expected flips array")
+	}
+	return *wrapped.Flips, nil
+}
+
+func (c *Client) transitionItem(serviceID string, ch check, at time.Time, up int, retrievedAt, start, end time.Time) evidence.Item {
+	state := "down"
+	sev := evidence.SeverityError
+	if up == 1 {
+		state = "up"
+		sev = evidence.SeverityInfo
+	}
+	name, nameRedactions, nameCut := redaction.ApplyAndTruncate(c.Redact, ch.Name, 256)
+	slug, slugRedactions, slugCut := redaction.ApplyAndTruncate(c.Redact, ch.Slug, 256)
+	sourceID, sourceRedactions, sourceCut := redaction.ApplyAndTruncate(c.Redact, safeSourceID(ch), 256)
+	rawSummary := fmt.Sprintf("healthchecks %q transitioned %s", ch.Name, state)
+	sum, summaryRedactions, summaryCut := redaction.ApplyAndTruncate(c.Redact, rawSummary, 512)
+	return evidence.Item{
+		ID:          evidence.NewOpaqueID("ev"),
+		ServiceID:   serviceID,
+		Source:      evidence.SourceHealthchecks,
+		SourceID:    sourceID,
+		Kind:        evidence.KindCronCheck,
+		ObservedAt:  at.UTC(),
+		RetrievedAt: retrievedAt,
+		WindowStart: timePtr(start),
+		WindowEnd:   timePtr(end),
+		Summary:     sum,
+		Severity:    sev,
+		Attributes: map[string]any{
+			"name":       name,
+			"slug":       slug,
+			"transition": state,
+			"current":    false,
+		},
+		Truncated:         nameCut || slugCut || sourceCut || summaryCut,
+		RedactionsApplied: nameRedactions + slugRedactions + sourceRedactions + summaryRedactions,
+		Freshness:         evidence.ComputeFreshness(at, retrievedAt),
+	}
 }
 
 func (c *Client) itemFrom(serviceID string, ch check, observedAt, retrievedAt time.Time) evidence.Item {

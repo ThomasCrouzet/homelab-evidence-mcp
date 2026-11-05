@@ -769,3 +769,20 @@ services: []
 		}
 	}
 }
+
+func TestParse_HealthchecksHistoryMode(t *testing.T) {
+	cfg, err := Parse(healthchecksConfig("        check_name: backup\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Services[0].Sources.Healthchecks.HistoryMode; got != "snapshot" {
+		t.Fatalf("default history mode=%q", got)
+	}
+	cfg, err = Parse(healthchecksConfig("        check_name: backup\n        history_mode: transitions\n"))
+	if err != nil || cfg.Services[0].Sources.Healthchecks.HistoryMode != "transitions" {
+		t.Fatalf("history mode=%q err=%v", cfg.Services[0].Sources.Healthchecks.HistoryMode, err)
+	}
+	if _, err := Parse(healthchecksConfig("        check_name: backup\n        history_mode: full\n")); err == nil {
+		t.Fatal("invalid history mode was accepted")
+	}
+}

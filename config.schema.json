@@ -197,7 +197,12 @@
                     "pattern": "^[A-Za-z0-9_-]+$",
                     "description": "Use the unique_key from a read-only Healthchecks API key. Do not combine it with check_uuid."
                   },
-                  "status_filter": { "type": "string", "enum": ["up", "down", "grace", "paused", "new"] }
+                  "status_filter": { "type": "string", "enum": ["up", "down", "grace", "paused", "new"] },
+                  "history_mode": {
+                    "type": "string",
+                    "enum": ["snapshot", "transitions"],
+                    "description": "Use snapshot for current state only. Use transitions to read dated up/down history in windowed failed_crons and incident_context."
+                  }
                 },
                 "anyOf": [
                   { "required": ["check_name"] },
