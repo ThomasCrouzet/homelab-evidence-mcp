@@ -221,6 +221,8 @@ Set only one of `token_env` and `token_file` per source.
 - **Caches:** `limits.source_cache_ttl` defaults to `15s`; `0` disables it.
   `limits.evidence_cache_ttl` defaults to `5m`.
   `limits.evidence_cache_max` defaults to `256`; `0` disables storage.
+  `limits.evidence_cache_max_bytes` defaults to 8 MiB with a 64 MiB maximum.
+  It limits the JSON payload of stored evidence, not exact process memory.
 - **Optional files:** `audit.file` enables audit persistence and defaults to none.
   `tls.ca_file` adds a CA bundle; its default uses only system CAs.
 

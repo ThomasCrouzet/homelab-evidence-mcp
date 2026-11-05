@@ -19,6 +19,8 @@ limits:
   max_body_bytes: 2097152
   evidence_cache_ttl: 5m
   evidence_cache_max: 256
+  # Serialized-payload budget. The default is 8 MiB and the maximum is 64 MiB.
+  evidence_cache_max_bytes: 8388608
   # This source response cache keeps the same GET responses for a short time. A value of 0 deactivates it.
   # On a cache hit, observed_at keeps the initial collection time.
   # Only get_evidence sets freshness to cached. Use a low value for snapshots.
