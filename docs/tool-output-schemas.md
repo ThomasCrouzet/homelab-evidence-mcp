@@ -23,6 +23,9 @@ carries the same facts in pretty-printed JSON.
   `upstream_truncated` and `local_truncated`.
 - `discarded` counts unusable source records. `cache_state` is `hit`, `miss`,
   or `disabled`; `cache_age_seconds` is optional.
+- Compact `incident_context` adds `compact`, `byte_budget`, `byte_size`,
+  `selection_truncated`, `byte_budget_truncated`, `omitted_items`, and
+  `omitted_sources`. See [compact incident context](incident-context.md).
 - Fields without `omitempty` are required. Optional fields can be absent.
 
 `attributes` stays an open object. Each adapter documents its allowlisted keys.
