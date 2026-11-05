@@ -130,6 +130,44 @@ func (a *App) collectHCStatus(ctx context.Context, serviceID string, ref *config
 }
 
 func (a *App) collectHCWindow(ctx context.Context, serviceID string, ref *config.HealthchecksRef, start, end time.Time) (evidence.SourceOutcome, []evidence.Item) {
+	if ref.HistoryMode == "transitions" {
+		transition := healthchecks.TransitionResult{}
+		outcome, items := a.withSourceTimeout(ctx, ref.Source, evidence.SourceHealthchecks, func(ctx context.Context) ([]evidence.Item, error) {
+			cli := a.hc[ref.Source]
+			if cli == nil {
+				return nil, fmt.Errorf("healthchecks client missing")
+			}
+			f := healthchecks.FilterFromRef(ref)
+			// Historical selection must not depend on the current state.
+			f.Status = ""
+			var err error
+			transition, err = cli.Transitions(ctx, serviceID, f, start, end)
+			return transition.Items, err
+		})
+		if outcome.Status != "ok" {
+			return outcome, items
+		}
+		outcome.Omitted = transition.Omitted
+		outcome.Discarded = transition.Discarded
+		outcome.LocalTruncated = transition.Truncated
+		outcome.Truncated = transition.Truncated
+		// The upstream history endpoint does not document complete retention.
+		outcome.Complete = false
+		outcome.Reason = "unknown_history_coverage"
+		switch {
+		case transition.Failures > 0:
+			outcome.Reason = "partial_fetch"
+			outcome.Error = fmt.Sprintf("%d healthcheck history request(s) failed", transition.Failures)
+		case transition.MissingIdentity > 0 && len(items) == 0:
+			outcome.Reason = "missing_identity"
+			outcome.Error = "no selected check exposes a unique_key for history"
+		case transition.Omitted > 0:
+			outcome.Reason = "omitted_checks"
+		case transition.Truncated:
+			outcome.Reason = "truncated"
+		}
+		return outcome, items
+	}
 	outcome, items := a.withSourceTimeout(ctx, ref.Source, evidence.SourceHealthchecks, func(ctx context.Context) ([]evidence.Item, error) {
 		cli := a.hc[ref.Source]
 		if cli == nil {

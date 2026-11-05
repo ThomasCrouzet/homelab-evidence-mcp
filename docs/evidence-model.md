@@ -39,7 +39,8 @@ The sources set `observed_at` as follows:
   A collection time does not prove that an undated event is recent. Historical
   windows do not include undated results.
 - **Loki**: `observed_at` contains the nanosecond line timestamp.
-- **Healthchecks**: `observed_at` contains the current-state collection time.
+- **Healthchecks**: `observed_at` contains the current-state collection time in
+  snapshot mode. In transition mode it contains the source transition time.
   The `last_ping` value stays in an attribute.
 - **Docker**: `observed_at` contains the collection time. The Docker list API
   does not give the last state change.

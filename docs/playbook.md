@@ -30,9 +30,13 @@ Use these operations:
 3. Examine useful log lines with `search_logs`.
 4. Use `failed_crons` to find jobs that have errors.
 
-The Healthchecks list API does not give transition history. Therefore,
-`failed_crons` gives only current `down`, `grace`, and `paused` states. It
-cannot identify a past outage or recovery.
+By default, the Healthchecks list API does not give transition history. In that
+mode, `failed_crons` gives only current `down`, `grace`, and `paused` states.
+A service binding with `history_mode: transitions` also reads dated up/down
+transitions. It can show a past outage and recovery when the source retains
+them. Transition results are incomplete by contract because the upstream
+retention period is not documented. Read the `reason`, `discarded`, `omitted`,
+and `warnings` fields before you claim complete history.
 
 ## 4. Read evidence again
 

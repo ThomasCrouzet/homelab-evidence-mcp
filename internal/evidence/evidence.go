@@ -89,7 +89,9 @@ type SourceOutcome struct {
 	UpstreamTruncated bool `json:"upstream_truncated"`
 	LocalTruncated    bool `json:"local_truncated"`
 	// Discarded counts invalid source records that the adapter skipped.
-	Discarded  int    `json:"discarded"`
+	Discarded int `json:"discarded"`
+	// Omitted counts selected objects left out by an explicit collection bound.
+	Omitted    int    `json:"omitted"`
 	CacheState string `json:"cache_state,omitempty"`
 	CacheAgeS  int64  `json:"cache_age_seconds,omitempty"`
 	DurationMS int64  `json:"duration_ms"`

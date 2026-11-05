@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -223,5 +224,176 @@ func TestStatus_RedactsAllTextAttributes(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].RedactionsApplied == 0 {
 		t.Fatalf("items=%+v", items)
+	}
+}
+
+func transitionsClient(t *testing.T, checks []map[string]any, flips func(key string) (int, string)) *Client {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/checks/" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"checks": checks})
+			return
+		}
+		const prefix = "/api/v3/checks/"
+		if strings.HasPrefix(r.URL.Path, prefix) && strings.HasSuffix(r.URL.Path, "/flips/") {
+			key := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, prefix), "/flips/")
+			status, body := flips(key)
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(body))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: 2 * time.Second})
+	_ = hc.RegisterDestination("hc", server.URL)
+	eng, _ := redaction.New(nil)
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	return &Client{
+		HTTP: hc, DestName: "hc", Redact: eng,
+		Headers: map[string]string{"X-Api-Key": "synthetic"},
+		Now:     func() time.Time { return now },
+	}
+}
+
+func TestTransitions_RecoveredIncident(t *testing.T) {
+	cli := transitionsClient(t, []map[string]any{{
+		"name": "backup", "slug": "backup", "status": "up",
+		"unique_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}}, func(string) (int, string) {
+		return http.StatusOK, `{"flips":[
+			{"timestamp":"2026-07-25T10:00:00Z","up":0},
+			{"timestamp":"2026-07-25T10:05:00Z","up":1}
+		]}`
+	})
+	start := time.Date(2026, 7, 25, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 25, 11, 0, 0, 0, time.UTC)
+	result, err := cli.Transitions(context.Background(), "svc", Filter{Name: "backup"}, start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 2 || result.Requests != 1 || result.Failures != 0 {
+		t.Fatalf("result=%+v", result)
+	}
+	if result.Items[0].Severity != "error" || result.Items[1].Severity != "info" {
+		t.Fatalf("severities=%s,%s", result.Items[0].Severity, result.Items[1].Severity)
+	}
+	if !result.Items[0].ObservedAt.Equal(time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)) ||
+		!result.Items[1].ObservedAt.Equal(time.Date(2026, 7, 25, 10, 5, 0, 0, time.UTC)) {
+		t.Fatalf("timestamps=%s,%s", result.Items[0].ObservedAt, result.Items[1].ObservedAt)
+	}
+	if result.Items[0].Attributes["transition"] != "down" || result.Items[1].Attributes["transition"] != "up" {
+		t.Fatalf("attributes=%+v", result.Items[0].Attributes)
+	}
+}
+
+func TestTransitions_EmptyAndInvalid(t *testing.T) {
+	cli := transitionsClient(t, []map[string]any{{
+		"name": "backup", "status": "up", "unique_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}}, func(string) (int, string) {
+		return http.StatusOK, `{"flips":[
+			{"timestamp":"invalid","up":0},
+			{"timestamp":"2026-07-25T10:00:00Z","up":7}
+		]}`
+	})
+	start := time.Date(2026, 7, 25, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 25, 11, 0, 0, 0, time.UTC)
+	result, err := cli.Transitions(context.Background(), "svc", Filter{Name: "backup"}, start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 0 || result.Discarded != 2 {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestTransitions_MissingIdentity(t *testing.T) {
+	cli := transitionsClient(t, []map[string]any{{
+		"name": "backup", "status": "up",
+	}}, func(string) (int, string) { return http.StatusOK, `{"flips":[]}` })
+	start := time.Date(2026, 7, 25, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 25, 11, 0, 0, 0, time.UTC)
+	result, err := cli.Transitions(context.Background(), "svc", Filter{Name: "backup"}, start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MissingIdentity != 1 || result.Requests != 0 {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestTransitions_PartialFailure(t *testing.T) {
+	cli := transitionsClient(t, []map[string]any{
+		{"name": "one", "status": "up", "tags": "ops", "unique_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		{"name": "two", "status": "up", "tags": "ops", "unique_key": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+	}, func(key string) (int, string) {
+		if key == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+			return http.StatusInternalServerError, ""
+		}
+		return http.StatusOK, `{"flips":[{"timestamp":"2026-07-25T10:00:00Z","up":0}]}`
+	})
+	start := time.Date(2026, 7, 25, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 25, 11, 0, 0, 0, time.UTC)
+	result, err := cli.Transitions(context.Background(), "svc", Filter{Tags: []string{"ops"}}, start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Failures != 1 || len(result.Items) != 1 || result.Requests != 2 {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestTransitions_AuthFailure(t *testing.T) {
+	cli := transitionsClient(t, []map[string]any{{
+		"name": "backup", "status": "up", "unique_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}}, func(string) (int, string) { return http.StatusUnauthorized, "" })
+	start := time.Date(2026, 7, 25, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 25, 11, 0, 0, 0, time.UTC)
+	if _, err := cli.Transitions(context.Background(), "svc", Filter{Name: "backup"}, start, end); err == nil {
+		t.Fatal("expected authentication error")
+	}
+}
+
+func TestTransitions_BoundsChecksAndFlips(t *testing.T) {
+	checks := make([]map[string]any, 0, maxTransitionChecks+1)
+	for index := 0; index <= maxTransitionChecks; index++ {
+		checks = append(checks, map[string]any{
+			"name":       fmt.Sprintf("check-%02d", index),
+			"status":     "up",
+			"tags":       "ops",
+			"unique_key": fmt.Sprintf("%032d", index),
+		})
+	}
+	var flips strings.Builder
+	flips.WriteString(`{"flips":[`)
+	base := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
+	for index := 0; index <= maxFlipsPerCheck; index++ {
+		if index > 0 {
+			flips.WriteString(",")
+		}
+		_, _ = fmt.Fprintf(&flips, `{"timestamp":%q,"up":0}`,
+			base.Add(time.Duration(index)*time.Second).Format(time.RFC3339))
+	}
+	flips.WriteString(`]}`)
+	cli := transitionsClient(t, checks, func(key string) (int, string) {
+		if key == fmt.Sprintf("%032d", 0) {
+			return http.StatusOK, flips.String()
+		}
+		return http.StatusOK, `{"flips":[]}`
+	})
+	start := time.Date(2026, 7, 25, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 25, 11, 0, 0, 0, time.UTC)
+	result, err := cli.Transitions(context.Background(), "svc", Filter{Tags: []string{"ops"}}, start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Omitted != 1 || result.Requests != maxTransitionChecks {
+		t.Fatalf("bounds=%+v", result)
+	}
+	if !result.Truncated {
+		t.Fatal("flip limit did not report truncation")
+	}
+	if got := len(result.Items); got != maxFlipsPerCheck {
+		t.Fatalf("items=%d, want=%d", got, maxFlipsPerCheck)
 	}
 }

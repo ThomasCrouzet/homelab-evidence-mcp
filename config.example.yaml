@@ -101,6 +101,8 @@ services:
         check_tags: [proxy]
         # With a read-only API key, bind the check by its unique_key:
         # check_unique_key: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        # Use transitions to include dated down/up history in windowed reads.
+        # history_mode: transitions
       beszel:
         source: beszel
         system_name: proxy-host

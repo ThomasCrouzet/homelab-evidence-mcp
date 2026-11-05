@@ -135,6 +135,8 @@ type HealthchecksRef struct {
 	CheckUniqueKey string
 	// StatusFilter selects one status. An empty value accepts all statuses.
 	StatusFilter string
+	// HistoryMode selects snapshot or transitions for windowed reads.
+	HistoryMode string
 }
 
 // BeszelRef connects a service to a Beszel system.
@@ -242,6 +244,7 @@ type fileHealthchecksRef struct {
 	CheckUUID      string   `yaml:"check_uuid"`
 	CheckUniqueKey string   `yaml:"check_unique_key"`
 	StatusFilter   string   `yaml:"status_filter"`
+	HistoryMode    string   `yaml:"history_mode"`
 }
 
 type fileBeszelRef struct {
@@ -885,6 +888,15 @@ func parseService(path string, f fileService, sources map[string]Source) (Servic
 				errs = append(errs, ValidationError{path + ".sources.healthchecks.status_filter", "must be up, down, grace, paused, or new"})
 			}
 		}
+		hm := strings.ToLower(strings.TrimSpace(ref.HistoryMode))
+		if hm == "" {
+			hm = "snapshot"
+		}
+		switch hm {
+		case "snapshot", "transitions":
+		default:
+			errs = append(errs, ValidationError{path + ".sources.healthchecks.history_mode", "must be snapshot or transitions"})
+		}
 		ss.Healthchecks = &HealthchecksRef{
 			Source:         ref.Source,
 			CheckName:      checkName,
@@ -892,6 +904,7 @@ func parseService(path string, f fileService, sources map[string]Source) (Servic
 			CheckUUID:      checkUUID,
 			CheckUniqueKey: checkUniqueKey,
 			StatusFilter:   sf,
+			HistoryMode:    hm,
 		}
 	}
 	if f.Sources.Beszel != nil {
