@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/evidence"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/httpx"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 )
@@ -218,6 +219,59 @@ func TestHistory_MissingTimeUsesCollectionWithoutInventingHistory(t *testing.T) 
 	}
 	if len(items) != 0 {
 		t.Fatalf("dateless notification invented into the past: %+v", items)
+	}
+}
+
+func TestItemFrom_NormalizesDefaultPriority(t *testing.T) {
+	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
+	explicit := 3
+	omitted := (&Client{}).itemFrom("media", "alerts", message{ID: "a", Message: "Backup completed successfully."}, t0, t0, 512)
+	normal := (&Client{}).itemFrom("media", "alerts", message{ID: "b", Message: "Backup completed successfully.", Priority: &explicit}, t0, t0, 512)
+	if omitted.Severity != evidence.SeverityInfo || normal.Severity != evidence.SeverityInfo {
+		t.Fatalf("omitted=%s explicit=%s", omitted.Severity, normal.Severity)
+	}
+	if omitted.Attributes["priority"] != 3 || normal.Attributes["priority"] != 3 {
+		t.Fatalf("omitted=%v explicit=%v", omitted.Attributes["priority"], normal.Attributes["priority"])
+	}
+}
+
+func TestItemFrom_ValidPriorityMapping(t *testing.T) {
+	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
+	want := map[int]evidence.Severity{
+		1: evidence.SeverityInfo,
+		2: evidence.SeverityInfo,
+		3: evidence.SeverityInfo,
+		4: evidence.SeverityError,
+		5: evidence.SeverityCritical,
+	}
+	for priority, severity := range want {
+		priority := priority
+		item := (&Client{}).itemFrom(
+			"media", "alerts",
+			message{ID: "x", Message: "fixture", Priority: &priority},
+			t0, t0, 512,
+		)
+		if item.Severity != severity {
+			t.Fatalf("priority=%d severity=%s, want=%s", priority, item.Severity, severity)
+		}
+	}
+}
+
+func TestItemFrom_InvalidPriorityIsExplicit(t *testing.T) {
+	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
+	for _, priority := range []int{-1, 0, 6, 99} {
+		priority := priority
+		item := (&Client{}).itemFrom(
+			"media", "alerts",
+			message{ID: "x", Message: "fixture", Priority: &priority},
+			t0, t0, 512,
+		)
+		if item.Severity != evidence.SeverityUnknown {
+			t.Fatalf("priority=%d severity=%s, want unknown", priority, item.Severity)
+		}
+		if item.Attributes["priority_valid"] != false {
+			t.Fatalf("priority=%d did not mark the value invalid: %+v", priority, item.Attributes)
+		}
 	}
 }
 
