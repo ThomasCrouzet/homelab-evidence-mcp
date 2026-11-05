@@ -19,6 +19,8 @@ This file records project changes. Its format uses
   `discarded`, cache state and age) to every evidence result.
 - Return an MCP error for a failed single-source log search, including a stable
   reason code. Valid empty searches remain successful.
+- Add `--doctor` for bounded read-only source diagnostics with human and JSON
+  output, stable exit codes, and binding validation.
 
 ### Changed
 

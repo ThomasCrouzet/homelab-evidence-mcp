@@ -178,6 +178,18 @@ Success prints `config ok`.
 Validation resolves credentials and checks configuration and destination
 settings. It sends no HTTP requests and does not prove source connectivity.
 
+Check source connectivity and bindings:
+
+```bash
+homelab-evidence-mcp --config /path/config.yaml --doctor
+homelab-evidence-mcp --config /path/config.yaml --doctor --json
+```
+
+The doctor command uses fixed adapter paths, per-source deadlines, and the
+configured destinations. Exit code `0` means complete, `1` means an incomplete
+source or binding, and `2` means a usage or configuration error.
+See [doctor command](docs/doctor.md) for output and limits.
+
 ### Collect your first evidence
 
 Register the binary with a client using [MCP integration](#mcp-integration).
@@ -349,6 +361,7 @@ See [Contributing](CONTRIBUTING.md) for the development and test rules.
 - [Configuration example](docs/configuration-example.md),
   [YAML template](config.example.yaml), and [JSON schema](config.schema.json)
 - [MCP clients](docs/mcp-hosts.md) and [incident playbook](docs/playbook.md)
+- [Doctor command](docs/doctor.md) for source diagnostics
 - [Evidence model](docs/evidence-model.md),
   [tool output schemas](docs/tool-output-schemas.md), and
   [API compatibility](docs/api-compatibility.md)

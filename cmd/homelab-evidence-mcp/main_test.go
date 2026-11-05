@@ -114,3 +114,19 @@ func TestRun_ValidateBad(t *testing.T) {
 		t.Fatal("expected failure")
 	}
 }
+
+func TestRun_JsonRequiresDoctor(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := run([]string{"--config", "unused.yaml", "--json"}, &out, &errb)
+	if code != 2 || !strings.Contains(errb.String(), "--json") {
+		t.Fatalf("code=%d err=%s", code, errb.String())
+	}
+}
+
+func TestRun_RejectsDoctorWithValidate(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := run([]string{"--config", "unused.yaml", "--doctor", "--validate"}, &out, &errb)
+	if code != 2 || !strings.Contains(errb.String(), "--doctor") {
+		t.Fatalf("code=%d err=%s", code, errb.String())
+	}
+}
