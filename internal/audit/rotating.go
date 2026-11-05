@@ -1,12 +1,17 @@
 package audit
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sync"
 )
+
+// ErrStorageUnavailable reports a recoverable audit storage failure.
+// The error has no path or record content. A later Write retries the open.
+var ErrStorageUnavailable = errors.New("audit storage unavailable")
 
 // RotatingFile sets a maximum size and does numbered rotation.
 // Callers must not pass secrets to it.
@@ -17,6 +22,7 @@ type RotatingFile struct {
 	maxFiles int
 	size     int64
 	f        *os.File
+	closed   bool
 }
 
 // OpenRotating opens the path for appends and rotation. It makes the path if necessary.
@@ -49,11 +55,17 @@ func OpenRotating(path string, maxBytes int64, maxFiles int) (*RotatingFile, err
 func (r *RotatingFile) Write(p []byte) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.f == nil {
+	if r.closed {
 		return 0, io.ErrClosedPipe
 	}
 	if int64(len(p)) > r.maxBytes {
 		return 0, fmt.Errorf("audit record exceeds max_bytes")
+	}
+	// A failed rotation closes the file. Reopen before the next complete record.
+	if r.f == nil {
+		if err := r.reopenLocked(); err != nil {
+			return 0, err
+		}
 	}
 	if r.size+int64(len(p)) > r.maxBytes {
 		if err := r.rotateLocked(); err != nil {
@@ -65,10 +77,11 @@ func (r *RotatingFile) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// Close closes the output file.
+// Close closes the output file. Later writes cannot reopen it.
 func (r *RotatingFile) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.closed = true
 	if r.f == nil {
 		return nil
 	}
@@ -79,11 +92,11 @@ func (r *RotatingFile) Close() error {
 
 func (r *RotatingFile) rotateLocked() error {
 	if r.f != nil {
-		err := r.f.Close()
-		r.f = nil
-		if err != nil {
-			return err
+		if err := r.f.Close(); err != nil {
+			r.f = nil
+			return ErrStorageUnavailable
 		}
+		r.f = nil
 	}
 	// The rotation moves older files before it makes the primary file again.
 	for i := r.maxFiles - 1; i >= 1; i-- {
@@ -93,18 +106,34 @@ func (r *RotatingFile) rotateLocked() error {
 		}
 		to := fmt.Sprintf("%s.%d", r.path, i)
 		if err := os.Remove(to); err != nil && !os.IsNotExist(err) {
-			return err
+			return ErrStorageUnavailable
 		}
 		if err := os.Rename(from, to); err != nil && !os.IsNotExist(err) {
-			return err
+			return ErrStorageUnavailable
 		}
 	}
 	f, err := openRegularAuditFile(r.path, false)
 	if err != nil {
-		return err
+		return ErrStorageUnavailable
 	}
 	r.f = f
 	r.size = 0
+	return nil
+}
+
+// reopenLocked opens the primary file for append after a storage failure.
+func (r *RotatingFile) reopenLocked() error {
+	f, err := openRegularAuditFile(r.path, true)
+	if err != nil {
+		return ErrStorageUnavailable
+	}
+	st, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return ErrStorageUnavailable
+	}
+	r.f = f
+	r.size = st.Size()
 	return nil
 }
 

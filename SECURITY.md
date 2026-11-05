@@ -121,7 +121,11 @@ If an audit write fails, stderr receives the fixed diagnostic `audit write faile
 The server gives one diagnostic per continuous failure period.
 The diagnostic contains no writer error, path, or event data.
 Tool calls continue, and the server attempts subsequent audit writes.
-Audit file contents can be incomplete after a storage failure.
+A rotation or reopen failure is recoverable: the next write reopens the file
+with the regular-file, mode `0600`, and size checks. `Close` stops recovery.
+Audit records can be missing during a storage failure, and retained backups can
+lag the primary file. Audit file contents can be incomplete after a storage
+failure.
 
 ### Cardinality and denial of service
 
