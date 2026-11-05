@@ -78,6 +78,9 @@ The server and the operator use these controls for secrets:
 - On Windows, use a user-only ACL. The binary does not examine Windows ACLs.
 - `token_header` selects the authentication header. The server does not accept static
   headers with secret-related names.
+- The server rejects a static header that equals the effective authentication
+  header in any letter case. This rule includes adapter default headers.
+  Header names are canonical, so each logical header has one value.
 - The server does not accept query strings, fragments, and userinfo in `base_url`.
 - Errors and capabilities do not show tokens, URLs, or destination hostnames.
   They use the logical source name.

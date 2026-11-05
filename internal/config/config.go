@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/textproto"
 	"net/url"
 	"os"
 	"regexp"
@@ -702,6 +703,31 @@ func parseSource(name string, fs fileSource) (Source, ValidationErrors) {
 			errs = append(errs, ValidationError{"sources." + name + ".token_header", "requires token_env or token_file"})
 		}
 	}
+	// The effective authentication header comes from token_header or the
+	// adapter default. A static header with the same name, in any letter case,
+	// would make the request header nondeterministic.
+	if fs.TokenEnv != "" || tokenFile != "" {
+		effectiveAuth := th
+		if effectiveAuth == "" {
+			effectiveAuth = "Authorization"
+			if kind == "healthchecks" {
+				effectiveAuth = "X-Api-Key"
+			}
+		}
+		collision := ""
+		for hk := range fs.Headers {
+			if strings.EqualFold(strings.TrimSpace(hk), effectiveAuth) {
+				collision = hk
+				break
+			}
+		}
+		if collision != "" {
+			errs = append(errs, ValidationError{
+				"sources." + name + ".headers." + collision,
+				"conflicts with the effective authentication header " + effectiveAuth,
+			})
+		}
+	}
 	if len(errs) > 0 {
 		return Source{}, errs
 	}
@@ -977,13 +1003,11 @@ func ResolveToken(src Source) (string, error) {
 
 // AuthHeaders makes static headers and optional authentication.
 // The environment or a file supplies authentication values.
+// Header names use canonical spelling so each logical header has one value.
 func AuthHeaders(src Source, token string) map[string]string {
 	out := map[string]string{}
 	for k, v := range src.Headers {
-		if strings.EqualFold(k, "authorization") {
-			continue
-		}
-		out[k] = v
+		out[textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(k))] = v
 	}
 	if token == "" {
 		return out
@@ -996,6 +1020,7 @@ func AuthHeaders(src Source, token string) map[string]string {
 			name = "Authorization"
 		}
 	}
+	name = textproto.CanonicalMIMEHeaderKey(name)
 	val := token
 	if strings.EqualFold(name, "Authorization") {
 		lower := strings.ToLower(token)
