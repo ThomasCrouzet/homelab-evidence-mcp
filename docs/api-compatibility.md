@@ -27,6 +27,9 @@ The Gatus adapter has this behavior:
 - Duplicate exact keys and multiple matching aliases give an explicit ambiguity
   source error. The adapter does not select an arbitrary row.
 - Row order does not change the selected endpoint.
+- If no result has a valid timestamp, the adapter reports `freshness: unknown`
+  and marks the collection-derived time in `attributes`. A historical window
+  does not include the undated result.
 - Tests include empty arrays, empty results, unknown fields, and unordered
   history.
 

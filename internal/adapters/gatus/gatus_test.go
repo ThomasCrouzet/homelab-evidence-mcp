@@ -306,6 +306,71 @@ func TestEvidenceInWindow_ExactKeyBeatsEarlierAlias(t *testing.T) {
 	}
 }
 
+func TestStatus_UnknownSourceTimeIsExplicit(t *testing.T) {
+	for name, timestamp := range map[string]string{
+		"invalid": `"timestamp":"invalid"`,
+		"missing": "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			field := ""
+			if timestamp != "" {
+				field = "," + timestamp
+			}
+			cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`[{"name":"api","key":"api","results":[{"success":true,"status":200` + field + `}]}]`))
+			})
+			item, err := cli.Status(context.Background(), "x", "api")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if item.Freshness != evidence.FreshnessUnknown {
+				t.Fatalf("freshness=%s, want unknown", item.Freshness)
+			}
+			if item.Attributes["source_time_known"] != false || item.Attributes["collection_time_derived"] != true {
+				t.Fatalf("unknown source time is not explicit: %+v", item.Attributes)
+			}
+			if !item.ObservedAt.Equal(time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)) {
+				t.Fatalf("observed_at=%s, want collection time", item.ObservedAt)
+			}
+		})
+	}
+}
+
+func TestStatus_MixedTimestampsSelectLatestValid(t *testing.T) {
+	cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"name":"api","key":"api","results":[
+			{"success":true,"status":200,"timestamp":"invalid"},
+			{"success":false,"status":503,"timestamp":"2026-07-25T11:00:00Z"},
+			{"success":true,"status":200}
+		]}]`))
+	})
+	item, err := cli.Status(context.Background(), "x", "api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Attributes["http_status"] != 503 || item.Attributes["source_time_known"] != true {
+		t.Fatalf("latest valid result was not selected: %+v", item.Attributes)
+	}
+	if !item.ObservedAt.Equal(time.Date(2026, 7, 25, 11, 0, 0, 0, time.UTC)) {
+		t.Fatalf("observed_at=%s", item.ObservedAt)
+	}
+}
+
+func TestEvidenceInWindow_DoesNotInventUndatedHistory(t *testing.T) {
+	cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"name":"api","key":"api","results":[{"success":true,"status":200,"timestamp":"invalid"}]}]`))
+	})
+	start := time.Date(2026, 7, 25, 8, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 25, 9, 0, 0, 0, time.UTC)
+	items, _, err := cli.EvidenceInWindow(context.Background(), "x", "api", start, end, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("undated result became history: %+v", items)
+	}
+}
+
 func TestStatus_RedactsAllTextAttributes(t *testing.T) {
 	cli := setup(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`[{

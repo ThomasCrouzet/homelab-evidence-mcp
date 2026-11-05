@@ -16,6 +16,8 @@ This file records project changes. Its format uses
   ambiguous selection instead of choosing the first row.
 - Treat an omitted ntfy priority as the default `3` and map explicit
   out-of-range priorities to `unknown`.
+- Mark Gatus evidence with no valid source timestamp as `freshness: unknown`
+  instead of presenting the collection time as a recent observation.
 
 ## [0.1.3] - 2026-10-23
 
