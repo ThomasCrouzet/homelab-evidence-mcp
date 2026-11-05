@@ -10,6 +10,9 @@ This file records project changes. Its format uses
 
 - Add a serialized-payload byte budget to the evidence cache, with counters in
   `evidence_capabilities`. The default is 8 MiB and the maximum is 64 MiB.
+- Add a versioned upstream fixture corpus with provenance, offline replay tests,
+  auth-failure checks, and a compatibility matrix that distinguishes replay from
+  live verification.
 
 ### Changed
 

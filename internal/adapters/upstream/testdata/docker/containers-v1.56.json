@@ -1,0 +1,20 @@
+[
+  {
+    "Id": "9f0d2b7c4e1a",
+    "Names": ["/api"],
+    "Image": "example/api:1.2.3",
+    "ImageID": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "Command": "/api",
+    "Created": 1760950000,
+    "State": "running",
+    "Status": "Up 2 hours (healthy)",
+    "Labels": {
+      "com.docker.compose.project": "example",
+      "com.docker.compose.service": "api"
+    },
+    "Ports": [],
+    "HostConfig": {"NetworkMode": "default"},
+    "NetworkSettings": {"Networks": {}},
+    "Mounts": []
+  }
+]

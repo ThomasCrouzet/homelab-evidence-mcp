@@ -335,6 +335,8 @@ It downloads markdownlint-cli2 on first use.
 `make lint` needs golangci-lint 2.15.0 and defaults to Go toolchain 1.26.10.
 Tests use local fixtures without live homelab credentials.
 The executable E2E suite covers all seven tools and six adapters.
+Versioned upstream fixtures and their verification levels are in
+[upstream fixtures](docs/upstream-fixtures.md).
 It saves logs and revision, working-tree, fixture, environment, and result
 metadata outside the repository.
 Set `HEM_E2E_ARTIFACT_DIR` to select an external artifact directory.

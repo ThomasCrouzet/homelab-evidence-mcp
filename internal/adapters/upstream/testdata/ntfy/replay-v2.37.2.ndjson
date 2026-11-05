@@ -1,0 +1,2 @@
+{"id":"msg0001","time":1792490400,"event":"message","topic":"alerts","title":"Backup","message":"Backup completed successfully.","priority":3,"tags":["backup","ok"]}
+{"id":"msg0002","time":1792490700,"event":"keepalive","topic":"alerts"}

@@ -1,0 +1,19 @@
+{
+  "checks": [
+    {
+      "name": "backup",
+      "slug": "backup",
+      "tags": "ops backup",
+      "desc": "",
+      "grace": 3600,
+      "n_pings": 42,
+      "status": "down",
+      "started": true,
+      "last_ping": "2026-10-20T09:00:00+00:00",
+      "next_ping": "2026-10-20T10:00:00+00:00",
+      "manual_resume": false,
+      "methods": "",
+      "unique_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ]
+}
