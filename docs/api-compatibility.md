@@ -129,6 +129,17 @@ The Healthchecks adapter has this behavior:
   `check_tags`, and one identity field combine with AND semantics.
 - A binding that selects no check gives a source error. It does not look like a
   successful empty result.
+- A configured check that exists but does not match `status_filter` reports
+  `status_filter_no_match` with `complete: true` and no items. It is not
+  `unmatched_binding`.
+- `source_id` is a bounded process-local HMAC of the check unique identity when
+  one exists. Two checks that share a slug keep distinct provenance, and raw
+  unique keys or UUIDs never appear in output. A check without a unique
+  identity sets `identity_unverified` and makes coverage incomplete.
+- The adapter keeps one checks inventory per source instance for a global
+  `failed_crons` call. A sliding request budget of
+  `limits.max_source_requests_per_minute` (default 100) bounds each source.
+  An exhausted budget gives `request_budget_exceeded` with partial evidence.
 - A `check_name` that matches more than one check, by name or by slug, gives an
   `ambiguous_binding` source error. A name does not identify one check across
   collisions. Use `check_unique_key` or `check_uuid` for a single check, or

@@ -35,7 +35,15 @@ type Client struct {
 
 	identityOnce sync.Once
 	identityKey  []byte
+
+	requestMu    sync.Mutex
+	requestTimes []time.Time
+	// RequestLimit bounds requests in a sliding minute. Zero uses 100.
+	RequestLimit int
 }
+
+// ErrRequestBudget reports that the per-source request budget is exhausted.
+var ErrRequestBudget = errors.New("healthchecks request budget exceeded")
 
 // check holds only the Healthchecks fields used.
 const (
@@ -65,6 +73,8 @@ type TransitionResult struct {
 	Failures        int
 	// Unauthorized counts per-check history requests that failed with 401 or 403.
 	Unauthorized int
+	// Budget counts requests skipped by the per-source request limit.
+	Budget int
 }
 
 type check struct {
@@ -220,6 +230,9 @@ func (c *Client) list(ctx context.Context, fallback time.Time) ([]check, time.Ti
 	if len(c.Headers) == 0 {
 		return nil, time.Time{}, fmt.Errorf("healthchecks token not configured")
 	}
+	if err := c.allowRequest(); err != nil {
+		return nil, time.Time{}, err
+	}
 	// Management API v3 gives access to the list at GET /api/v3/checks/.
 	path := "/api/v3/checks/"
 	// LockedClient.Get closes the body before it gives the response.
@@ -352,6 +365,12 @@ func (c *Client) TransitionsFrom(ctx context.Context, snapshot Snapshot, service
 			continue
 		}
 		path := "/api/v3/checks/" + url.PathEscape(key) + "/flips/?" + query.Encode()
+		if err := c.allowRequest(); err != nil {
+			result.Budget++
+			result.Requests++
+			result.Failures++
+			continue
+		}
 		// LockedClient.Get closes the body before it gives the response.
 		resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
 		result.Requests++
@@ -586,6 +605,29 @@ func safeSourceID(ch check) string {
 		return ch.Name
 	}
 	return "check"
+}
+
+func (c *Client) allowRequest() error {
+	limit := c.RequestLimit
+	if limit <= 0 {
+		limit = 100
+	}
+	now := c.now()
+	c.requestMu.Lock()
+	defer c.requestMu.Unlock()
+	cutoff := now.Add(-time.Minute)
+	kept := c.requestTimes[:0]
+	for _, at := range c.requestTimes {
+		if at.After(cutoff) {
+			kept = append(kept, at)
+		}
+	}
+	c.requestTimes = kept
+	if len(c.requestTimes) >= limit {
+		return ErrRequestBudget
+	}
+	c.requestTimes = append(c.requestTimes, now)
+	return nil
 }
 
 func (c *Client) now() time.Time {

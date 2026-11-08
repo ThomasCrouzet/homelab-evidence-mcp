@@ -547,3 +547,62 @@ func TestTransitions_BoundsChecksAndFlips(t *testing.T) {
 		t.Fatalf("items=%d, want=%d", got, maxFlipsPerCheck)
 	}
 }
+
+func TestStatus_StatusFilterNoMatchIsNotUnmatchedBinding(t *testing.T) {
+	cli := transitionsClient(t, []map[string]any{{
+		"name": "backup", "slug": "backup", "status": "up", "unique_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}}, func(string) (int, string) { return http.StatusOK, `{"flips":[]}` })
+	if _, err := cli.Status(context.Background(), "svc", Filter{Name: "backup", Status: "down"}); !errors.Is(err, ErrStatusFilterNoMatch) {
+		t.Fatalf("err=%v, want ErrStatusFilterNoMatch", err)
+	}
+	// A truly unknown check remains unmatched.
+	if _, err := cli.Status(context.Background(), "svc", Filter{Name: "missing", Status: "down"}); !errors.Is(err, ErrNoMatch) {
+		t.Fatalf("err=%v, want ErrNoMatch", err)
+	}
+}
+
+func TestStatus_DuplicateSlugsHaveDistinctProvenance(t *testing.T) {
+	cli := transitionsClient(t, []map[string]any{
+		{"name": "one", "slug": "backups", "tags": "ops", "status": "up", "unique_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		{"name": "two", "slug": "backups", "tags": "ops", "status": "down", "unique_key": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+	}, func(string) (int, string) { return http.StatusOK, `{"flips":[]}` })
+	items, err := cli.Status(context.Background(), "svc", Filter{Tags: []string{"ops"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].SourceID == items[1].SourceID {
+		t.Fatalf("duplicate slug collapsed provenance: %+v", items)
+	}
+	for _, item := range items {
+		if strings.Contains(item.SourceID, "aaaaaaaa") || strings.Contains(item.SourceID, "bbbb") {
+			t.Fatalf("raw unique key leaked in source id: %s", item.SourceID)
+		}
+	}
+}
+
+func TestStatus_LegacyDuplicateSlugIsUnverified(t *testing.T) {
+	cli := transitionsClient(t, []map[string]any{
+		{"name": "one", "slug": "backups", "tags": "ops", "status": "up"},
+		{"name": "two", "slug": "backups", "tags": "ops", "status": "up"},
+	}, func(string) (int, string) { return http.StatusOK, `{"flips":[]}` })
+	items, err := cli.Status(context.Background(), "svc", Filter{Tags: []string{"ops"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || !items[0].IdentityUnverified || !items[1].IdentityUnverified {
+		t.Fatalf("legacy duplicate identity was not marked: %+v", items)
+	}
+}
+
+func TestList_RequestBudget(t *testing.T) {
+	cli := transitionsClient(t, []map[string]any{{
+		"name": "backup", "slug": "backup", "status": "up", "unique_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}}, func(string) (int, string) { return http.StatusOK, `{"flips":[]}` })
+	cli.RequestLimit = 1
+	if _, err := cli.Fetch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cli.Fetch(context.Background()); !errors.Is(err, ErrRequestBudget) {
+		t.Fatalf("err=%v, want ErrRequestBudget", err)
+	}
+}

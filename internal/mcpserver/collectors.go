@@ -231,6 +231,9 @@ func (a *App) applyHCTransition(outcome *evidence.SourceOutcome, transition heal
 	if outcome.Status == "ok" {
 		outcome.Reason = "unknown_history_coverage"
 		switch {
+		case transition.Budget > 0:
+			outcome.Reason = "request_budget_exceeded"
+			outcome.Error = fmt.Sprintf("%d healthcheck history request(s) skipped by the source request budget", transition.Budget)
 		case transition.Unauthorized > 0:
 			outcome.Reason = "authentication_failed"
 			outcome.Error = fmt.Sprintf("%d healthcheck history request(s) returned 401 or 403", transition.Unauthorized)

@@ -143,7 +143,7 @@ func NewApp(cfg *config.Config, log *slog.Logger, aud *audit.Logger) (*App, erro
 		case "loki":
 			app.loki[name] = &loki.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng, MaxLineBytes: cfg.Limits.MaxLogLineBytes}
 		case "healthchecks":
-			app.hc[name] = &healthchecks.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng}
+			app.hc[name] = &healthchecks.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng, RequestLimit: cfg.Limits.MaxSourceRequestsPerMinute}
 		case "beszel":
 			app.beszel[name] = &beszel.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng}
 		case "ntfy":

@@ -40,6 +40,12 @@
           "description": "The source response cache keeps the same GET responses for a short time. The default is 15s. A value of 0 deactivates this cache. The source or collection time supplies the evidence timestamp."
         },
         "max_tool_calls_per_minute": { "type": "integer", "minimum": 0, "maximum": 1000, "description": "A value of 0 uses the default of 120." },
+        "max_source_requests_per_minute": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000,
+          "description": "Bound one source instance to this many requests in a sliding minute. A value of 0 uses 100. Healthchecks recommends at most 100."
+        },
         "max_concurrent_tools": { "type": "integer", "minimum": 0, "maximum": 64, "description": "A value of 0 uses the default of 8." },
         "warn_empty_bindings": { "type": "boolean" }
       }
