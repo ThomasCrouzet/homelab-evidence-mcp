@@ -123,6 +123,8 @@ type Bundle struct {
 	Items               []Item          `json:"items"`
 	Sources             []SourceOutcome `json:"sources"`
 	Complete            bool            `json:"complete"`
+	SourceComplete      bool            `json:"source_complete"`
+	DeliveryComplete    bool            `json:"delivery_complete"`
 	Truncated           bool            `json:"truncated"`
 	Compact             bool            `json:"compact"`
 	ByteBudget          int             `json:"byte_budget"`

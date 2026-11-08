@@ -2,8 +2,10 @@ package mcpserver
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 
+	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/correlation"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/evidence"
 )
 
@@ -11,9 +13,9 @@ import (
 const wireOverhead = 512
 
 // compactIncident reserves one item per contributing source, fills the item
-// limit by newest evidence, then enforces the byte budget by dropping the
-// oldest item from a source that still has another item.
-func compactIncident(bundle evidence.Bundle, maxItems, byteBudget int) evidence.Bundle {
+// limit by newest evidence, then enforces the byte budget and rebuilds the
+// summary from the retained items.
+func compactIncident(bundle evidence.Bundle, maxItems, byteBudget int) (evidence.Bundle, error) {
 	bundle.Compact = true
 	bundle.ByteBudget = byteBudget
 	items := append([]evidence.Item(nil), bundle.Items...)
@@ -52,16 +54,46 @@ func compactIncident(bundle evidence.Bundle, maxItems, byteBudget int) evidence.
 	bundle.Items = selectedItems(selected)
 	bundle.SelectionTruncated = selectionOmitted > 0
 	bundle.OmittedItems = selectionOmitted
-	trimmed := trimToBudget(&bundle, byteBudget)
-	bundle.Truncated = bundle.Truncated || bundle.SelectionTruncated || trimmed
-	if trimmed {
+	bundle.Truncated = bundle.Truncated || bundle.SelectionTruncated
+	if bundle.OmittedSources == nil {
+		bundle.OmittedSources = []string{}
+	}
+	// Account for item bytes once, then rebuild the envelope from the retained
+	// set. The exact check below is the final authority.
+	trimmed, err := trimToBudget(&bundle, byteBudget)
+	if err != nil {
+		return bundle, err
+	}
+	bundle.ByteBudgetTruncated = trimmed
+	bundle.Truncated = bundle.Truncated || trimmed
+	RebuildCompactDerived(&bundle, maxItems)
+	// The rebuilt summary and warnings are part of the payload. Trim further
+	// until the exact serialized envelope fits.
+	for bundle.ByteSize > byteBudget && len(bundle.Items) > 0 {
+		drop, _ := dropCandidate(bundle.Items)
+		bundle.Items = append(bundle.Items[:drop], bundle.Items[drop+1:]...)
+		bundle.OmittedItems++
 		bundle.ByteBudgetTruncated = true
+		bundle.Truncated = true
+		RebuildCompactDerived(&bundle, maxItems)
+	}
+	if bundle.ByteSize > byteBudget {
+		return bundle, fmt.Errorf("response budget %d bytes cannot hold the source metadata (%d bytes)", byteBudget, bundle.ByteSize)
+	}
+	return bundle, nil
+}
+
+// RebuildCompactDerived refreshes the item-derived fields after selection.
+func RebuildCompactDerived(bundle *evidence.Bundle, maxItems int) {
+	finalizeOmittedSources(bundle)
+	correlation.RebuildDerived(bundle, maxItems)
+	if bundle.Items == nil {
+		bundle.Items = []evidence.Item{}
 	}
 	if bundle.OmittedSources == nil {
 		bundle.OmittedSources = []string{}
 	}
-	bundle.ByteSize = incidentWireSize(bundle)
-	return bundle
+	bundle.ByteSize = incidentWireSize(*bundle)
 }
 
 func trimToNewest(selected map[string]evidence.Item, max int) map[string]evidence.Item {
@@ -85,29 +117,64 @@ func selectedItems(selected map[string]evidence.Item) []evidence.Item {
 	return items
 }
 
-// trimToBudget removes selected items until the result fits. It protects the
-// last selected item of each source until no other choice remains.
-func trimToBudget(bundle *evidence.Bundle, budget int) bool {
+// trimToBudget removes selected items until the estimated result fits. It
+// protects the last selected item of each source until no other choice
+// remains. The caller rechecks the exact wire size after the summary rebuild.
+func trimToBudget(bundle *evidence.Bundle, budget int) (bool, error) {
+	if incidentWireSize(*bundle) <= budget {
+		return false, nil
+	}
+	costs := make(map[string]int, len(bundle.Items))
+	for _, item := range bundle.Items {
+		costs[item.ID] = itemWireSize(item)
+	}
+	estimated := incidentWireSize(*bundle)
 	trimmed := false
+	for len(bundle.Items) > 0 && estimated > budget {
+		drop, dropped := dropCandidate(bundle.Items)
+		bundle.Items = append(bundle.Items[:drop], bundle.Items[drop+1:]...)
+		bundle.OmittedItems++
+		estimated -= costs[dropped.ID]
+		trimmed = true
+	}
+	// The envelope and warning text change with each omission. Make the final
+	// decision on the exact serialized size.
 	for len(bundle.Items) > 0 && incidentWireSize(*bundle) > budget {
-		counts := map[evidence.SourceKind]int{}
-		for _, item := range bundle.Items {
-			counts[item.Source]++
-		}
-		drop := -1
-		for index, item := range bundle.Items {
-			if counts[item.Source] > 1 {
-				drop = index
-				break
-			}
-		}
-		if drop < 0 {
-			drop = 0
-		}
+		drop, _ := dropCandidate(bundle.Items)
 		bundle.Items = append(bundle.Items[:drop], bundle.Items[drop+1:]...)
 		bundle.OmittedItems++
 		trimmed = true
 	}
+	bundle.ByteSize = incidentWireSize(*bundle)
+	return trimmed, nil
+}
+
+func dropCandidate(items []evidence.Item) (int, evidence.Item) {
+	counts := map[evidence.SourceKind]int{}
+	for _, item := range items {
+		counts[item.Source]++
+	}
+	for index, item := range items {
+		if counts[item.Source] > 1 {
+			return index, item
+		}
+	}
+	return 0, items[0]
+}
+
+func itemWireSize(item evidence.Item) int {
+	text, err := json.MarshalIndent(item, "", "  ")
+	if err != nil {
+		return 0
+	}
+	structured, err := json.Marshal(item)
+	if err != nil {
+		return len(text)
+	}
+	return len(text) + len(structured) + 2
+}
+
+func finalizeOmittedSources(bundle *evidence.Bundle) {
 	selectedSources := map[evidence.SourceKind]bool{}
 	for _, item := range bundle.Items {
 		selectedSources[item.Source] = true
@@ -125,7 +192,6 @@ func trimToBudget(bundle *evidence.Bundle, budget int) bool {
 	}
 	sort.Strings(omitted)
 	bundle.OmittedSources = omitted
-	return trimmed
 }
 
 // sourceHadItems reports a source that contributed evidence before selection.

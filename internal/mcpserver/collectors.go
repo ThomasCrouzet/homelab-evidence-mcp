@@ -470,6 +470,15 @@ func normalizeOutcomes(sources []evidence.SourceOutcome) {
 	}
 }
 
+func anySourceTruncated(sources []evidence.SourceOutcome) bool {
+	for _, source := range sources {
+		if source.Truncated {
+			return true
+		}
+	}
+	return false
+}
+
 // outcomeCoverage gives the overall state of a multi-source result.
 // Absent and skipped sources are outside the request coverage.
 func outcomeCoverage(sources []evidence.SourceOutcome) (complete, anyOK bool, configured int) {

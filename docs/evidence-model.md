@@ -94,12 +94,25 @@ prove a restart gap in the default memory storage.
 A grouped response contains:
 
 - The requested and effective windows
-- Items sorted by date, source, identity, stable source position, and
+- Items sorted by date, source, stable source position, identity, and
   identifier
 - The state and truncation of each source: `ok`, `error`, `timeout`,
   `canceled`, `skipped`, or `absent`
-- The truncation indicator and warnings
-- A factual summary without causal claims
+- `source_complete` reports whether every queried source answered with
+  complete coverage. `complete` keeps the same value for older clients.
+- `delivery_complete` reports whether the response includes every retrieved
+  item. It is false when item selection or the response byte budget omitted a
+  retrieved item.
+- `selection_truncated`, `byte_budget_truncated`, and `omitted_items` separate
+  an item limit from the response byte limit. `truncated` is true when either
+  applies, or when any source reports truncation.
+- The truncation indicator and warnings. Warnings describe retained evidence
+  and source coverage, not omitted item details.
+- A factual summary without causal claims. Item counts describe returned
+  evidence, not total upstream records.
+- `byte_size` and `byte_budget` for the serialized result in compact mode. A
+  compact result does not exceed its budget. When the source metadata alone
+  is too large, the tool returns an explicit error.
 
 A canceled request is not a successful collection, even when a warm source
 cache could answer it. The server checks the caller context before a cache read

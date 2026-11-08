@@ -153,8 +153,8 @@ services:
 	}
 
 	defaultBody := run(65536, 5, false)
-	if defaultBody.Compact || defaultBody.SelectionTruncated || defaultBody.OmittedItems != 0 {
-		t.Fatalf("default mode changed: %+v", defaultBody)
+	if defaultBody.Compact || !defaultBody.SelectionTruncated || defaultBody.OmittedItems != 16 {
+		t.Fatalf("default selection completeness changed: %+v", defaultBody)
 	}
 	for _, item := range defaultBody.Items {
 		if item.Source == "gatus" {

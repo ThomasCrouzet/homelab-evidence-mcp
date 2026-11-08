@@ -31,6 +31,12 @@ This file records project changes. Its format uses
 
 ### Fixed
 
+- Rebuild the incident `factual_summary` and item warnings from the retained
+  items after compact selection, while source coverage warnings stay visible.
+- Enforce the compact byte budget after the summary rebuild. A metadata-only
+  overflow returns an explicit tool error instead of an oversized success.
+- Add `source_complete`, `delivery_complete`, and separate selection and byte
+  omission fields. Top-level `truncated` now includes source truncation.
 - Sample `retrieved_at` after the source response is decoded in all adapters,
   so a slow request cannot report retrieval before collection.
 - Keep the source freshness in `source_freshness` and the cache read time in
