@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/adapters/gatus"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/adapters/healthchecks"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/adapters/loki"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/config"
@@ -31,12 +32,19 @@ func (a *App) collectGatusStatus(ctx context.Context, serviceID string, ref *con
 		outcome.Reason = "unmatched_binding"
 		outcome.Complete = false
 	}
+	if len(items) == 1 && !isMissingItem(items[0]) {
+		if known, ok := items[0].Attributes["success_known"].(bool); ok && !known {
+			outcome.Discarded = 1
+			outcome.Complete = false
+			outcome.Reason = "partial_invalid_records"
+		}
+	}
 	markEmpty(&outcome)
 	return outcome, items
 }
 
 func (a *App) collectGatusWindow(ctx context.Context, serviceID string, ref *config.GatusRef, start, end time.Time, max int) (evidence.SourceOutcome, []evidence.Item) {
-	localTruncated := false
+	var window gatus.WindowResult
 	outcome, items := a.withSourceTimeout(ctx, ref.Source, evidence.SourceGatus, func(ctx context.Context) ([]evidence.Item, error) {
 		cli := a.gatus[ref.Source]
 		if cli == nil {
@@ -46,17 +54,30 @@ func (a *App) collectGatusWindow(ctx context.Context, serviceID string, ref *con
 			max = a.Cfg.Limits.MaxEvidenceItems
 		}
 		var err error
-		var result []evidence.Item
-		result, localTruncated, err = cli.EvidenceInWindow(ctx, serviceID, ref.EndpointKey, start, end, max)
-		return result, err
+		window, err = cli.EvidenceInWindow(ctx, serviceID, ref.EndpointKey, start, end, max)
+		return window.Items, err
 	})
-	for _, item := range items {
-		if isMissingItem(item) {
+	if outcome.Status == "ok" {
+		if !window.Matched {
 			outcome.Reason = "unmatched_binding"
 			outcome.Complete = false
+		} else {
+			// Gatus keeps a bounded result count per endpoint. The adapter
+			// cannot prove that a window is fully retained.
+			outcome.RetentionLimited = true
+			outcome.Complete = false
+			switch {
+			case window.Discarded > 0:
+				outcome.Discarded = window.Discarded
+				outcome.Reason = "partial_invalid_records"
+			case window.Truncated:
+				outcome.Reason = "truncated"
+			default:
+				outcome.Reason = "retention_limited"
+			}
 		}
+		markTruncated(&outcome, false, window.Truncated)
 	}
-	markTruncated(&outcome, false, localTruncated)
 	markEmpty(&outcome)
 	return outcome, items
 }
@@ -352,6 +373,9 @@ func reasonForError(err error) string {
 		return "unmatched_binding"
 	}
 	if errors.Is(err, healthchecks.ErrAmbiguousBinding) {
+		return "ambiguous_binding"
+	}
+	if errors.Is(err, gatus.ErrEndpointAmbiguous) {
 		return "ambiguous_binding"
 	}
 	if err == nil {

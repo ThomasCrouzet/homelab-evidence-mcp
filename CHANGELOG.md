@@ -40,6 +40,12 @@ This file records project changes. Its format uses
   403, and report query, failure, unauthorized, and missing-identity counts.
 - Scope `failed_crons` without `service_id` to registered bindings and report
   `outside_registry_scope` for a configured source with no registered binding.
+- Report a missing Gatus endpoint as `unmatched_binding` in every window, and
+  stop an absent endpoint from looking like matched empty history.
+- Count Gatus records with an invalid timestamp or no `success` field as
+  `discarded`, and keep explicit failures without a status.
+- Mark windowed Gatus results as retention-limited and incomplete because the
+  upstream result count is bounded and memory storage loses history on restart.
 - Redact complete `Cookie` and `Set-Cookie` header values instead of the first
   cookie pair only.
 - Check the caller context before a source cache read or network request, and
