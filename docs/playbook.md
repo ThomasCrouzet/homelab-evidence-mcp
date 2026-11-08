@@ -36,7 +36,15 @@ A service binding with `history_mode: transitions` also reads dated up/down
 transitions. It can show a past outage and recovery when the source retains
 them. Transition results are incomplete by contract because the upstream
 retention period is not documented. Read the `reason`, `discarded`, `omitted`,
-and `warnings` fields before you claim complete history.
+`queried_checks`, `failed_checks`, `unauthorized_checks`,
+`missing_identity_checks`, and `warnings` fields before you claim complete
+history.
+
+A `check_name` that matches more than one check by name or slug returns
+`ambiguous_binding`. Bind one check with `check_unique_key` or `check_uuid`, or
+use `check_tags` for deliberate aggregation. Without `service_id`,
+`failed_crons` reads only registered bindings and reports
+`outside_registry_scope` for a source with none.
 
 ## 4. Read evidence again
 

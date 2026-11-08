@@ -39,12 +39,16 @@ func TestStdioHealthchecksTransitions(t *testing.T) {
 		}
 		if r.URL.Path == "/api/v3/checks/" {
 			_ = json.NewEncoder(w).Encode(map[string]any{"checks": []map[string]any{
-				{"name": "backup", "slug": "backup", "tags": "mixedhist", "status": "up", "unique_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+				{"name": "backup", "slug": "backup", "tags": "mixedhist idmix", "status": "up", "unique_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 				{"name": "fail-check", "slug": "fail-check", "tags": "mixedhist", "status": "up", "unique_key": "dddddddddddddddddddddddddddddddd"},
 				{"name": "empty-check", "slug": "empty-check", "status": "up", "unique_key": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 				{"name": "invalid-check", "slug": "invalid-check", "status": "up", "unique_key": "cccccccccccccccccccccccccccccccc"},
-				{"name": "no-key", "slug": "no-key", "status": "up"},
+				{"name": "no-key", "slug": "no-key", "tags": "idmix", "status": "up"},
 				{"name": "truncated", "slug": "truncated", "status": "up", "unique_key": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
+				{"name": "allowed", "slug": "allowed", "tags": "authmix", "status": "up", "unique_key": "11111111111111111111111111111111"},
+				{"name": "denied", "slug": "denied", "tags": "authmix", "status": "up", "unique_key": "22222222222222222222222222222222"},
+				{"name": "database", "slug": "db-primary", "status": "down", "unique_key": "33333333333333333333333333333333"},
+				{"name": "nightly backup", "slug": "database", "status": "down", "unique_key": "44444444444444444444444444444444"},
 			}})
 			return
 		}
@@ -59,6 +63,12 @@ func TestStdioHealthchecksTransitions(t *testing.T) {
 				}})
 			case "dddddddddddddddddddddddddddddddd":
 				w.WriteHeader(http.StatusInternalServerError)
+			case "22222222222222222222222222222222":
+				w.WriteHeader(http.StatusForbidden)
+			case "11111111111111111111111111111111":
+				_ = json.NewEncoder(w).Encode(map[string]any{"flips": []map[string]any{
+					{"timestamp": downAt.Format(time.RFC3339), "up": 0},
+				}})
 			case "cccccccccccccccccccccccccccccccc":
 				_ = json.NewEncoder(w).Encode(map[string]any{"flips": []map[string]any{
 					{"timestamp": "invalid", "up": 0},
@@ -128,6 +138,15 @@ services:
   - id: truncated
     sources:
       healthchecks: { source: hc, check_name: truncated, history_mode: transitions }
+  - id: partial-auth
+    sources:
+      healthchecks: { source: hc, check_tags: [authmix], history_mode: transitions }
+  - id: mixed-missing
+    sources:
+      healthchecks: { source: hc, check_tags: [idmix], history_mode: transitions }
+  - id: ambiguous-name
+    sources:
+      healthchecks: { source: hc, check_name: database, history_mode: transitions }
   - id: mixed
     sources:
       healthchecks: { source: hc, check_name: backup, history_mode: transitions }
@@ -160,11 +179,13 @@ services:
 		Complete bool   `json:"complete"`
 		Items    []item `json:"items"`
 		Sources  []struct {
-			Kind      string `json:"kind"`
-			Status    string `json:"status"`
-			Reason    string `json:"reason"`
-			Complete  bool   `json:"complete"`
-			Discarded int    `json:"discarded"`
+			Kind               string `json:"kind"`
+			Status             string `json:"status"`
+			Reason             string `json:"reason"`
+			Complete           bool   `json:"complete"`
+			Discarded          int    `json:"discarded"`
+			UnauthorizedChecks int    `json:"unauthorized_checks"`
+			MissingChecks      int    `json:"missing_identity_checks"`
 		} `json:"sources"`
 	}
 	call := func(name string, args map[string]any) outcome {
@@ -177,14 +198,24 @@ services:
 		executableE2EDecode(t, mustJSON(t, result.StructuredContent), &body)
 		return body
 	}
-	find := func(body outcome, kind string) (string, string, bool, int) {
+	type sourceView struct {
+		status, reason          string
+		complete                bool
+		discarded, unauthorized int
+		missing                 int
+	}
+	find := func(body outcome, kind string) sourceView {
 		for _, source := range body.Sources {
 			if source.Kind == kind {
-				return source.Status, source.Reason, source.Complete, source.Discarded
+				return sourceView{
+					status: source.Status, reason: source.Reason, complete: source.Complete,
+					discarded: source.Discarded, unauthorized: source.UnauthorizedChecks,
+					missing: source.MissingChecks,
+				}
 			}
 		}
 		t.Fatalf("source %s missing", kind)
-		return "", "", false, 0
+		return sourceView{}
 	}
 	recovered := call("failed_crons", map[string]any{
 		"service_id": "recovered", "start": windowStart, "end": windowEnd,
@@ -198,9 +229,9 @@ services:
 	if recovered.Items[0].WindowStart == nil || recovered.Items[1].WindowStart == nil {
 		t.Fatal("history items have no window")
 	}
-	status, reason, complete, _ := find(recovered, "healthchecks")
-	if status != "ok" || reason != "unknown_history_coverage" || complete {
-		t.Fatalf("history coverage status=%s reason=%s complete=%v", status, reason, complete)
+	recoveredSource := find(recovered, "healthchecks")
+	if recoveredSource.status != "ok" || recoveredSource.reason != "unknown_history_coverage" || recoveredSource.complete {
+		t.Fatalf("history coverage status=%s reason=%s complete=%v", recoveredSource.status, recoveredSource.reason, recoveredSource.complete)
 	}
 
 	snapshot := call("service_status", map[string]any{"service_id": "snapshot"})
@@ -208,46 +239,74 @@ services:
 		snapshot.Items[0].Attributes["status"] != "up" {
 		t.Fatalf("service_status changed to history: %+v", snapshot.Items)
 	}
-	if _, snapReason, snapComplete, _ := find(snapshot, "healthchecks"); snapReason != "" || !snapComplete {
-		t.Fatalf("snapshot coverage reason=%s complete=%v", snapReason, snapComplete)
+	if snap := find(snapshot, "healthchecks"); snap.reason != "" || !snap.complete {
+		t.Fatalf("snapshot coverage reason=%s complete=%v", snap.reason, snap.complete)
 	}
 
 	empty := call("failed_crons", map[string]any{"service_id": "empty", "start": windowStart, "end": windowEnd})
 	if len(empty.Items) != 0 {
 		t.Fatalf("empty history items=%+v", empty.Items)
 	}
-	if _, emptyReason, emptyComplete, _ := find(empty, "healthchecks"); emptyReason != "unknown_history_coverage" || emptyComplete {
-		t.Fatalf("empty history reason=%s complete=%v", emptyReason, emptyComplete)
+	if emptySource := find(empty, "healthchecks"); emptySource.reason != "unknown_history_coverage" || emptySource.complete {
+		t.Fatalf("empty history reason=%s complete=%v", emptySource.reason, emptySource.complete)
 	}
 
 	invalid := call("failed_crons", map[string]any{"service_id": "invalid", "start": windowStart, "end": windowEnd})
 	if len(invalid.Items) != 0 {
 		t.Fatalf("invalid history items=%+v", invalid.Items)
 	}
-	if _, _, _, discarded := find(invalid, "healthchecks"); discarded != 1 {
-		t.Fatalf("invalid history discarded=%d", discarded)
+	if invalidSource := find(invalid, "healthchecks"); invalidSource.discarded != 1 {
+		t.Fatalf("invalid history discarded=%d", invalidSource.discarded)
 	}
 
 	partial := call("failed_crons", map[string]any{"service_id": "partial", "start": windowStart, "end": windowEnd})
 	if len(partial.Items) != 2 {
 		t.Fatalf("partial history items=%+v", partial.Items)
 	}
-	if status, partialReason, partialComplete, _ := find(partial, "healthchecks"); status != "ok" ||
-		partialReason != "partial_fetch" || partialComplete {
-		t.Fatalf("partial fetch status=%s reason=%s complete=%v", status, partialReason, partialComplete)
+	if partialSource := find(partial, "healthchecks"); partialSource.status != "ok" ||
+		partialSource.reason != "partial_fetch" || partialSource.complete {
+		t.Fatalf("partial fetch status=%s reason=%s complete=%v", partialSource.status, partialSource.reason, partialSource.complete)
 	}
 
 	missing := call("failed_crons", map[string]any{"service_id": "missing", "start": windowStart, "end": windowEnd})
-	if status, missingReason, missingComplete, _ := find(missing, "healthchecks"); status != "ok" ||
-		missingReason != "missing_identity" || missingComplete || len(missing.Items) != 0 {
-		t.Fatalf("missing identity status=%s reason=%s complete=%v items=%d", status, missingReason, missingComplete, len(missing.Items))
+	if missingSource := find(missing, "healthchecks"); missingSource.status != "ok" ||
+		missingSource.reason != "missing_identity" || missingSource.complete || len(missing.Items) != 0 || missingSource.missing != 1 {
+		t.Fatalf("missing identity status=%s reason=%s complete=%v items=%d missing=%d", missingSource.status, missingSource.reason, missingSource.complete, len(missing.Items), missingSource.missing)
 	}
 
 	truncated := call("failed_crons", map[string]any{"service_id": "truncated", "start": windowStart, "end": windowEnd})
-	if status, truncatedReason, truncatedComplete, _ := find(truncated, "healthchecks"); status != "ok" ||
-		truncatedReason != "truncated" || truncatedComplete || len(truncated.Items) != 200 {
+	if truncatedSource := find(truncated, "healthchecks"); truncatedSource.status != "ok" ||
+		truncatedSource.reason != "truncated" || truncatedSource.complete || len(truncated.Items) != 200 {
 		t.Fatalf("truncated history status=%s reason=%s complete=%v items=%d",
-			status, truncatedReason, truncatedComplete, len(truncated.Items))
+			truncatedSource.status, truncatedSource.reason, truncatedSource.complete, len(truncated.Items))
+	}
+
+	partialAuth := call("failed_crons", map[string]any{"service_id": "partial-auth", "start": windowStart, "end": windowEnd})
+	if len(partialAuth.Items) != 1 {
+		t.Fatalf("partial auth lost evidence: %+v", partialAuth.Items)
+	}
+	if authSource := find(partialAuth, "healthchecks"); authSource.status != "ok" ||
+		authSource.reason != "authentication_failed" || authSource.complete || authSource.unauthorized != 1 {
+		t.Fatalf("partial auth status=%s reason=%s complete=%v unauthorized=%d",
+			authSource.status, authSource.reason, authSource.complete, authSource.unauthorized)
+	}
+
+	mixedMissing := call("failed_crons", map[string]any{"service_id": "mixed-missing", "start": windowStart, "end": windowEnd})
+	if len(mixedMissing.Items) != 2 {
+		t.Fatalf("mixed missing-identity items=%+v", mixedMissing.Items)
+	}
+	if mixSource := find(mixedMissing, "healthchecks"); mixSource.status != "ok" ||
+		mixSource.reason != "missing_identity" || mixSource.complete || mixSource.missing != 1 {
+		t.Fatalf("mixed missing-identity status=%s reason=%s complete=%v missing=%d",
+			mixSource.status, mixSource.reason, mixSource.complete, mixSource.missing)
+	}
+
+	ambiguous := call("failed_crons", map[string]any{"service_id": "ambiguous-name", "start": windowStart, "end": windowEnd})
+	if len(ambiguous.Items) != 0 {
+		t.Fatalf("ambiguous binding attributed other check evidence: %+v", ambiguous.Items)
+	}
+	if ambSource := find(ambiguous, "healthchecks"); ambSource.status != "error" || ambSource.reason != "ambiguous_binding" {
+		t.Fatalf("ambiguous binding status=%s reason=%s", ambSource.status, ambSource.reason)
 	}
 
 	mixed := call("incident_context", map[string]any{"service_id": "mixed", "start": windowStart, "end": windowEnd})

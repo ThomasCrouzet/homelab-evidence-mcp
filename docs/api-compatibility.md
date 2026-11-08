@@ -95,10 +95,21 @@ The Healthchecks adapter has this behavior:
   `check_tags`, and one identity field combine with AND semantics.
 - A binding that selects no check gives a source error. It does not look like a
   successful empty result.
+- A `check_name` that matches more than one check, by name or by slug, gives an
+  `ambiguous_binding` source error. A name does not identify one check across
+  collisions. Use `check_unique_key` or `check_uuid` for a single check, or
+  `check_tags` for deliberate aggregation.
+- `failed_crons` without `service_id` reads only the Healthchecks bindings in
+  the service registry. It never enumerates unbound checks. A source without a
+  registered binding reports `outside_registry_scope` and makes the result
+  incomplete.
 - `history_mode: snapshot` is the default. It keeps the current list behavior.
 - `history_mode: transitions` reads
-  `GET /api/v3/checks/<unique_key>/flips/?start=<RFC3339>&end=<RFC3339>` for
-  windowed `failed_crons` and `incident_context`.
+  `GET /api/v3/checks/<unique_key>/flips/?start=<unix>&end=<unix>` for
+  windowed `failed_crons` and `incident_context`. Both bounds are Unix
+  seconds. The adapter widens each exclusive upstream bound by one second,
+  then applies the requested inclusive window to the returned flips locally.
+  As a result, a flip exactly on `start` or `end` stays in the result.
 - Transition mode keeps both failure and recovery events, with source
   timestamps, even when the current state is healthy.
 - A selection reads at most 32 checks and 200 flips per check. It reports

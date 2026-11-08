@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,6 +55,8 @@ type TransitionResult struct {
 	Discarded       int
 	Requests        int
 	Failures        int
+	// Unauthorized counts per-check history requests that failed with 401 or 403.
+	Unauthorized int
 }
 
 type check struct {
@@ -86,6 +89,10 @@ type Filter struct {
 // The error does not include the identity value.
 var ErrNoMatch = errors.New("healthchecks binding matched no check")
 
+// ErrAmbiguousBinding reports a name or identity binding that selected more
+// than one check. The error does not include an identity value.
+var ErrAmbiguousBinding = errors.New("healthchecks binding matched more than one check")
+
 // FilterFromRef makes a filter from the configuration.
 func FilterFromRef(ref *config.HealthchecksRef) Filter {
 	if ref == nil {
@@ -111,9 +118,9 @@ func (c *Client) Status(ctx context.Context, serviceID string, f Filter) ([]evid
 	if err != nil {
 		return nil, err
 	}
-	matched := filterChecks(checks, f)
-	if len(matched) == 0 && f.selects() {
-		return nil, ErrNoMatch
+	matched, err := selectChecks(checks, f)
+	if err != nil {
+		return nil, err
 	}
 	out := make([]evidence.Item, 0, len(matched))
 	for _, ch := range matched {
@@ -132,9 +139,9 @@ func (c *Client) FailedInWindow(ctx context.Context, serviceID string, f Filter,
 	}
 	var matched []check
 	if serviceID != "" || f.selects() {
-		matched = filterChecks(checks, f)
-		if len(matched) == 0 && f.selects() {
-			return nil, ErrNoMatch
+		matched, err = selectChecks(checks, f)
+		if err != nil {
+			return nil, err
 		}
 	} else {
 		matched = checks
@@ -189,6 +196,26 @@ func (c *Client) list(ctx context.Context, fallback time.Time) ([]check, time.Ti
 	return arr, observedAt, nil
 }
 
+// selectChecks applies the configured binding. A name, UUID, or unique key
+// identifies one check, so more than one match fails closed. Tag-only bindings
+// can deliberately aggregate several checks.
+func selectChecks(checks []check, f Filter) ([]check, error) {
+	if !f.selects() {
+		return nil, nil
+	}
+	matched := filterChecks(checks, f)
+	if len(matched) == 0 {
+		return nil, ErrNoMatch
+	}
+	if f.Name != "" || f.UUID != "" || f.UniqueKey != "" {
+		if len(matched) > 1 {
+			return nil, ErrAmbiguousBinding
+		}
+	}
+	return matched, nil
+}
+
+// filterChecks returns every check that satisfies each configured filter field.
 func filterChecks(checks []check, f Filter) []check {
 	var out []check
 	for _, ch := range checks {
@@ -205,10 +232,6 @@ func filterChecks(checks []check, f Filter) []check {
 			continue
 		}
 		if f.Status != "" && !strings.EqualFold(strings.TrimSpace(ch.Status), f.Status) {
-			continue
-		}
-		// An empty filter matches nothing. The global failed_crons path processes this case.
-		if !f.selects() {
 			continue
 		}
 		out = append(out, ch)
@@ -241,9 +264,9 @@ func (c *Client) Transitions(ctx context.Context, serviceID string, f Filter, st
 	}
 	var matched []check
 	if serviceID != "" || f.selects() {
-		matched = filterChecks(checks, f)
-		if len(matched) == 0 && f.selects() {
-			return result, ErrNoMatch
+		matched, err = selectChecks(checks, f)
+		if err != nil {
+			return result, err
 		}
 	} else {
 		matched = checks
@@ -261,9 +284,13 @@ func (c *Client) Transitions(ctx context.Context, serviceID string, f Filter, st
 		matched = matched[:maxTransitionChecks]
 	}
 
+	// The flips endpoint takes Unix seconds. The upstream bounds are exclusive:
+	// start is newer than the value and end is older than the value. Widen each
+	// bound by one second so the local inclusive filter sees every candidate,
+	// including a flip exactly on a boundary or inside a sub-second bound.
 	query := url.Values{}
-	query.Set("start", start.UTC().Format(time.RFC3339))
-	query.Set("end", end.UTC().Format(time.RFC3339))
+	query.Set("start", strconv.FormatInt(start.UTC().Unix()-1, 10))
+	query.Set("end", strconv.FormatInt(end.UTC().Unix()+1, 10))
 	for _, ch := range matched {
 		key := strings.TrimSpace(ch.UniqueKey)
 		if !transitionKeyRe.MatchString(key) {
@@ -279,7 +306,8 @@ func (c *Client) Transitions(ctx context.Context, serviceID string, f Filter, st
 			continue
 		}
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return result, fmt.Errorf("healthchecks authentication failed")
+			result.Unauthorized++
+			continue
 		}
 		if resp.StatusCode != http.StatusOK {
 			result.Failures++
@@ -321,7 +349,13 @@ func (c *Client) Transitions(ctx context.Context, serviceID string, f Filter, st
 			result.Items = append(result.Items, c.transitionItem(serviceID, ch, entry.at, entry.up, retrievedAt, start, end))
 		}
 	}
-	if result.Requests > 0 && result.Failures == result.Requests && len(result.Items) == 0 {
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
+	if result.Requests > 0 && result.Failures+result.Unauthorized == result.Requests && len(result.Items) == 0 {
+		if result.Unauthorized > 0 {
+			return result, fmt.Errorf("healthchecks authentication failed")
+		}
 		return result, fmt.Errorf("healthchecks history requests failed")
 	}
 	return result, nil

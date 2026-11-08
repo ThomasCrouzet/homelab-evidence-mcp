@@ -91,10 +91,15 @@ type SourceOutcome struct {
 	// Discarded counts invalid source records that the adapter skipped.
 	Discarded int `json:"discarded"`
 	// Omitted counts selected objects left out by an explicit collection bound.
-	Omitted    int    `json:"omitted"`
-	CacheState string `json:"cache_state,omitempty"`
-	CacheAgeS  int64  `json:"cache_age_seconds,omitempty"`
-	DurationMS int64  `json:"duration_ms"`
+	Omitted int `json:"omitted"`
+	// The check counters make partial Healthchecks history explicit.
+	QueriedChecks         int    `json:"queried_checks,omitempty"`
+	FailedChecks          int    `json:"failed_checks,omitempty"`
+	UnauthorizedChecks    int    `json:"unauthorized_checks,omitempty"`
+	MissingIdentityChecks int    `json:"missing_identity_checks,omitempty"`
+	CacheState            string `json:"cache_state,omitempty"`
+	CacheAgeS             int64  `json:"cache_age_seconds,omitempty"`
+	DurationMS            int64  `json:"duration_ms"`
 }
 
 // Bundle contains a multi-source response.
