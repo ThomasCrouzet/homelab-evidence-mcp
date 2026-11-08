@@ -227,3 +227,32 @@ func TestSortItems(t *testing.T) {
 		t.Fatalf("%+v", items)
 	}
 }
+
+func TestSortItems_ServiceIDPrecedesOpaqueID(t *testing.T) {
+	t0 := time.Unix(100, 0).UTC()
+	for attempt := 0; attempt < 20; attempt++ {
+		items := []Item{
+			{ID: NewOpaqueID("ev"), ServiceID: "z-service", Source: SourceHealthchecks, SourceID: "check", ObservedAt: t0},
+			{ID: NewOpaqueID("ev"), ServiceID: "a-service", Source: SourceHealthchecks, SourceID: "check", ObservedAt: t0},
+		}
+		SortItems(items)
+		if items[0].ServiceID != "a-service" || items[1].ServiceID != "z-service" {
+			t.Fatalf("order=%s,%s", items[0].ServiceID, items[1].ServiceID)
+		}
+		kept, truncated := KeepNewest(items, 1)
+		if !truncated || len(kept) != 1 || kept[0].ServiceID != "z-service" {
+			t.Fatalf("tie selection depended on an opaque id: %+v", kept)
+		}
+	}
+}
+
+func TestSortOutcomes_UsesServiceBinding(t *testing.T) {
+	outcomes := []SourceOutcome{
+		{Kind: SourceHealthchecks, SourceName: "hc", ServiceID: "z-service", Status: "error"},
+		{Kind: SourceHealthchecks, SourceName: "hc", ServiceID: "a-service", Status: "ok"},
+	}
+	SortOutcomes(outcomes)
+	if outcomes[0].ServiceID != "a-service" || outcomes[1].ServiceID != "z-service" {
+		t.Fatalf("outcomes=%+v", outcomes)
+	}
+}

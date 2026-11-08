@@ -129,6 +129,8 @@ Execution status and evidence coverage are separate:
   `empty_result`, `no_binding`, `unmatched_binding`, `unsupported_history`,
   `partial_invalid_records`, `truncated`, `timeout`, `canceled`,
   `authentication_failed`, `upstream_error`, or `not_queried_by_tool`.
+- `service_id` identifies the service binding when the outcome belongs to one
+  binding. A global source-only outcome omits it.
 - `complete` is true only when the source answered the requested coverage.
 - `truncated` combines `upstream_truncated` and `local_truncated`.
 - `discarded` counts unusable source records, such as a Loki line with an

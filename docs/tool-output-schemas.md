@@ -21,6 +21,7 @@ carries the same facts in pretty-printed JSON.
   [evidence model](evidence-model.md#outcome-and-coverage).
 - `complete` is required on every evidence result. `truncated` combines
   `upstream_truncated` and `local_truncated`.
+- `service_id` is optional and identifies a per-binding source outcome.
 - `discarded` counts unusable source records. `cache_state` is `hit`, `miss`,
   or `disabled`; `cache_age_seconds` is optional.
 - Compact `incident_context` adds `compact`, `byte_budget`, `byte_size`,

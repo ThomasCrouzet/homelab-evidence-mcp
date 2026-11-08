@@ -31,6 +31,8 @@ This file records project changes. Its format uses
 
 ### Fixed
 
+- Add an optional `service_id` to a per-binding source outcome, and use the
+  binding and service identity as stable sort tie-breakers before opaque ids.
 - Validate every returned Loki stream against the configured equality labels
   and discard a mismatched stream with an incomplete source outcome.
 - Derive a bounded process-local Loki stream identity from the complete label
