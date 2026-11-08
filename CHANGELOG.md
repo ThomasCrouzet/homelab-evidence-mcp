@@ -33,6 +33,10 @@ This file records project changes. Its format uses
 
 - Add an optional `service_id` to a per-binding source outcome, and use the
   binding and service identity as stable sort tie-breakers before opaque ids.
+- Keep a concurrent-tool slot until its handler exits, including a canceled
+  handler, so `max_concurrent_tools` bounds active callbacks.
+- Enforce `max_tool_calls_per_minute` over a sliding minute instead of a fixed
+  window that allows a boundary burst.
 - Validate every returned Loki stream against the configured equality labels
   and discard a mismatched stream with an incomplete source outcome.
 - Derive a bounded process-local Loki stream identity from the complete label

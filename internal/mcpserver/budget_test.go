@@ -148,3 +148,61 @@ func TestSanitizeErr_UsesRedaction(t *testing.T) {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+func TestWithBudget_CanceledHandlerKeepsSlotUntilExit(t *testing.T) {
+	app := &App{budget: newToolBudget(1000, 1)}
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _, _ = app.withBudget(ctx, "service_status", func() (*mcp.CallToolResult, any, error) {
+			close(started)
+			<-release
+			return textResult(map[string]string{"ok": "held"}), nil, nil
+		})
+	}()
+	<-started
+	cancel()
+	ran := false
+	res, _, err := app.withBudget(context.Background(), "service_status", func() (*mcp.CallToolResult, any, error) {
+		ran = true
+		return textResult(map[string]string{"ok": "second"}), nil, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ran || res == nil || !res.IsError {
+		t.Fatalf("a canceled handler released its slot early: ran=%v res=%+v", ran, res)
+	}
+	close(release)
+	<-done
+	if res, _, err := app.withBudget(context.Background(), "service_status", func() (*mcp.CallToolResult, any, error) {
+		return textResult(map[string]string{"ok": "after"}), nil, nil
+	}); err != nil || res.IsError {
+		t.Fatalf("slot was not released after the handler exited: %v %+v", err, res)
+	}
+}
+
+func TestToolBudget_SlidingMinuteWindow(t *testing.T) {
+	b := newToolBudget(2, 8)
+	now := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
+	b.clock = func() time.Time { return now }
+	for i := 0; i < 2; i++ {
+		if err := b.acquire(); err != nil {
+			t.Fatalf("acquire %d: %v", i, err)
+		}
+		b.release()
+	}
+	now = now.Add(59 * time.Second)
+	if err := b.acquire(); err == nil {
+		t.Fatal("a burst at the next fixed minute bypassed the limit")
+		b.release()
+	}
+	now = now.Add(2 * time.Second)
+	if err := b.acquire(); err != nil {
+		t.Fatalf("expired calls still count: %v", err)
+	}
+	b.release()
+}
