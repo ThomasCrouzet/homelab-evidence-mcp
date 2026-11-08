@@ -200,8 +200,22 @@ func (c *Client) itemFrom(serviceID string, ct containerSummary, observedAt, ret
 	}
 
 	health := healthFromStatus(ct.Status)
-	if health == "unhealthy" {
+	readiness := "unproven"
+	switch health {
+	case "unhealthy":
 		sev = evidence.SeverityError
+		readiness = "unhealthy"
+		rawSummary = fmt.Sprintf("docker container %s state=%s health=unhealthy", primaryName(ct), state)
+	case "starting":
+		// Docker defines starting as not yet ready. Runtime state stays running,
+		// but readiness is not proven.
+		if sev == evidence.SeverityInfo {
+			sev = evidence.SeverityWarning
+		}
+		readiness = "starting"
+		rawSummary = fmt.Sprintf("docker container %s state=%s health=starting", primaryName(ct), state)
+	case "healthy":
+		readiness = "ready"
 	}
 
 	name, nameRedactions, nameCut := redaction.ApplyAndTruncate(c.Redact, primaryName(ct), 256)
@@ -225,6 +239,7 @@ func (c *Client) itemFrom(serviceID string, ct containerSummary, observedAt, ret
 	if health != "" {
 		attrs["health"] = health
 	}
+	attrs["health_readiness"] = readiness
 	// Give only labels with keys in the allowlist.
 	if v := safeLabel(ct.Labels, "com.docker.compose.service"); v != "" {
 		clean, n, cut := redaction.ApplyAndTruncate(c.Redact, v, 128)
