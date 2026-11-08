@@ -103,7 +103,6 @@ func (c *Client) History(ctx context.Context, serviceID, topic string, start, en
 // invalid, duplicative, and undated records.
 func (c *Client) HistoryDetail(ctx context.Context, serviceID, topic string, start, end time.Time, limit int) (Result, error) {
 	result := Result{RetentionLimited: true}
-	now := c.now()
 	if topic == "" {
 		return result, fmt.Errorf("ntfy topic is required")
 	}
@@ -137,6 +136,7 @@ func (c *Client) HistoryDetail(ctx context.Context, serviceID, topic string, sta
 	}
 	partialBody := errors.Is(err, httpx.ErrBodyTooLarge)
 	result.UpstreamTruncated = httpx.UpstreamTruncated(resp)
+	retrievedAt := c.now()
 	msgs, invalid, decodeTruncated := decodeMessages(body, partialBody)
 	result.Discarded += invalid
 	result.LocalTruncated = partialBody || decodeTruncated
@@ -208,7 +208,7 @@ func (c *Client) HistoryDetail(ctx context.Context, serviceID, topic string, sta
 	})
 	items := make([]evidence.Item, 0, len(candidates))
 	for _, entry := range candidates {
-		item := c.itemFrom(serviceID, topic, entry.m, entry.ts, now, maxLineBytes)
+		item := c.itemFrom(serviceID, topic, entry.m, entry.ts, retrievedAt, maxLineBytes)
 		item.WindowStart = timePtr(start)
 		item.WindowEnd = timePtr(end)
 		item.Order = entry.pos

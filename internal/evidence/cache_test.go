@@ -6,6 +6,68 @@ import (
 	"time"
 )
 
+func TestCache_DefensiveCopies(t *testing.T) {
+	c := NewCache(time.Minute, 10, DefaultCacheMaxBytes)
+	tags := []string{"original"}
+	item := Item{
+		ID: "ev", Summary: "s", Freshness: FreshnessUnknown,
+		Attributes: map[string]any{
+			"tags":   tags,
+			"nested": map[string]any{"key": "value"},
+			"count":  2,
+		},
+	}
+	c.Put(item)
+	// Mutating the caller's values must not change retained evidence.
+	tags[0] = "mutated"
+	item.Attributes["extra"] = "added"
+	item.Attributes["nested"].(map[string]any)["key"] = "changed"
+	statsBefore := c.Stats()
+
+	got, ok := c.Get("ev")
+	if !ok {
+		t.Fatal("item missing")
+	}
+	if got.Attributes["tags"].([]string)[0] != "original" {
+		t.Fatalf("stored tags mutated: %+v", got.Attributes)
+	}
+	if got.Attributes["nested"].(map[string]any)["key"] != "value" {
+		t.Fatalf("stored nested map mutated: %+v", got.Attributes)
+	}
+	if _, exists := got.Attributes["extra"]; exists {
+		t.Fatalf("stored map gained a key: %+v", got.Attributes)
+	}
+	if c.Stats().Bytes != statsBefore.Bytes {
+		t.Fatalf("byte accounting changed: %d -> %d", statsBefore.Bytes, c.Stats().Bytes)
+	}
+
+	// Mutating a returned copy must not change the next read either.
+	got.Attributes["tags"].([]string)[0] = "returned-mutation"
+	got.Attributes["nested"].(map[string]any)["key"] = "returned-change"
+	again, _ := c.Get("ev")
+	if again.Attributes["tags"].([]string)[0] != "original" ||
+		again.Attributes["nested"].(map[string]any)["key"] != "value" {
+		t.Fatalf("returned copy aliased the cache: %+v", again.Attributes)
+	}
+	if again.Freshness != FreshnessCached || again.SourceFreshness != FreshnessUnknown || again.CacheReadAt == nil {
+		t.Fatalf("cache delivery state=%+v", again)
+	}
+}
+
+func TestCache_GetKeepsSourceFreshness(t *testing.T) {
+	c := NewCache(time.Minute, 10, DefaultCacheMaxBytes)
+	c.Put(Item{ID: "stale", Freshness: FreshnessStale})
+	c.Put(Item{ID: "live", Freshness: FreshnessLive})
+	stale, _ := c.Get("stale")
+	live, _ := c.Get("live")
+	if stale.SourceFreshness != FreshnessStale || stale.Freshness != FreshnessCached {
+		t.Fatalf("stale=%+v", stale)
+	}
+	if live.SourceFreshness != FreshnessLive || live.Freshness != FreshnessCached {
+		t.Fatalf("live=%+v", live)
+	}
+}
+
 func TestCache_TTLAndEvict(t *testing.T) {
 	c := NewCache(50*time.Millisecond, 2, DefaultCacheMaxBytes)
 	c.Put(Item{ID: "a", Summary: "1"})

@@ -70,6 +70,12 @@ type Item struct {
 	Truncated         bool           `json:"truncated"`
 	RedactionsApplied int            `json:"redactions_applied"`
 	Freshness         Freshness      `json:"freshness"`
+	// SourceFreshness keeps the source-derived age after a cache delivery
+	// changes Freshness to cached.
+	SourceFreshness Freshness `json:"source_freshness,omitempty"`
+	// CacheReadAt records the current cache read without changing the source
+	// collection time in RetrievedAt.
+	CacheReadAt *time.Time `json:"cache_read_at,omitempty"`
 	// Order is an internal stable position for equal observation times.
 	// It does not appear in MCP output or cached evidence.
 	Order int `json:"-"`
@@ -170,6 +176,16 @@ func SortOutcomes(outcomes []SourceOutcome) {
 		}
 		return outcomes[i].SourceName < outcomes[j].SourceName
 	})
+}
+
+// MarkSourceFreshness records the source-derived freshness before a cache
+// delivery changes Freshness to cached.
+func MarkSourceFreshness(items []Item) {
+	for index := range items {
+		if items[index].SourceFreshness == "" {
+			items[index].SourceFreshness = items[index].Freshness
+		}
+	}
 }
 
 // ComputeFreshness gives a freshness category for age relative to now.

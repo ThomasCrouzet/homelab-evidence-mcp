@@ -20,6 +20,12 @@ Each evidence item has these fields:
 - `redactions_applied` gives the number of redacted text regions.
   Overlapping or adjacent rule matches form one region.
 - `freshness` is `live`, `recent`, `stale`, `cached`, `missing`, or `unknown`.
+  For a `get_evidence` result, `freshness` is `cached` and `source_freshness`
+  keeps the original source value.
+- `source_freshness` is the source-derived freshness at collection. It does
+  not change when the evidence cache serves the item.
+- `cache_read_at` is the time of a `get_evidence` cache read. It does not
+  replace the source collection time in `retrieved_at`.
 
 ## Timeline order
 
@@ -60,8 +66,12 @@ The sources set `observed_at` as follows:
   `retention_limited: true` and `complete: false`.
 
 When the source response cache supplies a current snapshot, `observed_at`
-keeps its initial time. `retrieved_at` contains the time of the current read.
-Thus, the freshness continues to show the age of the observation.
+keeps its initial time. `retrieved_at` contains the time the source response
+was obtained and decoded, not the time the request started. Thus, a slow
+response cannot report `retrieved_at` before `observed_at`. A later
+`get_evidence` call keeps the original `retrieved_at`, sets `freshness` to
+`cached`, and records the current read in `cache_read_at`. The original source
+age stays in `source_freshness`.
 The server assigns one collection time after it reads a successful response
 body. The direct response and every cache hit use that same time. A refresh
 after the TTL assigns a new collection time.

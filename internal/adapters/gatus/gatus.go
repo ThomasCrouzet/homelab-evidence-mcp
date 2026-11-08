@@ -85,11 +85,11 @@ func (d *flexDuration) UnmarshalJSON(raw []byte) error {
 
 // Status gets the observation with the maximum timestamp for endpointKey.
 func (c *Client) Status(ctx context.Context, serviceID, endpointKey string) (evidence.Item, error) {
-	retrievedAt := c.now()
-	list, snapshotAt, err := c.fetchAll(ctx, retrievedAt)
+	list, snapshotAt, err := c.fetchAll(ctx, c.now())
 	if err != nil {
 		return evidence.Item{}, err
 	}
+	retrievedAt := c.now()
 	ep, ok, err := findEndpoint(list, endpointKey)
 	if err != nil {
 		return evidence.Item{}, err
@@ -122,11 +122,11 @@ func (c *Client) missingItem(serviceID, endpointKey string, observedAt, retrieve
 // EvidenceInWindow gives results between start and end.
 func (c *Client) EvidenceInWindow(ctx context.Context, serviceID, endpointKey string, start, end time.Time, max int) (WindowResult, error) {
 	result := WindowResult{}
-	retrievedAt := c.now()
-	list, snapshotAt, err := c.fetchAll(ctx, retrievedAt)
+	list, snapshotAt, err := c.fetchAll(ctx, c.now())
 	if err != nil {
 		return result, err
 	}
+	retrievedAt := c.now()
 	ep, ok, err := findEndpoint(list, endpointKey)
 	if err != nil {
 		return result, err

@@ -85,6 +85,7 @@ services:
 
 	type statusBody struct {
 		Items []struct {
+			ID         string         `json:"id"`
 			ObservedAt time.Time      `json:"observed_at"`
 			Freshness  string         `json:"freshness"`
 			Attributes map[string]any `json:"attributes"`
@@ -110,10 +111,29 @@ services:
 		}
 		return body
 	}
-	callUndated()
+	first := callUndated()
 	callUndated()
 	if undatedCalls.Load() != 1 {
 		t.Fatalf("warm source cache used %d upstream requests", undatedCalls.Load())
+	}
+
+	cachedResult, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "get_evidence", Arguments: map[string]any{"id": first.Items[0].ID},
+	})
+	if err != nil || cachedResult.IsError {
+		t.Fatalf("get_evidence failed: %v", err)
+	}
+	var cachedBody struct {
+		Item struct {
+			Freshness       string     `json:"freshness"`
+			SourceFreshness string     `json:"source_freshness"`
+			CacheReadAt     *time.Time `json:"cache_read_at"`
+		} `json:"item"`
+	}
+	executableE2EDecode(t, mustJSON(t, cachedResult.StructuredContent), &cachedBody)
+	if cachedBody.Item.Freshness != "cached" || cachedBody.Item.SourceFreshness != "unknown" ||
+		cachedBody.Item.CacheReadAt == nil {
+		t.Fatalf("cache delivery lost the source freshness: %+v", cachedBody.Item)
 	}
 
 	historical, err := session.CallTool(ctx, &mcp.CallToolParams{
