@@ -179,10 +179,11 @@ func (c *Client) EvidenceInWindow(ctx context.Context, serviceID, endpointKey st
 	if result.Truncated {
 		pairs = pairs[len(pairs)-max:]
 	}
-	for _, p := range pairs {
+	for index, p := range pairs {
 		item := c.itemFromResult(serviceID, ep, p.r, p.ts, retrievedAt, true)
 		item.WindowStart = timePtr(start)
 		item.WindowEnd = timePtr(end)
+		item.Order = index
 		items = append(items, item)
 	}
 	result.Items = items

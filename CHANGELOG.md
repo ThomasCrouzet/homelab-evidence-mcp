@@ -31,6 +31,17 @@ This file records project changes. Its format uses
 
 ### Fixed
 
+- Validate ntfy message `id`, `event`, and `topic`, reject cross-topic rows,
+  collapse duplicate ids, and count invalid or undated records without losing
+  valid notifications.
+- Never use ntfy collection time for a message with a missing or unusable
+  `time`. Such a message is not evidence and is counted in
+  `unknown_time_records`.
+- Report every ntfy replay as retention-limited and incomplete, including an
+  empty replay, and keep complete records from an oversized body with
+  `local_truncated: true`.
+- Make equal-timestamp ordering use a stable source position before source
+  identity and the opaque item id. ntfy same-second messages keep receipt order.
 - Send Healthchecks `flips` time filters as Unix seconds, widen the exclusive
   upstream bounds, and keep the requested inclusive window locally.
 - Reject an ambiguous Healthchecks `check_name` that matches more than one

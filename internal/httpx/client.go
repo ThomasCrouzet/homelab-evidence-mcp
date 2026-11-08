@@ -33,6 +33,11 @@ const (
 	UpstreamTruncatedHeader = "X-Messages-Truncated"
 )
 
+// ErrBodyTooLarge reports a response body above the configured cap. The
+// returned body contains the first MaxBody bytes so a caller can keep
+// complete records that arrived before the cutoff.
+var ErrBodyTooLarge = errors.New("response body exceeds configured limit")
+
 // destination contains a base URL set at startup.
 type destination struct {
 	BaseURL *url.URL
@@ -343,7 +348,7 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 		return resp, nil, errors.New("response body read failed")
 	}
 	if int64(len(body)) > c.maxBody {
-		return resp, body[:c.maxBody], fmt.Errorf("response body exceeds %d bytes", c.maxBody)
+		return resp, body[:c.maxBody], fmt.Errorf("%w: %d bytes", ErrBodyTooLarge, c.maxBody)
 	}
 	// One collection time describes this snapshot for the direct response and
 	// every later cache hit. The header is internal and set after remote headers

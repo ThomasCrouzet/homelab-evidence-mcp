@@ -35,15 +35,15 @@ func TestStdioNtfyPriorityNormalization(t *testing.T) {
 		return server
 	}
 	normal := messages(
-		fmt.Sprintf(`{"id":"omitted","time":%d,"event":"message","message":"Backup completed successfully."}`, t0.Unix()),
-		fmt.Sprintf(`{"id":"explicit","time":%d,"event":"message","message":"Backup completed successfully.","priority":3}`, t0.Unix()),
+		fmt.Sprintf(`{"id":"omitted","time":%d,"event":"message","topic":"normal-alerts","message":"Backup completed successfully."}`, t0.Unix()),
+		fmt.Sprintf(`{"id":"explicit","time":%d,"event":"message","topic":"normal-alerts","message":"Backup completed successfully.","priority":3}`, t0.Unix()),
 	)
 	mixed := messages(
-		fmt.Sprintf(`{"id":"min","time":%d,"event":"message","message":"minimum","priority":1}`, t0.Unix()),
-		fmt.Sprintf(`{"id":"low","time":%d,"event":"message","message":"low","priority":2}`, t0.Unix()),
-		fmt.Sprintf(`{"id":"high","time":%d,"event":"message","message":"high","priority":4}`, t0.Unix()),
-		fmt.Sprintf(`{"id":"max","time":%d,"event":"message","message":"maximum","priority":5}`, t0.Unix()),
-		fmt.Sprintf(`{"id":"invalid","time":%d,"event":"message","message":"invalid","priority":6}`, t0.Unix()),
+		fmt.Sprintf(`{"id":"min","time":%d,"event":"message","topic":"mixed-alerts","message":"minimum","priority":1}`, t0.Unix()),
+		fmt.Sprintf(`{"id":"low","time":%d,"event":"message","topic":"mixed-alerts","message":"low","priority":2}`, t0.Unix()),
+		fmt.Sprintf(`{"id":"high","time":%d,"event":"message","topic":"mixed-alerts","message":"high","priority":4}`, t0.Unix()),
+		fmt.Sprintf(`{"id":"max","time":%d,"event":"message","topic":"mixed-alerts","message":"maximum","priority":5}`, t0.Unix()),
+		fmt.Sprintf(`{"id":"invalid","time":%d,"event":"message","topic":"mixed-alerts","message":"invalid","priority":6}`, t0.Unix()),
 	)
 
 	configPath := filepath.Join(t.TempDir(), "config.yaml")

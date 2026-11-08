@@ -166,15 +166,33 @@ The ntfy adapter has this behavior:
   `attributes.message`. The summary contains a shorter view.
 - The adapter reads the topic only from the configuration.
 - The adapter accepts NDJSON and JSON arrays.
-- The adapter reads `id`, `time`, `event`, `message`, `title`, `priority`, and
-  `tags`.
+- The adapter reads `id`, `time`, `event`, `topic`, `message`, `title`,
+  `priority`, and `tags`.
+- A message record requires `id`, `event`, and `topic`. The source `topic` must
+  equal the configured topic exactly. A cross-topic message, a missing event,
+  a missing id, or a malformed row is discarded and counted. It cannot receive
+  this service's identity.
+- Control events such as `open`, `keepalive`, `poll_request`, `message_clear`,
+  and `message_delete` are skipped. They are not evidence and are not
+  discarded records.
+- A missing, zero, negative, or out-of-range `time` is not usable evidence. The
+  adapter counts it in `unknown_time_records` and does not place the message in
+  a timeline. It never uses collection time as a substitute source time.
+- A repeated `topic` and `id` inside one replay is collapsed. An identical
+  repeat counts as a duplicate. A conflicting repeat counts as discarded.
+- Same-second messages keep the source receipt order. The order does not depend
+  on the random upstream `id`.
 - An omitted priority uses the ntfy default of `3`. Priorities `1`, `2`, and `3`
   map to `info`, `4` maps to `error`, and `5` maps to `critical`. These values
   are presentation severity only and do not prove an incident.
 - An explicit priority outside `1` through `5` maps to `unknown` and sets
   `attributes.priority_valid` to `false`.
-- The adapter ignores events other than `message`.
-- An invalid or truncated NDJSON line gives an explicit source error.
+- The replay endpoint is a short-lived cache, not an archive. Every ntfy source
+  reports `retention_limited: true` and `complete: false`, including an empty
+  replay. A successful empty replay cannot prove that no notification existed.
+- When a valid replay is larger than `limits.max_body_bytes`, the adapter keeps
+  complete records before the cutoff, sets `local_truncated: true`, and reports
+  the partial result. It does not discard the whole response.
 - `X-Messages-Truncated: 1` marks the source and grouped result as incomplete,
   even when the local item limit is not reached. The signal survives a source
   cache hit. Other response headers are not retained.

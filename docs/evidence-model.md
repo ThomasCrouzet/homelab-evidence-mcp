@@ -21,6 +21,13 @@ Each evidence item has these fields:
   Overlapping or adjacent rule matches form one region.
 - `freshness` is `live`, `recent`, `stale`, `cached`, `missing`, or `unknown`.
 
+## Timeline order
+
+Items sort by `observed_at`, then source family, then a stable source position,
+then source identity. The random opaque `id` never decides the order of two
+items with equal time. When a limit keeps the newest items, the same rules
+decide the boundary. ntfy same-second messages keep the source receipt order.
+
 Before emission, the server cleans and redacts source identifiers, summaries,
 and text attributes. It uses size limits for these values. Numeric fields and
 closed vocabularies keep their structure. The server derives the Loki
@@ -45,8 +52,12 @@ The sources set `observed_at` as follows:
 - **Docker**: `observed_at` contains the collection time. The Docker list API
   does not give the last state change.
 - **Beszel**: `observed_at` contains the snapshot collection time.
-- **ntfy**: If the response has `time`, `observed_at` contains that value.
-  If the response has no `time`, `observed_at` contains the collection time.
+- **ntfy**: `observed_at` contains the message `time`. A message without a
+  usable source time is not evidence: the adapter counts it in
+  `unknown_time_records` and does not put it in a timeline. Collection time is
+  never a substitute source time.
+  The ntfy replay endpoint is a short-lived cache. Every ntfy source reports
+  `retention_limited: true` and `complete: false`.
 
 When the source response cache supplies a current snapshot, `observed_at`
 keeps its initial time. `retrieved_at` contains the time of the current read.

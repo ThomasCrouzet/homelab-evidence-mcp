@@ -55,7 +55,7 @@ func TestHistory_NDJSON(t *testing.T) {
 func TestHistory_Array(t *testing.T) {
 	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprintf(w, `[{"id":"a","time":%d,"event":"message","message":"ok","priority":1}]`, t0.Unix())
+		_, _ = fmt.Fprintf(w, `[{"id":"a","time":%d,"event":"message","topic":"alerts","message":"ok","priority":1}]`, t0.Unix())
 	}))
 	defer ts.Close()
 	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
@@ -106,19 +106,22 @@ func TestHistory_InstructionLikeMarked(t *testing.T) {
 	}
 }
 
-func TestHistory_RejectsMalformedNDJSON(t *testing.T) {
+func TestHistory_KeepsValidRowsAndCountsMalformedRows(t *testing.T) {
 	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprintf(w, `{"id":"1","time":%d,"event":"message","message":"ok"}`+"\n", t0.Unix())
+		_, _ = fmt.Fprintf(w, `{"id":"1","time":%d,"event":"message","topic":"alerts","message":"ok"}`+"\n", t0.Unix())
 		_, _ = w.Write([]byte("{not-json}\n"))
 	}))
 	defer ts.Close()
 	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
 	_ = hc.RegisterDestination("ntfy", ts.URL)
 	cli := &Client{HTTP: hc, DestName: "ntfy"}
-	_, _, err := cli.History(context.Background(), "media", "alerts", t0.Add(-time.Hour), t0.Add(time.Hour), 10)
-	if err == nil || !strings.Contains(err.Error(), "invalid NDJSON") {
-		t.Fatalf("got %v", err)
+	result, err := cli.HistoryDetail(context.Background(), "media", "alerts", t0.Add(-time.Hour), t0.Add(time.Hour), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 1 || result.Discarded != 1 {
+		t.Fatalf("items=%d discarded=%d", len(result.Items), result.Discarded)
 	}
 }
 
@@ -147,8 +150,8 @@ func TestHistory_SortsBeforeApplyingLimit(t *testing.T) {
 	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintf(w, `[
-			{"id":"later","time":%d,"event":"message","message":"later"},
-			{"id":"earlier","time":%d,"event":"message","message":"earlier"}
+			{"id":"later","time":%d,"event":"message","topic":"alerts","message":"later"},
+			{"id":"earlier","time":%d,"event":"message","topic":"alerts","message":"earlier"}
 		]`, t0.Add(time.Minute).Unix(), t0.Unix())
 	}))
 	defer ts.Close()
@@ -170,7 +173,7 @@ func TestHistory_SortsBeforeApplyingLimit(t *testing.T) {
 func TestHistory_RedactsSourceID(t *testing.T) {
 	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprintf(w, `{"id":"password=supersecret","time":%d,"event":"message","message":"ok"}`+"\n", t0.Unix())
+		_, _ = fmt.Fprintf(w, `{"id":"password=supersecret","time":%d,"event":"message","topic":"alerts","message":"ok"}`+"\n", t0.Unix())
 	}))
 	defer ts.Close()
 	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
@@ -186,10 +189,10 @@ func TestHistory_RedactsSourceID(t *testing.T) {
 	}
 }
 
-func TestHistory_MissingTimeUsesCollectionWithoutInventingHistory(t *testing.T) {
+func TestHistory_UndatedMessagesAreNotEvidence(t *testing.T) {
 	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"id":"missing-time","event":"message","message":"ok"}` + "\n"))
+		_, _ = w.Write([]byte(`{"id":"missing-time","event":"message","topic":"alerts","message":"ok"}` + "\n"))
 	}))
 	defer ts.Close()
 	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second, Now: func() time.Time { return t0 }})
@@ -199,26 +202,35 @@ func TestHistory_MissingTimeUsesCollectionWithoutInventingHistory(t *testing.T) 
 		Now: func() time.Time { return t0 },
 	}
 
-	items, _, err := cli.History(
-		context.Background(), "media", "alerts",
-		t0.Add(-time.Minute), t0.Add(-10*time.Second), 10,
-	)
-	if err != nil {
-		t.Fatal(err)
+	for _, window := range [][2]time.Time{
+		{t0.Add(-time.Minute), t0.Add(-10 * time.Second)},
+		{t0.Add(-2 * time.Hour), t0.Add(-time.Hour)},
+	} {
+		result, err := cli.HistoryDetail(context.Background(), "media", "alerts", window[0], window[1], 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Items) != 0 || result.UnknownTime != 1 || result.Discarded != 1 {
+			t.Fatalf("undated message became evidence: %+v", result)
+		}
 	}
-	if len(items) != 1 || !items[0].ObservedAt.Equal(t0) {
-		t.Fatalf("items=%+v", items)
-	}
+}
 
-	items, _, err = cli.History(
-		context.Background(), "media", "alerts",
-		t0.Add(-2*time.Hour), t0.Add(-time.Hour), 10,
-	)
+func TestHistory_OutOfRangeTimeIsNotEvidence(t *testing.T) {
+	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"id":"huge","time":%d,"event":"message","topic":"alerts","message":"ok"}`+"\n", int64(1<<62))
+	}))
+	defer ts.Close()
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
+	_ = hc.RegisterDestination("ntfy", ts.URL)
+	cli := &Client{HTTP: hc, DestName: "ntfy"}
+	result, err := cli.HistoryDetail(context.Background(), "media", "alerts", t0.Add(-time.Hour), t0.Add(time.Hour), 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 0 {
-		t.Fatalf("dateless notification invented into the past: %+v", items)
+	if len(result.Items) != 0 || result.UnknownTime != 1 {
+		t.Fatalf("out-of-range time became evidence: %+v", result)
 	}
 }
 
@@ -228,7 +240,7 @@ func TestHistory_UpstreamTruncationSurvivesCache(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.Header().Set(httpx.UpstreamTruncatedHeader, "1")
-		_, _ = fmt.Fprintf(w, `{"id":"1","time":%d,"event":"message","message":"only retained"}`+"\n", t0.Unix())
+		_, _ = fmt.Fprintf(w, `{"id":"1","time":%d,"event":"message","topic":"alerts","message":"only retained"}`+"\n", t0.Unix())
 	}))
 	defer ts.Close()
 	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second, CacheTTL: time.Minute})
@@ -253,8 +265,8 @@ func TestHistory_LocalLimitTruncationWithoutUpstreamSignal(t *testing.T) {
 	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintf(w, `[
-			{"id":"1","time":%d,"event":"message","message":"first"},
-			{"id":"2","time":%d,"event":"message","message":"second"}
+			{"id":"1","time":%d,"event":"message","topic":"alerts","message":"first"},
+			{"id":"2","time":%d,"event":"message","topic":"alerts","message":"second"}
 		]`, t0.Unix(), t0.Add(time.Second).Unix())
 	}))
 	defer ts.Close()
@@ -267,10 +279,127 @@ func TestHistory_LocalLimitTruncationWithoutUpstreamSignal(t *testing.T) {
 	}
 }
 
+func TestHistory_RejectsCrossTopicMessages(t *testing.T) {
+	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"id":"a","time":%d,"event":"message","topic":"alerts","message":"owned"}`+"\n", t0.Unix())
+		_, _ = fmt.Fprintf(w, `{"id":"b","time":%d,"event":"message","topic":"other","message":"foreign"}`+"\n", t0.Unix())
+	}))
+	defer ts.Close()
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
+	_ = hc.RegisterDestination("ntfy", ts.URL)
+	cli := &Client{HTTP: hc, DestName: "ntfy"}
+	result, err := cli.HistoryDetail(context.Background(), "media", "alerts", t0.Add(-time.Hour), t0.Add(time.Hour), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 1 || result.Items[0].SourceID != "a" || result.Discarded != 1 {
+		t.Fatalf("cross-topic attribution: items=%+v discarded=%d", result.Items, result.Discarded)
+	}
+}
+
+func TestHistory_RequiresEventTopicAndID(t *testing.T) {
+	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"id":"a","time":%d,"topic":"alerts","message":"no event"}`+"\n", t0.Unix())
+		_, _ = fmt.Fprintf(w, `{"id":"b","time":%d,"event":"message","message":"no topic"}`+"\n", t0.Unix())
+		_, _ = fmt.Fprintf(w, `{"time":%d,"event":"message","topic":"alerts","message":"no id"}`+"\n", t0.Unix())
+	}))
+	defer ts.Close()
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
+	_ = hc.RegisterDestination("ntfy", ts.URL)
+	cli := &Client{HTTP: hc, DestName: "ntfy"}
+	result, err := cli.HistoryDetail(context.Background(), "media", "alerts", t0.Add(-time.Hour), t0.Add(time.Hour), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 0 || result.Discarded != 3 {
+		t.Fatalf("mandatory fields: items=%+v discarded=%d", result.Items, result.Discarded)
+	}
+}
+
+func TestHistory_ControlEventsAreNotEvidence(t *testing.T) {
+	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, event := range []string{"open", "keepalive", "message_clear", "poll_request"} {
+			_, _ = fmt.Fprintf(w, `{"id":"%s","time":%d,"event":"%s","topic":"alerts"}`+"\n", event, t0.Unix(), event)
+		}
+	}))
+	defer ts.Close()
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
+	_ = hc.RegisterDestination("ntfy", ts.URL)
+	cli := &Client{HTTP: hc, DestName: "ntfy"}
+	result, err := cli.HistoryDetail(context.Background(), "media", "alerts", t0.Add(-time.Hour), t0.Add(time.Hour), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 0 || result.Discarded != 0 {
+		t.Fatalf("control events became evidence: %+v", result)
+	}
+}
+
+func TestHistory_DuplicateIDsAreCollapsed(t *testing.T) {
+	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"id":"same","time":%d,"event":"message","topic":"alerts","message":"one"}`+"\n", t0.Unix())
+		_, _ = fmt.Fprintf(w, `{"id":"same","time":%d,"event":"message","topic":"alerts","message":"one"}`+"\n", t0.Unix())
+		_, _ = fmt.Fprintf(w, `{"id":"same","time":%d,"event":"message","topic":"alerts","message":"different"}`+"\n", t0.Unix())
+	}))
+	defer ts.Close()
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
+	_ = hc.RegisterDestination("ntfy", ts.URL)
+	cli := &Client{HTTP: hc, DestName: "ntfy"}
+	result, err := cli.HistoryDetail(context.Background(), "media", "alerts", t0.Add(-time.Hour), t0.Add(time.Hour), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 1 || result.Duplicates != 1 || result.Discarded != 1 {
+		t.Fatalf("duplicate handling: items=%+v duplicates=%d discarded=%d", result.Items, result.Duplicates, result.Discarded)
+	}
+}
+
+func TestHistory_SameSecondKeepsReceiptOrder(t *testing.T) {
+	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"id":"zzz","time":%d,"event":"message","topic":"alerts","message":"first"}`+"\n", t0.Unix())
+		_, _ = fmt.Fprintf(w, `{"id":"aaa","time":%d,"event":"message","topic":"alerts","message":"second"}`+"\n", t0.Unix())
+	}))
+	defer ts.Close()
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
+	_ = hc.RegisterDestination("ntfy", ts.URL)
+	cli := &Client{HTTP: hc, DestName: "ntfy"}
+	result, err := cli.HistoryDetail(context.Background(), "media", "alerts", t0.Add(-time.Hour), t0.Add(time.Hour), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 2 || result.Items[0].SourceID != "zzz" || result.Items[1].SourceID != "aaa" {
+		t.Fatalf("same-second order=%+v", result.Items)
+	}
+}
+
+func TestHistory_OversizedBodyKeepsCompleteRecords(t *testing.T) {
+	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"id":"one","time":%d,"event":"message","topic":"alerts","message":"complete"}`+"\n", t0.Unix())
+		_, _ = fmt.Fprintf(w, `{"id":"two","time":%d,"event":"message","topic":"alerts","message":"%s"}`, t0.Unix(), strings.Repeat("x", 4096))
+	}))
+	defer ts.Close()
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second, MaxBody: 256})
+	_ = hc.RegisterDestination("ntfy", ts.URL)
+	cli := &Client{HTTP: hc, DestName: "ntfy"}
+	result, err := cli.HistoryDetail(context.Background(), "media", "alerts", t0.Add(-time.Hour), t0.Add(time.Hour), 10)
+	if err != nil {
+		t.Fatalf("oversized replay must keep partial evidence: %v", err)
+	}
+	if len(result.Items) != 1 || !result.LocalTruncated {
+		t.Fatalf("partial body handling: items=%+v local=%v discarded=%d", result.Items, result.LocalTruncated, result.Discarded)
+	}
+}
+
 func TestHistory_NoFalseTruncation(t *testing.T) {
 	t0 := time.Date(2026, 7, 25, 2, 0, 0, 0, time.UTC)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprintf(w, `{"id":"1","time":%d,"event":"message","message":"complete"}`+"\n", t0.Unix())
+		_, _ = fmt.Fprintf(w, `{"id":"1","time":%d,"event":"message","topic":"alerts","message":"complete"}`+"\n", t0.Unix())
 	}))
 	defer ts.Close()
 	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})

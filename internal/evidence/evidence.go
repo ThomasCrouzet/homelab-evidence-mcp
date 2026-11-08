@@ -99,10 +99,12 @@ type SourceOutcome struct {
 	MissingIdentityChecks int `json:"missing_identity_checks,omitempty"`
 	// RetentionLimited reports that the source keeps a bounded history and the
 	// adapter cannot prove full coverage of the requested window.
-	RetentionLimited bool   `json:"retention_limited,omitempty"`
-	CacheState       string `json:"cache_state,omitempty"`
-	CacheAgeS        int64  `json:"cache_age_seconds,omitempty"`
-	DurationMS       int64  `json:"duration_ms"`
+	RetentionLimited bool `json:"retention_limited,omitempty"`
+	// UnknownTimeRecords counts records without a usable source time.
+	UnknownTimeRecords int    `json:"unknown_time_records,omitempty"`
+	CacheState         string `json:"cache_state,omitempty"`
+	CacheAgeS          int64  `json:"cache_age_seconds,omitempty"`
+	DurationMS         int64  `json:"duration_ms"`
 }
 
 // Bundle contains a multi-source response.
@@ -139,8 +141,8 @@ func KeepNewest(items []Item, max int) ([]Item, bool) {
 	return items[len(items)-max:], true
 }
 
-// SortItems puts evidence in order by time, source, source identity, stable
-// source position, and then id. An opaque id must not decide equal-time order.
+// SortItems puts evidence in order by time, source, stable source position,
+// source identity, and then id. An opaque id must not decide equal-time order.
 func SortItems(items []Item) {
 	sort.SliceStable(items, func(i, j int) bool {
 		a, b := items[i], items[j]
@@ -150,11 +152,11 @@ func SortItems(items []Item) {
 		if a.Source != b.Source {
 			return a.Source < b.Source
 		}
-		if a.SourceID != b.SourceID {
-			return a.SourceID < b.SourceID
-		}
 		if a.Order != b.Order {
 			return a.Order < b.Order
+		}
+		if a.SourceID != b.SourceID {
+			return a.SourceID < b.SourceID
 		}
 		return a.ID < b.ID
 	})

@@ -8,12 +8,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/evidence"
@@ -33,12 +34,27 @@ type Client struct {
 
 type message struct {
 	ID       string   `json:"id"`
-	Time     int64    `json:"time"`
+	Time     *int64   `json:"time"`
 	Event    string   `json:"event"`
+	Topic    string   `json:"topic"`
 	Title    string   `json:"title"`
 	Message  string   `json:"message"`
 	Priority *int     `json:"priority"`
 	Tags     []string `json:"tags"`
+}
+
+// Result gives replay items and every coverage or validity counter.
+type Result struct {
+	Items             []evidence.Item
+	UpstreamTruncated bool
+	LocalTruncated    bool
+	// Discarded counts invalid rows, cross-topic messages, and duplicate IDs.
+	Discarded int
+	// Duplicates counts repeated identical message IDs that were collapsed.
+	Duplicates int
+	// UnknownTime counts messages without a usable source time.
+	UnknownTime      int
+	RetentionLimited bool
 }
 
 // ntfy priorities. Priority 3 is the source default for an omitted value.
@@ -79,21 +95,23 @@ func effectivePriority(reported *int) (int, bool) {
 // History gives notifications between start and end with the specified limit.
 // The boolean combines upstream and local truncation.
 func (c *Client) History(ctx context.Context, serviceID, topic string, start, end time.Time, limit int) ([]evidence.Item, bool, error) {
-	items, upstream, local, err := c.HistoryDetail(ctx, serviceID, topic, start, end, limit)
-	return items, upstream || local, err
+	result, err := c.HistoryDetail(ctx, serviceID, topic, start, end, limit)
+	return result.Items, result.UpstreamTruncated || result.LocalTruncated, err
 }
 
-// HistoryDetail also separates upstream and local truncation.
-func (c *Client) HistoryDetail(ctx context.Context, serviceID, topic string, start, end time.Time, limit int) ([]evidence.Item, bool, bool, error) {
+// HistoryDetail also separates upstream and local truncation and reports
+// invalid, duplicative, and undated records.
+func (c *Client) HistoryDetail(ctx context.Context, serviceID, topic string, start, end time.Time, limit int) (Result, error) {
+	result := Result{RetentionLimited: true}
 	now := c.now()
 	if topic == "" {
-		return nil, false, false, fmt.Errorf("ntfy topic is required")
+		return result, fmt.Errorf("ntfy topic is required")
 	}
 	if limit <= 0 {
 		limit = 50
 	}
 	if !start.Before(end) {
-		return nil, false, false, fmt.Errorf("invalid time window")
+		return result, fmt.Errorf("invalid time window")
 	}
 	// poll=1 gives messages from storage and does not open a stream.
 	q := url.Values{}
@@ -102,98 +120,187 @@ func (c *Client) HistoryDetail(ctx context.Context, serviceID, topic string, sta
 	path := "/" + url.PathEscape(topic) + "/json?" + q.Encode()
 	// LockedClient.Get closes the body before it gives the response.
 	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
-	if err != nil {
-		return nil, false, false, err
+	if err != nil && !errors.Is(err, httpx.ErrBodyTooLarge) {
+		return result, err
+	}
+	if resp == nil {
+		return result, err
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return nil, false, false, fmt.Errorf("ntfy authentication failed")
+		return result, fmt.Errorf("ntfy authentication failed")
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, false, false, fmt.Errorf("ntfy topic not found")
+		return result, fmt.Errorf("ntfy topic not found")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, false, false, fmt.Errorf("ntfy HTTP %d", resp.StatusCode)
+		return result, fmt.Errorf("ntfy HTTP %d", resp.StatusCode)
 	}
-	snapshotAt := httpx.CollectionTime(resp, now)
-	upstreamTruncated := httpx.UpstreamTruncated(resp)
-	msgs, err := decodeMessages(body)
-	if err != nil {
-		return nil, false, false, err
+	partialBody := errors.Is(err, httpx.ErrBodyTooLarge)
+	result.UpstreamTruncated = httpx.UpstreamTruncated(resp)
+	msgs, invalid, decodeTruncated := decodeMessages(body, partialBody)
+	result.Discarded += invalid
+	result.LocalTruncated = partialBody || decodeTruncated
+	if len(msgs) == 0 && invalid > 0 && !partialBody {
+		return result, fmt.Errorf("ntfy decode: invalid response")
 	}
 	maxLineBytes := c.MaxLineBytes
 	if maxLineBytes <= 0 {
 		maxLineBytes = 2048
 	}
-	sort.SliceStable(msgs, func(i, j int) bool {
-		if msgs[i].Time != msgs[j].Time {
-			return msgs[i].Time < msgs[j].Time
-		}
-		return msgs[i].ID < msgs[j].ID
-	})
-	var items []evidence.Item
-	for _, m := range msgs {
-		if m.Event != "" && m.Event != "message" {
-			continue
-		}
-		ts := time.Unix(m.Time, 0).UTC()
-		if m.Time <= 0 {
-			ts = snapshotAt
-			if ts.Before(start) || ts.After(end.Add(30*time.Second)) {
-				continue
+	seen := make(map[string]string, len(msgs))
+	type candidate struct {
+		m   message
+		ts  time.Time
+		pos int
+	}
+	candidates := make([]candidate, 0, len(msgs))
+	for index, m := range msgs {
+		if m.Event != "message" {
+			// Control events carry no notification evidence. A missing event
+			// field is not a message, because the field is mandatory.
+			if m.Event == "" {
+				result.Discarded++
 			}
-		} else if ts.Before(start) || ts.After(end) {
 			continue
 		}
-		item := c.itemFrom(serviceID, topic, m, ts, now, maxLineBytes)
+		if m.Topic != topic {
+			// A replay must not attribute another topic to this service.
+			result.Discarded++
+			continue
+		}
+		if m.ID == "" {
+			result.Discarded++
+			continue
+		}
+		if m.Time == nil || *m.Time <= 0 {
+			result.UnknownTime++
+			result.Discarded++
+			continue
+		}
+		ts, ok := sourceTime(*m.Time)
+		if !ok {
+			result.UnknownTime++
+			result.Discarded++
+			continue
+		}
+		if ts.Before(start) || ts.After(end) {
+			continue
+		}
+		fingerprint := messageFingerprint(m)
+		if previous, ok := seen[m.ID]; ok {
+			// Collapse a repeated ID. Conflicting content is invalid.
+			if previous != fingerprint {
+				result.Discarded++
+			} else {
+				result.Duplicates++
+			}
+			continue
+		}
+		seen[m.ID] = fingerprint
+		candidates = append(candidates, candidate{m: m, ts: ts, pos: index})
+	}
+	// Same-second messages keep the source receipt order.
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if !candidates[i].ts.Equal(candidates[j].ts) {
+			return candidates[i].ts.Before(candidates[j].ts)
+		}
+		return candidates[i].pos < candidates[j].pos
+	})
+	items := make([]evidence.Item, 0, len(candidates))
+	for _, entry := range candidates {
+		item := c.itemFrom(serviceID, topic, entry.m, entry.ts, now, maxLineBytes)
 		item.WindowStart = timePtr(start)
 		item.WindowEnd = timePtr(end)
+		item.Order = entry.pos
 		items = append(items, item)
 	}
 	kept, localTruncated := evidence.KeepNewest(items, limit)
-	return kept, upstreamTruncated, localTruncated, nil
+	result.LocalTruncated = result.LocalTruncated || localTruncated
+	result.Items = kept
+	return result, nil
 }
 
-func decodeMessages(body []byte) ([]message, error) {
+// sourceTime validates a Unix second value against the RFC3339 year range.
+// A value outside the range cannot be marshalled and is not usable evidence.
+func sourceTime(seconds int64) (time.Time, bool) {
+	ts := time.Unix(seconds, 0).UTC()
+	if ts.Year() < 1 || ts.Year() > 9999 {
+		return time.Time{}, false
+	}
+	return ts, true
+}
+
+func messageFingerprint(m message) string {
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return m.ID
+	}
+	return string(raw)
+}
+
+// decodeMessages reads a JSON array or an NDJSON stream. It keeps complete
+// records and counts rows it cannot decode. partial marks a body cut at the
+// HTTP byte limit, so an incomplete final row is not a malformed row.
+func decodeMessages(body []byte, partial bool) ([]message, int, bool) {
 	body = bytes.TrimSpace(body)
 	if len(body) == 0 {
-		return nil, nil
+		return nil, 0, false
 	}
-	// JSON array.
 	if body[0] == '[' {
-		var decoded []*message
-		if err := json.Unmarshal(body, &decoded); err != nil {
-			return nil, fmt.Errorf("ntfy decode: invalid JSON array")
-		}
-		arr := make([]message, 0, len(decoded))
-		for _, m := range decoded {
-			if m == nil {
-				return nil, fmt.Errorf("ntfy decode: null message")
-			}
-			arr = append(arr, *m)
-		}
-		return arr, nil
+		return decodeArray(body, partial)
 	}
-	// NDJSON stream.
+	return decodeNDJSON(body, partial)
+}
+
+func decodeArray(body []byte, partial bool) ([]message, int, bool) {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	if _, err := dec.Token(); err != nil {
+		return nil, 1, partial
+	}
 	var out []message
-	sc := bufio.NewScanner(bytes.NewReader(body))
-	// Increase the scanner limit. The HTTP body limit sets the maximum input size.
-	buf := make([]byte, 0, 64*1024)
-	sc.Buffer(buf, 1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
+	discarded := 0
+	for dec.More() {
 		var m *message
-		if err := json.Unmarshal([]byte(line), &m); err != nil || m == nil {
-			return nil, fmt.Errorf("ntfy decode: invalid NDJSON line")
+		if err := dec.Decode(&m); err != nil {
+			discarded++
+			return out, discarded, true
+		}
+		if m == nil {
+			discarded++
+			continue
 		}
 		out = append(out, *m)
 	}
-	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("ntfy decode: %w", err)
+	return out, discarded, partial
+}
+
+func decodeNDJSON(body []byte, partial bool) ([]message, int, bool) {
+	var out []message
+	discarded := 0
+	truncated := false
+	reader := bufio.NewReader(bytes.NewReader(body))
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		line = bytes.TrimSpace(line)
+		if len(line) > 0 {
+			var m *message
+			if err := json.Unmarshal(line, &m); err != nil || m == nil {
+				discarded++
+				if readErr != nil || partial {
+					truncated = true
+				}
+			} else {
+				out = append(out, *m)
+			}
+		}
+		if readErr != nil {
+			if readErr != io.EOF {
+				truncated = true
+			}
+			break
+		}
 	}
-	return out, nil
+	return out, discarded, truncated
 }
 
 func (c *Client) itemFrom(serviceID, topic string, m message, ts, now time.Time, maxLineBytes int) evidence.Item {
