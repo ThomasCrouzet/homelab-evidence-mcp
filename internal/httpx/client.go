@@ -463,6 +463,7 @@ func (c *LockedClient) fetch(ctx context.Context, destName string, full *url.URL
 	// every later cache hit. The header is internal and set after remote headers
 	// are removed. CollectionTime reads it in both paths.
 	collectedAt := c.clock()
+	info.recordMissTime(collectedAt)
 	resp.Header.Set(cacheTimeHeader, collectedAt.Format(time.RFC3339Nano))
 
 	if c.cacheTTL > 0 && resp.StatusCode == http.StatusOK {

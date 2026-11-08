@@ -5,7 +5,9 @@ package beszel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -33,6 +35,7 @@ type Client struct {
 }
 
 type systemRow struct {
+	ID     string   `json:"id"`
 	Name   string   `json:"name"`
 	Status string   `json:"status"`
 	Host   string   `json:"host"`
@@ -47,15 +50,31 @@ type systemRow struct {
 	} `json:"info"`
 }
 
+// ErrSystemAmbiguous reports more than one system at the same identity tier.
+var ErrSystemAmbiguous = errors.New("beszel system selection is ambiguous")
+
+// fetchResult gives the complete inventory and its collection-age facts.
+type fetchResult struct {
+	Rows       []systemRow
+	ObservedAt time.Time
+	PageCount  int
+	MixedAge   bool
+	Overlap    bool
+	Unverified bool
+}
+
 // Status gives a snapshot for systemName.
 func (c *Client) Status(ctx context.Context, serviceID, systemName string) (evidence.Item, error) {
 	requestedAt := c.now()
-	list, observedAt, err := c.fetchSystems(ctx, requestedAt)
+	result, err := c.fetchSystems(ctx, requestedAt)
 	if err != nil {
 		return evidence.Item{}, err
 	}
 	retrievedAt := c.now()
-	row, ok := findSystem(list, systemName)
+	row, ok, err := findSystem(result.Rows, systemName)
+	if err != nil {
+		return evidence.Item{}, err
+	}
 	if !ok {
 		cleanName, redactions, truncated := redaction.ApplyAndTruncate(c.Redact, systemName, 256)
 		return evidence.Item{
@@ -64,17 +83,36 @@ func (c *Client) Status(ctx context.Context, serviceID, systemName string) (evid
 			Source:            evidence.SourceBeszel,
 			SourceID:          cleanName,
 			Kind:              evidence.KindMetricSample,
-			ObservedAt:        observedAt,
+			ObservedAt:        result.ObservedAt,
 			RetrievedAt:       retrievedAt,
 			Summary:           "beszel system not found",
 			Severity:          evidence.SeverityUnknown,
-			Attributes:        map[string]any{"system_name": cleanName, "found": false},
+			Attributes:        c.collectionAttributes(result, map[string]any{"system_name": cleanName, "found": false}),
 			Truncated:         truncated,
 			RedactionsApplied: redactions,
 			Freshness:         evidence.FreshnessMissing,
 		}, nil
 	}
-	return c.itemFrom(serviceID, row, observedAt, retrievedAt), nil
+	item := c.itemFrom(serviceID, row, result.ObservedAt, retrievedAt)
+	item.Attributes = c.collectionAttributes(result, item.Attributes)
+	return item, nil
+}
+
+func (c *Client) collectionAttributes(result fetchResult, attrs map[string]any) map[string]any {
+	if attrs == nil {
+		attrs = map[string]any{}
+	}
+	attrs["pages"] = result.PageCount
+	if result.MixedAge {
+		attrs["mixed_page_age"] = true
+	}
+	if result.Overlap {
+		attrs["pagination_overlap"] = true
+	}
+	if result.Unverified {
+		attrs["pagination_unverified"] = true
+	}
+	return attrs
 }
 
 // Evidence gives Status in a list.
@@ -86,7 +124,7 @@ func (c *Client) Evidence(ctx context.Context, serviceID, systemName string) ([]
 	return []evidence.Item{it}, nil
 }
 
-func (c *Client) fetchSystems(ctx context.Context, fallback time.Time) ([]systemRow, time.Time, error) {
+func (c *Client) fetchSystems(ctx context.Context, fallback time.Time) (fetchResult, error) {
 	paths := []string{
 		"/api/collections/systems/records",
 		"/api/systems",
@@ -94,20 +132,21 @@ func (c *Client) fetchSystems(ctx context.Context, fallback time.Time) ([]system
 		"/api/systems/",
 	}
 	var lastErr error
-	for _, p := range paths {
-		if p == "/api/collections/systems/records" {
-			list, observedAt, tryAlternate, err := c.fetchPocketBaseSystems(ctx, p, fallback)
-			if tryAlternate {
+	for _, path := range paths {
+		if path == "/api/collections/systems/records" {
+			page, collectedAt, err := c.fetchPage(ctx, path, 1, beszelPageSize, fallback)
+			if err != nil {
 				lastErr = err
 				continue
 			}
+			result, err := c.collectPages(ctx, path, page, collectedAt, fallback)
 			if err != nil {
-				return nil, time.Time{}, err
+				return fetchResult{}, err
 			}
-			return list, observedAt, nil
+			return result, nil
 		}
 		// LockedClient.Get closes the body before it gives the response.
-		resp, body, err := c.HTTP.Get(ctx, c.DestName, p, c.Headers) //nolint:bodyclose
+		resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
 		if err != nil {
 			lastErr = err
 			continue
@@ -117,91 +156,128 @@ func (c *Client) fetchSystems(ctx context.Context, fallback time.Time) ([]system
 			continue
 		}
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return nil, time.Time{}, fmt.Errorf("beszel authentication failed")
+			return fetchResult{}, fmt.Errorf("beszel authentication failed")
 		}
 		if resp.StatusCode != http.StatusOK {
-			return nil, time.Time{}, fmt.Errorf("beszel HTTP %d", resp.StatusCode)
+			return fetchResult{}, fmt.Errorf("beszel HTTP %d", resp.StatusCode)
 		}
-		list, err := decodeSystems(body)
+		page, err := decodeSystemPage(body)
 		if err != nil {
-			return nil, time.Time{}, err
+			return fetchResult{}, err
 		}
-		return list, httpx.CollectionTime(resp, fallback), nil
+		collectedAt := httpx.CollectionTime(resp, fallback)
+		result, err := c.collectPages(ctx, path, page, collectedAt, fallback)
+		if err != nil {
+			return fetchResult{}, err
+		}
+		return result, nil
 	}
 	if lastErr != nil {
-		return nil, time.Time{}, lastErr
+		return fetchResult{}, lastErr
 	}
-	return nil, time.Time{}, fmt.Errorf("beszel: no systems endpoint available")
+	return fetchResult{}, fmt.Errorf("beszel: no systems endpoint available")
 }
 
-func (c *Client) fetchPocketBaseSystems(ctx context.Context, path string, fallback time.Time) ([]systemRow, time.Time, bool, error) {
-	var all []systemRow
-	var observedAt time.Time
-	expectedPages := 1
-	expectedTotalItems := 0
-	expectedHasTotalItems := false
-	for pageNumber := 1; pageNumber <= expectedPages; pageNumber++ {
-		query := url.Values{}
-		query.Set("page", strconv.Itoa(pageNumber))
-		query.Set("perPage", strconv.Itoa(beszelPageSize))
-		requestPath := path + "?" + query.Encode()
-		// LockedClient.Get closes the body before it gives the response.
-		resp, body, err := c.HTTP.Get(ctx, c.DestName, requestPath, c.Headers) //nolint:bodyclose
+func (c *Client) collectPages(ctx context.Context, path string, first systemPage, firstAt, fallback time.Time) (fetchResult, error) {
+	result := fetchResult{Rows: append([]systemRow(nil), first.Items...), ObservedAt: firstAt, PageCount: 1}
+	ids := map[string]bool{}
+	missingIDs := false
+	for _, row := range first.Items {
+		if row.ID == "" {
+			missingIDs = true
+			continue
+		}
+		if ids[row.ID] {
+			result.Overlap = true
+		}
+		ids[row.ID] = true
+	}
+	if !first.Paginated {
+		result.Unverified = false
+		return result, nil
+	}
+	if first.Page < 1 || first.TotalPages < 1 {
+		return fetchResult{}, fmt.Errorf("beszel pagination metadata is incomplete")
+	}
+	if first.TotalPages > maxBeszelPages {
+		return fetchResult{}, fmt.Errorf("beszel collection exceeds %d pages", maxBeszelPages)
+	}
+	perPage := first.PerPage
+	if perPage <= 0 {
+		perPage = beszelPageSize
+	}
+	for pageNumber := 2; pageNumber <= first.TotalPages; pageNumber++ {
+		page, collectedAt, err := c.fetchPage(ctx, path, pageNumber, perPage, fallback)
 		if err != nil {
-			return nil, time.Time{}, pageNumber == 1, err
+			return fetchResult{}, fmt.Errorf("beszel pagination failed on page %d: %w", pageNumber, err)
 		}
-		if resp.StatusCode == http.StatusNotFound {
-			return nil, time.Time{}, pageNumber == 1, fmt.Errorf("beszel returned 404")
+		if !page.Paginated || page.Page != pageNumber || page.TotalPages != first.TotalPages ||
+			page.HasTotalItems != first.HasTotalItems ||
+			(first.HasTotalItems && page.TotalItems != first.TotalItems) {
+			return fetchResult{}, fmt.Errorf("beszel pagination changed during collection")
 		}
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return nil, time.Time{}, false, fmt.Errorf("beszel authentication failed")
+		result.PageCount++
+		if collectedAt.Before(result.ObservedAt) {
+			result.ObservedAt = collectedAt
 		}
-		if resp.StatusCode != http.StatusOK {
-			return nil, time.Time{}, false, fmt.Errorf("beszel HTTP %d", resp.StatusCode)
+		if collectedAt.Sub(firstAt) > time.Second || firstAt.Sub(collectedAt) > time.Second {
+			result.MixedAge = true
 		}
-		if observedAt.IsZero() {
-			observedAt = httpx.CollectionTime(resp, fallback)
+		if len(page.Items) > maxBeszelRecords-len(result.Rows) {
+			return fetchResult{}, fmt.Errorf("beszel collection exceeds %d records", maxBeszelRecords)
 		}
-		result, err := decodeSystemPage(body)
-		if err != nil {
-			return nil, time.Time{}, false, err
-		}
-		if result.HasTotalItems && result.TotalItems > maxBeszelRecords {
-			return nil, time.Time{}, false, fmt.Errorf("beszel collection exceeds %d records", maxBeszelRecords)
-		}
-		if len(result.Items) > maxBeszelRecords-len(all) {
-			return nil, time.Time{}, false, fmt.Errorf("beszel collection exceeds %d records", maxBeszelRecords)
-		}
-		all = append(all, result.Items...)
-		if !result.Paginated {
-			return all, observedAt, false, nil
-		}
-		if result.Page < 1 || result.TotalPages < 1 {
-			return nil, time.Time{}, false, fmt.Errorf("beszel pagination metadata is incomplete")
-		}
-		if pageNumber == 1 {
-			expectedPages = result.TotalPages
-			expectedTotalItems = result.TotalItems
-			expectedHasTotalItems = result.HasTotalItems
-			if expectedPages > maxBeszelPages {
-				return nil, time.Time{}, false, fmt.Errorf("beszel collection exceeds %d pages", maxBeszelPages)
+		for _, row := range page.Items {
+			if row.ID == "" {
+				missingIDs = true
+				continue
 			}
+			if ids[row.ID] {
+				result.Overlap = true
+			}
+			ids[row.ID] = true
 		}
-		if result.Page != pageNumber || result.TotalPages != expectedPages ||
-			result.HasTotalItems != expectedHasTotalItems ||
-			(result.HasTotalItems && result.TotalItems != expectedTotalItems) {
-			return nil, time.Time{}, false, fmt.Errorf("beszel pagination changed during collection")
-		}
+		result.Rows = append(result.Rows, page.Items...)
 	}
-	if expectedHasTotalItems && len(all) != expectedTotalItems {
-		return nil, time.Time{}, false, fmt.Errorf("beszel collection item count does not match totalItems")
+	if first.HasTotalItems && len(result.Rows) != first.TotalItems {
+		return fetchResult{}, fmt.Errorf("beszel collection item count does not match totalItems")
 	}
-	return all, observedAt, false, nil
+	if len(result.Rows) > maxBeszelRecords {
+		return fetchResult{}, fmt.Errorf("beszel collection exceeds %d records", maxBeszelRecords)
+	}
+	result.Unverified = missingIDs
+	return result, nil
+}
+
+func (c *Client) fetchPage(ctx context.Context, path string, pageNumber, perPage int, fallback time.Time) (systemPage, time.Time, error) {
+	query := url.Values{}
+	query.Set("page", strconv.Itoa(pageNumber))
+	query.Set("perPage", strconv.Itoa(perPage))
+	requestPath := path + "?" + query.Encode()
+	// LockedClient.Get closes the body before it gives the response.
+	resp, body, err := c.HTTP.Get(ctx, c.DestName, requestPath, c.Headers) //nolint:bodyclose
+	if err != nil {
+		return systemPage{}, time.Time{}, err
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return systemPage{}, time.Time{}, fmt.Errorf("beszel returned 404")
+	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return systemPage{}, time.Time{}, fmt.Errorf("beszel authentication failed")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return systemPage{}, time.Time{}, fmt.Errorf("beszel HTTP %d", resp.StatusCode)
+	}
+	result, err := decodeSystemPage(body)
+	if err != nil {
+		return systemPage{}, time.Time{}, err
+	}
+	return result, httpx.CollectionTime(resp, fallback), nil
 }
 
 type systemPage struct {
 	Items         []systemRow
 	Page          int
+	PerPage       int
 	TotalItems    int
 	TotalPages    int
 	Paginated     bool
@@ -275,29 +351,49 @@ func decodeSystemPage(body []byte) (systemPage, error) {
 			}
 		}
 		return systemPage{
-			Items: *wrap.Items, Page: *wrap.Page, TotalItems: totalItems,
+			Items: *wrap.Items, Page: *wrap.Page, PerPage: *wrap.PerPage, TotalItems: totalItems,
 			TotalPages: totalPages, Paginated: true, HasTotalItems: wrap.TotalItems != nil,
 		}, nil
 	}
 	return systemPage{}, fmt.Errorf("beszel decode: empty systems list")
 }
 
-func decodeSystems(body []byte) ([]systemRow, error) {
-	result, err := decodeSystemPage(body)
-	return result.Items, err
-}
-
-func findSystem(list []systemRow, want string) (systemRow, bool) {
+// findSystem scans the whole collection by identity tier. Canonical names win
+// over host aliases, and more than one match in the winning tier is ambiguous.
+func findSystem(list []systemRow, want string) (systemRow, bool, error) {
 	want = strings.ToLower(strings.TrimSpace(want))
-	for _, r := range list {
-		names := []string{r.Name, r.System, r.Host, r.Info.Hostname}
-		for _, n := range names {
-			if strings.ToLower(strings.TrimSpace(n)) == want {
-				return r, true
+	if want == "" {
+		return systemRow{}, false, nil
+	}
+	tiers := [][]func(systemRow) string{
+		{func(r systemRow) string { return r.Name }, func(r systemRow) string { return r.System }},
+		{func(r systemRow) string { return r.Host }, func(r systemRow) string { return r.Info.Hostname }},
+	}
+	for _, tier := range tiers {
+		matched := map[string]int{}
+		for index, row := range list {
+			for _, field := range tier {
+				if strings.ToLower(strings.TrimSpace(field(row))) == want {
+					key := row.ID
+					if key == "" {
+						key = fmt.Sprintf("#%d", index)
+					}
+					matched[key] = index
+					break
+				}
 			}
 		}
+		if len(matched) == 0 {
+			continue
+		}
+		if len(matched) > 1 {
+			return systemRow{}, false, ErrSystemAmbiguous
+		}
+		for _, index := range matched {
+			return list[index], true, nil
+		}
 	}
-	return systemRow{}, false
+	return systemRow{}, false, nil
 }
 
 func (c *Client) itemFrom(serviceID string, row systemRow, observedAt, retrievedAt time.Time) evidence.Item {
@@ -338,19 +434,39 @@ func (c *Client) itemFrom(serviceID string, row systemRow, observedAt, retrieved
 		"found":       true,
 		"snapshot":    true,
 	}
-	cpu := row.Info.CPU
-	if cpu == nil {
-		cpu = row.CPU
+	// Info values are documented percentages. Legacy top-level values keep an
+	// unknown unit because older API variants do not prove the same meaning.
+	cpuInfo := validPercent(row.Info.CPU)
+	cpuLegacy := validPercent(row.CPU)
+	switch {
+	case cpuInfo != nil:
+		attrs["cpu_percent"] = *cpuInfo
+		attrs["cpu_source"] = "info"
+		attrs["cpu"] = *cpuInfo
+	case row.Info.CPU != nil:
+		attrs["cpu_invalid"] = true
+	case cpuLegacy != nil:
+		attrs["cpu_legacy"] = *cpuLegacy
+		attrs["cpu_unit"] = "unknown"
+		attrs["cpu"] = *cpuLegacy
+	case row.CPU != nil:
+		attrs["cpu_invalid"] = true
 	}
-	if cpu != nil {
-		attrs["cpu"] = *cpu
-	}
-	mem := row.Info.Mem
-	if mem == nil {
-		mem = row.Mem
-	}
-	if mem != nil {
-		attrs["mem"] = *mem
+	memInfo := validPercent(row.Info.Mem)
+	memLegacy := validPercent(row.Mem)
+	switch {
+	case memInfo != nil:
+		attrs["memory_percent"] = *memInfo
+		attrs["memory_source"] = "info.mp"
+		attrs["mem"] = *memInfo
+	case row.Info.Mem != nil:
+		attrs["memory_invalid"] = true
+	case memLegacy != nil:
+		attrs["memory_legacy"] = *memLegacy
+		attrs["memory_unit"] = "unknown"
+		attrs["mem"] = *memLegacy
+	case row.Mem != nil:
+		attrs["memory_invalid"] = true
 	}
 	sum, summaryRedactions, summaryCut := redaction.ApplyAndTruncate(c.Redact, rawSummary, 512)
 	return evidence.Item{
@@ -368,6 +484,15 @@ func (c *Client) itemFrom(serviceID string, row systemRow, observedAt, retrieved
 		RedactionsApplied: nameRedactions + statusRedactions + summaryRedactions,
 		Freshness:         evidence.ComputeFreshness(observedAt, retrievedAt),
 	}
+}
+
+// validPercent accepts a finite percentage from 0 through 100.
+func validPercent(value *float64) *float64 {
+	if value == nil || math.IsNaN(*value) || math.IsInf(*value, 0) || *value < 0 || *value > 100 {
+		return nil
+	}
+	v := *value
+	return &v
 }
 
 func (c *Client) now() time.Time {

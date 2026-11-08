@@ -149,7 +149,8 @@ func applyStatusEnum(schema *jsonschema.Schema) {
 				"missing_identity", "omitted_checks", "ambiguous_binding",
 				"outside_registry_scope", "retention_limited",
 				"status_filter_no_match", "identity_unverified", "request_budget_exceeded",
-				"no_bound_sources")
+				"no_bound_sources", "mixed_page_age", "pagination_overlap",
+				"pagination_unverified")
 		case "cache_state":
 			property.Enum = stringEnum("", "hit", "miss", "mixed", "coalesced", "disabled")
 		}

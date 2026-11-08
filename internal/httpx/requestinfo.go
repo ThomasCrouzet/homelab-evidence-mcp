@@ -67,6 +67,19 @@ func (i *RequestInfo) recordCoalesced(collectedAt time.Time) {
 	}
 }
 
+// recordMissTime records the collection time of a fresh response. With a
+// mixed hit and miss collection, it gives the age of the oldest page.
+func (i *RequestInfo) recordMissTime(collectedAt time.Time) {
+	if i == nil {
+		return
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.oldestCollected.IsZero() || collectedAt.Before(i.oldestCollected) {
+		i.oldestCollected = collectedAt
+	}
+}
+
 func (i *RequestInfo) recordDisabled() {
 	if i == nil {
 		return
@@ -96,7 +109,7 @@ func (i *RequestInfo) Snapshot() (string, int64) {
 	case i.hits == i.requests:
 		return "hit", ageS
 	case i.misses == i.requests:
-		return "miss", 0
+		return "miss", ageS
 	case i.coalesced == i.requests:
 		return "coalesced", ageS
 	default:

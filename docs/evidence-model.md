@@ -140,7 +140,7 @@ Execution status and evidence coverage are separate:
 - `truncated` combines `upstream_truncated` and `local_truncated`.
 - `discarded` counts unusable source records, such as a Loki line with an
   invalid timestamp.
-- `cache_state` is `hit`, `miss`, or `disabled`. `cache_age_seconds` gives the
+- `cache_state` is `hit`, `miss`, `mixed`, or `disabled`. `cache_age_seconds` gives the
   age of the oldest cached snapshot used. These fields do not change
   `observed_at`.
 
