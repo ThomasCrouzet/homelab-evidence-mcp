@@ -32,6 +32,19 @@ The Gatus adapter has this behavior:
 - Duplicate exact keys and multiple matching aliases give an explicit ambiguity
   source error. The adapter does not select an arbitrary row.
 - Row order does not change the selected endpoint.
+- A configured endpoint that is absent from the status list gives
+  `unmatched_binding` and `complete: false` in every window, including a
+  historical window. The adapter does not report matched empty history.
+- Each result must have a usable timestamp and an explicit `success` field. An
+  invalid record is counted in `discarded` and the source reports
+  `partial_invalid_records`. An absent `success` is not a failure value.
+- An explicit `success: false` with no `status` remains a valid failure. The
+  adapter omits `http_status` rather than inventing zero.
+- Gatus keeps a bounded result count for each endpoint. The default is 100
+  results, and the default memory storage loses history on restart. A windowed
+  result therefore reports `retention_limited: true`, `reason:
+  retention_limited` (or a more specific coverage reason), and `complete:
+  false`. A short returned list does not prove full window coverage.
 - If no result has a valid timestamp, the adapter reports `freshness: unknown`
   and marks the collection-derived time in `attributes`. A historical window
   does not include the undated result.

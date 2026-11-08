@@ -59,7 +59,14 @@ after the TTL assigns a new collection time.
 only when its collection time is in the requested window. The check allows a
 30-second tolerance for the request duration. Therefore, a historical window
 does not present the current state as historical data.
-The same rule applies when Gatus reports a missing endpoint.
+The same rule applies when Gatus reports a missing endpoint. A missing Gatus
+endpoint reports `unmatched_binding` in every window. It never reports a
+matched empty history.
+
+Gatus keeps a bounded result count for each endpoint. A windowed Gatus source
+reports `retention_limited: true` and `complete: false`, because the adapter
+cannot prove that the source retained the complete window. The API also cannot
+prove a restart gap in the default memory storage.
 
 ## Multi-source envelope
 

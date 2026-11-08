@@ -93,13 +93,16 @@ type SourceOutcome struct {
 	// Omitted counts selected objects left out by an explicit collection bound.
 	Omitted int `json:"omitted"`
 	// The check counters make partial Healthchecks history explicit.
-	QueriedChecks         int    `json:"queried_checks,omitempty"`
-	FailedChecks          int    `json:"failed_checks,omitempty"`
-	UnauthorizedChecks    int    `json:"unauthorized_checks,omitempty"`
-	MissingIdentityChecks int    `json:"missing_identity_checks,omitempty"`
-	CacheState            string `json:"cache_state,omitempty"`
-	CacheAgeS             int64  `json:"cache_age_seconds,omitempty"`
-	DurationMS            int64  `json:"duration_ms"`
+	QueriedChecks         int `json:"queried_checks,omitempty"`
+	FailedChecks          int `json:"failed_checks,omitempty"`
+	UnauthorizedChecks    int `json:"unauthorized_checks,omitempty"`
+	MissingIdentityChecks int `json:"missing_identity_checks,omitempty"`
+	// RetentionLimited reports that the source keeps a bounded history and the
+	// adapter cannot prove full coverage of the requested window.
+	RetentionLimited bool   `json:"retention_limited,omitempty"`
+	CacheState       string `json:"cache_state,omitempty"`
+	CacheAgeS        int64  `json:"cache_age_seconds,omitempty"`
+	DurationMS       int64  `json:"duration_ms"`
 }
 
 // Bundle contains a multi-source response.

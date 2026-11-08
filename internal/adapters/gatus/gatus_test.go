@@ -125,17 +125,17 @@ func TestEvidenceInWindow(t *testing.T) {
 	})
 	start := time.Date(2026, 7, 25, 11, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
-	items, truncated, err := cli.EvidenceInWindow(context.Background(), "x", "a", start, end, 10)
+	window, err := cli.EvidenceInWindow(context.Background(), "x", "a", start, end, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 {
-		t.Fatalf("got %d", len(items))
+	if !window.Matched || len(window.Items) != 1 {
+		t.Fatalf("matched=%v items=%d", window.Matched, len(window.Items))
 	}
-	if truncated {
+	if window.Truncated {
 		t.Fatal("history unexpectedly truncated")
 	}
-	if items[0].WindowStart == nil || items[0].WindowEnd == nil {
+	if window.Items[0].WindowStart == nil || window.Items[0].WindowEnd == nil {
 		t.Fatal("window missing")
 	}
 }
@@ -166,15 +166,15 @@ func TestEvidenceInWindow_MissingEndpointIsAbsence(t *testing.T) {
 	})
 	start := time.Date(2026, 7, 25, 11, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
-	items, truncated, err := cli.EvidenceInWindow(context.Background(), "x", "missing", start, end, 10)
+	window, err := cli.EvidenceInWindow(context.Background(), "x", "missing", start, end, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if truncated || len(items) != 1 {
-		t.Fatalf("items=%d truncated=%v", len(items), truncated)
+	if window.Matched || window.Truncated || len(window.Items) != 1 {
+		t.Fatalf("matched=%v items=%d truncated=%v", window.Matched, len(window.Items), window.Truncated)
 	}
-	if items[0].Freshness != evidence.FreshnessMissing || items[0].Attributes["found"] != false {
-		t.Fatalf("want a missing item, got %+v", items[0])
+	if window.Items[0].Freshness != evidence.FreshnessMissing || window.Items[0].Attributes["found"] != false {
+		t.Fatalf("want a missing item, got %+v", window.Items[0])
 	}
 }
 
@@ -190,15 +190,15 @@ func TestEvidenceInWindow_KeepsNewestWhenTruncating(t *testing.T) {
 	})
 	start := time.Date(2026, 7, 25, 11, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
-	items, truncated, err := cli.EvidenceInWindow(context.Background(), "x", "a", start, end, 1)
+	window, err := cli.EvidenceInWindow(context.Background(), "x", "a", start, end, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !truncated || len(items) != 1 {
-		t.Fatalf("items=%d truncated=%v", len(items), truncated)
+	if !window.Truncated || len(window.Items) != 1 {
+		t.Fatalf("items=%d truncated=%v", len(window.Items), window.Truncated)
 	}
-	if items[0].Attributes["http_status"] != 501 {
-		t.Fatalf("kept oldest instead of newest: %+v", items[0].Attributes)
+	if window.Items[0].Attributes["http_status"] != 501 {
+		t.Fatalf("kept oldest instead of newest: %+v", window.Items[0].Attributes)
 	}
 }
 
@@ -271,7 +271,7 @@ func TestStatus_DuplicateExactKeyIsAmbiguous(t *testing.T) {
 			{"name":"two","key":"api","results":[{"success":false,"status":503,"timestamp":"2026-07-25T11:00:00Z"}]}
 		]`))
 	})
-	if _, err := cli.Status(context.Background(), "x", "api"); !errors.Is(err, errEndpointAmbiguous) {
+	if _, err := cli.Status(context.Background(), "x", "api"); !errors.Is(err, ErrEndpointAmbiguous) {
 		t.Fatalf("err=%v, want ambiguity", err)
 	}
 }
@@ -283,7 +283,7 @@ func TestStatus_MultipleAliasesAreAmbiguous(t *testing.T) {
 			{"name":"api","key":"second","results":[{"success":false,"status":503,"timestamp":"2026-07-25T11:00:00Z"}]}
 		]`))
 	})
-	if _, err := cli.Status(context.Background(), "x", "api"); !errors.Is(err, errEndpointAmbiguous) {
+	if _, err := cli.Status(context.Background(), "x", "api"); !errors.Is(err, ErrEndpointAmbiguous) {
 		t.Fatalf("err=%v, want ambiguity", err)
 	}
 }
@@ -297,12 +297,12 @@ func TestEvidenceInWindow_ExactKeyBeatsEarlierAlias(t *testing.T) {
 	})
 	start := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
-	items, _, err := cli.EvidenceInWindow(context.Background(), "x", "prod_api", start, end, 10)
+	window, err := cli.EvidenceInWindow(context.Background(), "x", "prod_api", start, end, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].Attributes["http_status"] != 503 {
-		t.Fatalf("window used an alias: %+v", items)
+	if len(window.Items) != 1 || window.Items[0].Attributes["http_status"] != 503 {
+		t.Fatalf("window used an alias: %+v", window.Items)
 	}
 }
 
@@ -362,12 +362,83 @@ func TestEvidenceInWindow_DoesNotInventUndatedHistory(t *testing.T) {
 	})
 	start := time.Date(2026, 7, 25, 8, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 7, 25, 9, 0, 0, 0, time.UTC)
-	items, _, err := cli.EvidenceInWindow(context.Background(), "x", "api", start, end, 10)
+	window, err := cli.EvidenceInWindow(context.Background(), "x", "api", start, end, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 0 {
-		t.Fatalf("undated result became history: %+v", items)
+	if len(window.Items) != 0 || window.Discarded != 1 {
+		t.Fatalf("undated result became history: items=%+v discarded=%d", window.Items, window.Discarded)
+	}
+}
+
+func TestEvidenceInWindow_MissingEndpointHistoricalIsUnmatched(t *testing.T) {
+	cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"name":"a","key":"a","results":[{"success":true,"status":200,"timestamp":"2026-07-25T11:00:00Z"}]}]`))
+	})
+	start := time.Date(2026, 7, 25, 8, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 25, 9, 0, 0, 0, time.UTC)
+	window, err := cli.EvidenceInWindow(context.Background(), "x", "missing", start, end, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if window.Matched || len(window.Items) != 0 {
+		t.Fatalf("missing endpoint became matched history: %+v", window)
+	}
+}
+
+func TestEvidenceInWindow_CountsInvalidRecords(t *testing.T) {
+	cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"name":"a","key":"a","results":[
+			{"success":true,"status":200,"timestamp":"2026-07-25T11:00:00Z"},
+			{"status":500,"timestamp":"2026-07-25T11:10:00Z"},
+			{"success":false,"status":500,"timestamp":"invalid"}
+		]}]`))
+	})
+	start := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	window, err := cli.EvidenceInWindow(context.Background(), "x", "a", start, end, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(window.Items) != 1 || window.Discarded != 2 {
+		t.Fatalf("items=%d discarded=%d", len(window.Items), window.Discarded)
+	}
+	if window.Items[0].Severity != evidence.SeverityInfo {
+		t.Fatalf("valid item severity=%s", window.Items[0].Severity)
+	}
+}
+
+func TestEvidenceInWindow_ExplicitFalseWithoutStatusIsFailure(t *testing.T) {
+	cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"name":"a","key":"a","results":[{"success":false,"timestamp":"2026-07-25T11:00:00Z"}]}]`))
+	})
+	start := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	window, err := cli.EvidenceInWindow(context.Background(), "x", "a", start, end, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(window.Items) != 1 || window.Items[0].Severity != evidence.SeverityError {
+		t.Fatalf("explicit failure was not retained: %+v", window.Items)
+	}
+	if _, ok := window.Items[0].Attributes["http_status"]; ok {
+		t.Fatalf("absent status was invented: %+v", window.Items[0].Attributes)
+	}
+}
+
+func TestStatus_MissingSuccessIsUnknown(t *testing.T) {
+	cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"name":"a","key":"a","results":[{"status":500,"timestamp":"2026-07-25T11:00:00Z"}]}]`))
+	})
+	item, err := cli.Status(context.Background(), "x", "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Severity != evidence.SeverityUnknown || item.Attributes["success_known"] != false {
+		t.Fatalf("missing success became a diagnosis: %+v", item)
+	}
+	if _, ok := item.Attributes["success"]; ok {
+		t.Fatalf("absent success was invented: %+v", item.Attributes)
 	}
 }
 

@@ -16,9 +16,9 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 )
 
-// errEndpointAmbiguous reports a selector that identifies more than one endpoint.
+// ErrEndpointAmbiguous reports a selector that identifies more than one endpoint.
 // The error omits the configured key.
-var errEndpointAmbiguous = errors.New("gatus endpoint selection is ambiguous")
+var ErrEndpointAmbiguous = errors.New("gatus endpoint selection is ambiguous")
 
 // Client gets data from the Gatus status route and compatible variants.
 type Client struct {
@@ -38,11 +38,21 @@ type endpointStatus struct {
 }
 
 type endpointResult struct {
-	Status    int          `json:"status"`
-	Success   bool         `json:"success"`
+	Status    *int         `json:"status"`
+	Success   *bool        `json:"success"`
 	Timestamp string       `json:"timestamp"`
 	Duration  flexDuration `json:"duration"`
 	Errors    []string     `json:"errors"`
+}
+
+// WindowResult gives history items and the coverage facts around them.
+// Matched is false when the configured endpoint is absent from the status list.
+type WindowResult struct {
+	Items     []evidence.Item
+	Matched   bool
+	Truncated bool
+	// Discarded counts records with an unusable timestamp or no success field.
+	Discarded int
 }
 
 // flexDuration accepts Gatus nanosecond numbers and duration strings.
@@ -110,26 +120,32 @@ func (c *Client) missingItem(serviceID, endpointKey string, observedAt, retrieve
 }
 
 // EvidenceInWindow gives results between start and end.
-func (c *Client) EvidenceInWindow(ctx context.Context, serviceID, endpointKey string, start, end time.Time, max int) ([]evidence.Item, bool, error) {
+func (c *Client) EvidenceInWindow(ctx context.Context, serviceID, endpointKey string, start, end time.Time, max int) (WindowResult, error) {
+	result := WindowResult{}
 	retrievedAt := c.now()
 	list, snapshotAt, err := c.fetchAll(ctx, retrievedAt)
 	if err != nil {
-		return nil, false, err
+		return result, err
 	}
 	ep, ok, err := findEndpoint(list, endpointKey)
 	if err != nil {
-		return nil, false, err
+		return result, err
 	}
 	if !ok {
-		// A missing endpoint is a current snapshot, not a historical event.
+		// Keep identity explicit in every window. A missing endpoint is not a
+		// matched empty history. The caller reports unmatched_binding.
 		if snapshotAt.Before(start) || snapshotAt.After(end.Add(30*time.Second)) {
-			return []evidence.Item{}, false, nil
+			return result, nil
 		}
+		// A window that includes the current collection can carry a missing
+		// snapshot item. It is not a re-dated historical event.
 		item := c.missingItem(serviceID, endpointKey, snapshotAt, retrievedAt)
 		item.WindowStart = timePtr(start)
 		item.WindowEnd = timePtr(end)
-		return []evidence.Item{item}, false, nil
+		result.Items = []evidence.Item{item}
+		return result, nil
 	}
+	result.Matched = true
 	if max <= 0 {
 		max = 20
 	}
@@ -143,9 +159,15 @@ func (c *Client) EvidenceInWindow(ctx context.Context, serviceID, endpointKey st
 	for _, r := range ep.Results {
 		ts, ok := parseTS(r.Timestamp)
 		if !ok {
+			result.Discarded++
 			continue
 		}
 		if ts.Before(start) || ts.After(end) {
+			continue
+		}
+		if r.Success == nil {
+			// An absent success field is not an explicit false value.
+			result.Discarded++
 			continue
 		}
 		pairs = append(pairs, pair{r, ts})
@@ -153,8 +175,8 @@ func (c *Client) EvidenceInWindow(ctx context.Context, serviceID, endpointKey st
 	sort.SliceStable(pairs, func(i, j int) bool {
 		return pairs[i].ts.Before(pairs[j].ts)
 	})
-	truncated := len(pairs) > max
-	if truncated {
+	result.Truncated = len(pairs) > max
+	if result.Truncated {
 		pairs = pairs[len(pairs)-max:]
 	}
 	for _, p := range pairs {
@@ -163,7 +185,8 @@ func (c *Client) EvidenceInWindow(ctx context.Context, serviceID, endpointKey st
 		item.WindowEnd = timePtr(end)
 		items = append(items, item)
 	}
-	return items, truncated, nil
+	result.Items = items
+	return result, nil
 }
 
 func (c *Client) fetchAll(ctx context.Context, fallback time.Time) ([]endpointStatus, time.Time, error) {
@@ -214,7 +237,7 @@ func findEndpoint(list []endpointStatus, key string) (endpointStatus, bool, erro
 		return exact[0], true, nil
 	case 0:
 	default:
-		return endpointStatus{}, false, errEndpointAmbiguous
+		return endpointStatus{}, false, ErrEndpointAmbiguous
 	}
 	// Some versions use a name or group_name composition. An alias is valid
 	// only when it identifies one endpoint.
@@ -234,7 +257,7 @@ func findEndpoint(list []endpointStatus, key string) (endpointStatus, bool, erro
 	case 0:
 		return endpointStatus{}, false, nil
 	default:
-		return endpointStatus{}, false, errEndpointAmbiguous
+		return endpointStatus{}, false, ErrEndpointAmbiguous
 	}
 }
 
@@ -295,11 +318,16 @@ func (c *Client) itemFromEndpoint(serviceID string, ep endpointStatus, snapshotA
 }
 
 func (c *Client) itemFromResult(serviceID string, ep endpointStatus, r endpointResult, ts, now time.Time, sourceTimeKnown bool) evidence.Item {
-	sev := evidence.SeverityInfo
-	rawSummary := fmt.Sprintf("gatus %s success status=%d", safeName(ep), r.Status)
-	if !r.Success {
-		sev = evidence.SeverityError
-		rawSummary = fmt.Sprintf("gatus %s failure status=%d", safeName(ep), r.Status)
+	successKnown := r.Success != nil
+	sev := evidence.SeverityUnknown
+	rawSummary := fmt.Sprintf("gatus %s has no success field status=%d", safeName(ep), intValue(r.Status))
+	if successKnown {
+		sev = evidence.SeverityInfo
+		rawSummary = fmt.Sprintf("gatus %s success status=%d", safeName(ep), intValue(r.Status))
+		if !*r.Success {
+			sev = evidence.SeverityError
+			rawSummary = fmt.Sprintf("gatus %s failure status=%d", safeName(ep), intValue(r.Status))
+		}
 	}
 	key, keyRedactions, keyCut := redaction.ApplyAndTruncate(c.Redact, ep.Key, 256)
 	name, nameRedactions, nameCut := redaction.ApplyAndTruncate(c.Redact, ep.Name, 256)
@@ -308,10 +336,15 @@ func (c *Client) itemFromResult(serviceID string, ep endpointStatus, r endpointR
 		"endpoint_key":      key,
 		"name":              name,
 		"group":             group,
-		"success":           r.Success,
-		"http_status":       r.Status,
+		"success_known":     successKnown,
 		"found":             true,
 		"source_time_known": sourceTimeKnown,
+	}
+	if successKnown {
+		attrs["success"] = *r.Success
+	}
+	if r.Status != nil {
+		attrs["http_status"] = *r.Status
 	}
 	if !sourceTimeKnown {
 		attrs["collection_time_derived"] = true
@@ -388,6 +421,13 @@ func parseTS(s string) (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
+}
+
+func intValue(v *int) int {
+	if v == nil {
+		return 0
+	}
+	return *v
 }
 
 func safeName(ep endpointStatus) string {
