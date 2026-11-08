@@ -2,6 +2,7 @@ package evidence
 
 import (
 	"encoding/json"
+	"reflect"
 	"sync"
 	"time"
 )
@@ -77,7 +78,11 @@ func (c *Cache) Put(item Item) {
 	if c == nil || c.max <= 0 || item.ID == "" {
 		return
 	}
-	size := serializedItemSize(item)
+	if item.SourceFreshness == "" {
+		item.SourceFreshness = item.Freshness
+	}
+	stored := cloneItem(item)
+	size := serializedItemSize(stored)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.expireLocked(time.Now())
@@ -87,7 +92,7 @@ func (c *Cache) Put(item Item) {
 		return
 	}
 	c.removeLocked(item.ID)
-	c.items[item.ID] = cacheEntry{item: item, expiresAt: time.Now().Add(c.ttl), size: size}
+	c.items[item.ID] = cacheEntry{item: stored, expiresAt: time.Now().Add(c.ttl), size: size}
 	c.order = append(c.order, item.ID)
 	c.bytes += size
 	for (len(c.items) > c.max || c.bytes > c.maxBytes) && len(c.order) > 0 {
@@ -103,21 +108,90 @@ func (c *Cache) PutAll(items []Item) {
 	}
 }
 
-// Get gives a non-expired evidence item.
+// Get gives a non-expired evidence item. The caller receives a defensive copy.
 func (c *Cache) Get(id string) (Item, bool) {
 	if c == nil || id == "" {
 		return Item{}, false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.expireLocked(time.Now())
+	now := time.Now().UTC()
+	c.expireLocked(now)
 	e, ok := c.items[id]
 	if !ok {
 		return Item{}, false
 	}
-	it := e.item
+	it := cloneItem(e.item)
+	if it.SourceFreshness == "" {
+		it.SourceFreshness = it.Freshness
+	}
 	it.Freshness = FreshnessCached
+	readAt := now
+	it.CacheReadAt = &readAt
 	return it, true
+}
+
+// cloneItem copies reference-bearing fields so a cache caller cannot mutate
+// stored evidence or its byte accounting.
+func cloneItem(item Item) Item {
+	out := item
+	if item.Attributes != nil {
+		out.Attributes = cloneValue(item.Attributes).(map[string]any)
+	}
+	if item.WindowStart != nil {
+		start := *item.WindowStart
+		out.WindowStart = &start
+	}
+	if item.WindowEnd != nil {
+		end := *item.WindowEnd
+		out.WindowEnd = &end
+	}
+	if item.CacheReadAt != nil {
+		readAt := *item.CacheReadAt
+		out.CacheReadAt = &readAt
+	}
+	return out
+}
+
+// cloneValue copies maps and slices with their concrete types. Scalar values
+// are immutable and pass through unchanged.
+func cloneValue(value any) any {
+	if value == nil {
+		return nil
+	}
+	return cloneReflect(reflect.ValueOf(value)).Interface()
+}
+
+func cloneReflect(value reflect.Value) reflect.Value {
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return value
+		}
+		inner := cloneValue(value.Interface())
+		return reflect.ValueOf(inner)
+	case reflect.Map:
+		if value.IsNil() {
+			return value
+		}
+		out := reflect.MakeMapWithSize(value.Type(), value.Len())
+		iter := value.MapRange()
+		for iter.Next() {
+			out.SetMapIndex(iter.Key(), cloneReflect(iter.Value()))
+		}
+		return out
+	case reflect.Slice:
+		if value.IsNil() {
+			return value
+		}
+		out := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		for index := 0; index < value.Len(); index++ {
+			out.Index(index).Set(cloneReflect(value.Index(index)))
+		}
+		return out
+	default:
+		return value
+	}
 }
 
 // Stats gives counters for the retained cache state.

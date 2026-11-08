@@ -49,11 +49,12 @@ type systemRow struct {
 
 // Status gives a snapshot for systemName.
 func (c *Client) Status(ctx context.Context, serviceID, systemName string) (evidence.Item, error) {
-	retrievedAt := c.now()
-	list, observedAt, err := c.fetchSystems(ctx, retrievedAt)
+	requestedAt := c.now()
+	list, observedAt, err := c.fetchSystems(ctx, requestedAt)
 	if err != nil {
 		return evidence.Item{}, err
 	}
+	retrievedAt := c.now()
 	row, ok := findSystem(list, systemName)
 	if !ok {
 		cleanName, redactions, truncated := redaction.ApplyAndTruncate(c.Redact, systemName, 256)

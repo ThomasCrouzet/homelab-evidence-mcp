@@ -31,6 +31,12 @@ This file records project changes. Its format uses
 
 ### Fixed
 
+- Sample `retrieved_at` after the source response is decoded in all adapters,
+  so a slow request cannot report retrieval before collection.
+- Keep the source freshness in `source_freshness` and the cache read time in
+  `cache_read_at` when `get_evidence` serves an item from memory.
+- Store and return defensive copies of cached evidence attributes so caller
+  mutation cannot change retained evidence or byte accounting.
 - Validate ntfy message `id`, `event`, and `topic`, reject cross-topic rows,
   collapse duplicate ids, and count invalid or undated records without losing
   valid notifications.

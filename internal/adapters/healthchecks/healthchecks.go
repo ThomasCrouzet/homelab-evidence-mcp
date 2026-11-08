@@ -113,11 +113,12 @@ func (f Filter) selects() bool {
 
 // Status gives the current state of the selected checks.
 func (c *Client) Status(ctx context.Context, serviceID string, f Filter) ([]evidence.Item, error) {
-	retrievedAt := c.now()
-	checks, observedAt, err := c.list(ctx, retrievedAt)
+	requestedAt := c.now()
+	checks, observedAt, err := c.list(ctx, requestedAt)
 	if err != nil {
 		return nil, err
 	}
+	retrievedAt := c.now()
 	matched, err := selectChecks(checks, f)
 	if err != nil {
 		return nil, err
@@ -132,11 +133,12 @@ func (c *Client) Status(ctx context.Context, serviceID string, f Filter) ([]evid
 // FailedInWindow gives checks with a current state of down, grace, or paused.
 // The list route cannot prove a past incident or recovery.
 func (c *Client) FailedInWindow(ctx context.Context, serviceID string, f Filter, start, end time.Time) ([]evidence.Item, error) {
-	retrievedAt := c.now()
-	checks, observedAt, err := c.list(ctx, retrievedAt)
+	requestedAt := c.now()
+	checks, observedAt, err := c.list(ctx, requestedAt)
 	if err != nil {
 		return nil, err
 	}
+	retrievedAt := c.now()
 	var matched []check
 	if serviceID != "" || f.selects() {
 		matched, err = selectChecks(checks, f)
@@ -257,8 +259,8 @@ func tagsMatch(tagStr string, want []string) bool {
 // It keeps the service_status path as a current snapshot.
 func (c *Client) Transitions(ctx context.Context, serviceID string, f Filter, start, end time.Time) (TransitionResult, error) {
 	result := TransitionResult{}
-	retrievedAt := c.now()
-	checks, _, err := c.list(ctx, retrievedAt)
+	requestedAt := c.now()
+	checks, _, err := c.list(ctx, requestedAt)
 	if err != nil {
 		return result, err
 	}
@@ -346,10 +348,16 @@ func (c *Client) Transitions(ctx context.Context, serviceID string, f Filter, st
 			parsed = parsed[len(parsed)-maxFlipsPerCheck:]
 		}
 		for _, entry := range parsed {
-			item := c.transitionItem(serviceID, ch, entry.at, entry.up, retrievedAt, start, end)
+			item := c.transitionItem(serviceID, ch, entry.at, entry.up, requestedAt, start, end)
 			item.Order = len(result.Items)
 			result.Items = append(result.Items, item)
 		}
+	}
+	// The last history response defines the retrieval time for every kept item.
+	retrievedAt := c.now()
+	for index := range result.Items {
+		result.Items[index].RetrievedAt = retrievedAt
+		result.Items[index].Freshness = evidence.ComputeFreshness(result.Items[index].ObservedAt, retrievedAt)
 	}
 	if err := ctx.Err(); err != nil {
 		return result, err

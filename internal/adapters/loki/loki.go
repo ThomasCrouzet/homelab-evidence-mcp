@@ -72,7 +72,7 @@ func (s QueryStats) Discarded() int {
 
 // Search sends a query_range request and gives lines as evidence items.
 func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item, bool, error) {
-	now := c.now()
+	requestNow := c.now()
 	if opt.Selector == "" {
 		return nil, false, fmt.Errorf("loki selector is required")
 	}
@@ -83,7 +83,7 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 		return nil, false, fmt.Errorf("limit exceeds 1000")
 	}
 	if opt.End.IsZero() {
-		opt.End = now
+		opt.End = requestNow
 	}
 	if opt.Start.IsZero() || !opt.Start.Before(opt.End) {
 		return nil, false, fmt.Errorf("invalid time window")
@@ -132,6 +132,8 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 		return nil, false, fmt.Errorf("loki decode: unexpected result type")
 	}
 
+	// The response is decoded before the retrieval time is recorded.
+	retrievedAt := c.now()
 	maxLineBytes := c.MaxLineBytes
 	if maxLineBytes <= 0 {
 		maxLineBytes = 2048
@@ -184,7 +186,7 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 				SourceID:          streamSourceID(labels),
 				Kind:              evidence.KindLogLine,
 				ObservedAt:        ts,
-				RetrievedAt:       now,
+				RetrievedAt:       retrievedAt,
 				WindowStart:       timePtr(opt.Start),
 				WindowEnd:         timePtr(opt.End),
 				Summary:           sum,
@@ -192,7 +194,7 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 				Attributes:        attrs,
 				Truncated:         lineTruncated || summaryTruncated || labelsTruncated,
 				RedactionsApplied: rn + labelRedactions,
-				Freshness:         evidence.ComputeFreshness(ts, now),
+				Freshness:         evidence.ComputeFreshness(ts, retrievedAt),
 				Order:             position,
 			})
 			position++

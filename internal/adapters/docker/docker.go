@@ -36,11 +36,12 @@ type containerSummary struct {
 
 // Status gives the state selected for containerName.
 func (c *Client) Status(ctx context.Context, serviceID, containerName string) (evidence.Item, error) {
-	retrievedAt := c.now()
-	list, observedAt, err := c.list(ctx, retrievedAt)
+	requestedAt := c.now()
+	list, observedAt, err := c.list(ctx, requestedAt)
 	if err != nil {
 		return evidence.Item{}, err
 	}
+	retrievedAt := c.now()
 	ct, ok := findContainer(list, containerName)
 	if !ok {
 		cleanName, redactions, truncated := redaction.ApplyAndTruncate(c.Redact, containerName, 256)

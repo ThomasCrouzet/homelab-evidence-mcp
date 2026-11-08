@@ -38,6 +38,47 @@ func setup(t *testing.T, body any, status int) *Client {
 	}}
 }
 
+func TestStatus_RetrievedAfterCollection(t *testing.T) {
+	requestAt := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	collectedAt := requestAt.Add(2 * time.Second)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/containers/json") {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"Id": "abc", "Names": []string{"/app"}, "State": "running",
+		}})
+	}))
+	defer ts.Close()
+	// The HTTP client clock marks the response body read. The adapter clock
+	// gives the pre-request value on the first call and the post-request value
+	// on the second.
+	hc := httpx.NewLockedClient(httpx.Options{
+		Timeout: time.Second,
+		Now:     func() time.Time { return collectedAt },
+	})
+	_ = hc.RegisterDestination("docker", ts.URL)
+	calls := 0
+	cli := &Client{HTTP: hc, DestName: "docker", Now: func() time.Time {
+		calls++
+		if calls == 1 {
+			return requestAt
+		}
+		return collectedAt
+	}}
+	item, err := cli.Status(context.Background(), "svc", "app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !item.RetrievedAt.Equal(collectedAt) {
+		t.Fatalf("retrieved_at=%s, want %s", item.RetrievedAt, collectedAt)
+	}
+	if item.RetrievedAt.Before(item.ObservedAt) {
+		t.Fatalf("retrieved_at %s is before observed_at %s", item.RetrievedAt, item.ObservedAt)
+	}
+}
+
 func TestRunningHealthy(t *testing.T) {
 	cli := setup(t, []map[string]any{{
 		"Id": "abc123", "Names": []string{"/jellyfin"}, "Image": "jellyfin:latest",
