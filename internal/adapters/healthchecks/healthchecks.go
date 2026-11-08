@@ -346,7 +346,9 @@ func (c *Client) Transitions(ctx context.Context, serviceID string, f Filter, st
 			parsed = parsed[len(parsed)-maxFlipsPerCheck:]
 		}
 		for _, entry := range parsed {
-			result.Items = append(result.Items, c.transitionItem(serviceID, ch, entry.at, entry.up, retrievedAt, start, end))
+			item := c.transitionItem(serviceID, ch, entry.at, entry.up, retrievedAt, start, end)
+			item.Order = len(result.Items)
+			result.Items = append(result.Items, item)
 		}
 	}
 	if err := ctx.Err(); err != nil {

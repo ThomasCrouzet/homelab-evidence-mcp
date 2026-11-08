@@ -11,6 +11,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/adapters/gatus"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/adapters/healthchecks"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/adapters/loki"
+	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/adapters/ntfy"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/config"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/evidence"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/httpx"
@@ -288,19 +289,31 @@ func (a *App) collectBeszelWindow(ctx context.Context, serviceID string, ref *co
 }
 
 func (a *App) collectNtfy(ctx context.Context, serviceID string, ref *config.NtfyRef, start, end time.Time, limit int) (evidence.SourceOutcome, []evidence.Item) {
-	upstreamTruncated := false
-	localTruncated := false
+	result := ntfy.Result{}
 	outcome, items := a.withSourceTimeout(ctx, ref.Source, evidence.SourceNtfy, func(ctx context.Context) ([]evidence.Item, error) {
 		cli := a.ntfy[ref.Source]
 		if cli == nil {
 			return nil, fmt.Errorf("ntfy client missing")
 		}
-		result, upstream, local, err := cli.HistoryDetail(ctx, serviceID, ref.Topic, start, end, limit)
-		upstreamTruncated = upstream
-		localTruncated = local
-		return result, err
+		var err error
+		result, err = cli.HistoryDetail(ctx, serviceID, ref.Topic, start, end, limit)
+		return result.Items, err
 	})
-	markTruncated(&outcome, upstreamTruncated, localTruncated)
+	if outcome.Status == "ok" {
+		// The replay endpoint is a short-lived cache, not an archive. A
+		// successful empty replay cannot prove that no notification existed.
+		outcome.RetentionLimited = true
+		outcome.Complete = false
+		outcome.Discarded = result.Discarded
+		outcome.UnknownTimeRecords = result.UnknownTime
+		markTruncated(&outcome, result.UpstreamTruncated, result.LocalTruncated)
+		switch {
+		case result.Discarded > 0:
+			outcome.Reason = "partial_invalid_records"
+		case outcome.Reason == "":
+			outcome.Reason = "retention_limited"
+		}
+	}
 	markEmpty(&outcome)
 	return outcome, items
 }

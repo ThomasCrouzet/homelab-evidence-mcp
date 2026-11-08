@@ -34,17 +34,17 @@ func TestStdioNtfyTruncationOnCacheHits(t *testing.T) {
 		w.Header().Set("X-Messages-Truncated", "1")
 		w.Header().Set("Set-Cookie", "sid=sensitive-cookie-value")
 		w.Header().Set("X-Private", "private-header-value")
-		_, _ = fmt.Fprintf(w, `{"id":"truncated-1","time":%d,"event":"message","message":"only retained"}`+"\n", t0.Unix())
+		_, _ = fmt.Fprintf(w, `{"id":"truncated-1","time":%d,"event":"message","topic":"truncated","message":"only retained"}`+"\n", t0.Unix())
 	}))
 	defer upstream.Close()
 	complete := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = fmt.Fprintf(w, `{"id":"complete-1","time":%d,"event":"message","message":"complete"}`+"\n", t0.Unix())
+		_, _ = fmt.Fprintf(w, `{"id":"complete-1","time":%d,"event":"message","topic":"complete","message":"complete"}`+"\n", t0.Unix())
 	}))
 	defer complete.Close()
 	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprintf(w, `[
-			{"id":"local-1","time":%d,"event":"message","message":"first"},
-			{"id":"local-2","time":%d,"event":"message","message":"second"}
+			{"id":"local-1","time":%d,"event":"message","topic":"local","message":"first"},
+			{"id":"local-2","time":%d,"event":"message","topic":"local","message":"second"}
 		]`, t0.Unix(), t0.Add(time.Second).Unix())
 	}))
 	defer local.Close()

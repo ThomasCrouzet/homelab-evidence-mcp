@@ -57,7 +57,7 @@ func TestStdioAdapterCorrections(t *testing.T) {
 	defer lokiServer.Close()
 
 	ntfyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = fmt.Fprintf(w, `{"id":"notice","time":%d,"event":"message","message":"fixture"}`+"\n", base.Unix())
+		_, _ = fmt.Fprintf(w, `{"id":"notice","time":%d,"event":"message","topic":"secret-topic","message":"fixture"}`+"\n", base.Unix())
 	}))
 	defer ntfyServer.Close()
 
