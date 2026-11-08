@@ -334,12 +334,25 @@ func TestFailedCrons_GlobalRegistryScope(t *testing.T) {
 		Items []struct {
 			ServiceID string `json:"service_id"`
 		} `json:"items"`
+		Sources []struct {
+			Kind      string `json:"kind"`
+			ServiceID string `json:"service_id"`
+		} `json:"sources"`
 	}
 	if err := json.Unmarshal(b, &parsed); err != nil {
 		t.Fatal(err)
 	}
 	if len(parsed.Items) != 1 || parsed.Items[0].ServiceID != "media" {
 		t.Fatalf("global item attribution=%+v: %s", parsed.Items, s)
+	}
+	foundBinding := false
+	for _, source := range parsed.Sources {
+		if source.Kind == "healthchecks" && source.ServiceID == "media" {
+			foundBinding = true
+		}
+	}
+	if !foundBinding {
+		t.Fatalf("global source outcome has no binding identity: %s", s)
 	}
 }
 

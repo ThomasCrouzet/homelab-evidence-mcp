@@ -236,6 +236,7 @@ func (a *App) collectRegisteredFailedCrons(ctx context.Context, start, end time.
 		go func() {
 			defer wg.Done()
 			o, its := a.collectHCWindow(ctx, svc.ID, ref, start, end)
+			o.ServiceID = svc.ID
 			mu.Lock()
 			defer mu.Unlock()
 			outcomes = append(outcomes, o)

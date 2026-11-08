@@ -83,14 +83,16 @@ type Item struct {
 
 // SourceOutcome gives the result of a source query.
 type SourceOutcome struct {
-	SourceName string     `json:"source_name"`
-	Kind       SourceKind `json:"kind"`
-	Status     string     `json:"status"` // ok | error | skipped | timeout | absent | canceled
-	Reason     string     `json:"reason,omitempty"`
-	Error      string     `json:"error,omitempty"`
-	ItemCount  int        `json:"item_count"`
-	Complete   bool       `json:"complete"`
-	Truncated  bool       `json:"truncated"`
+	SourceName string `json:"source_name"`
+	// ServiceID identifies the binding when the outcome belongs to one.
+	ServiceID string     `json:"service_id,omitempty"`
+	Kind      SourceKind `json:"kind"`
+	Status    string     `json:"status"` // ok | error | skipped | timeout | absent | canceled
+	Reason    string     `json:"reason,omitempty"`
+	Error     string     `json:"error,omitempty"`
+	ItemCount int        `json:"item_count"`
+	Complete  bool       `json:"complete"`
+	Truncated bool       `json:"truncated"`
 	// UpstreamTruncated and LocalTruncated explain Truncated.
 	UpstreamTruncated bool `json:"upstream_truncated"`
 	LocalTruncated    bool `json:"local_truncated"`
@@ -160,6 +162,9 @@ func SortItems(items []Item) {
 		if a.Source != b.Source {
 			return a.Source < b.Source
 		}
+		if a.ServiceID != b.ServiceID {
+			return a.ServiceID < b.ServiceID
+		}
 		if a.Order != b.Order {
 			return a.Order < b.Order
 		}
@@ -175,6 +180,9 @@ func SortOutcomes(outcomes []SourceOutcome) {
 	sort.SliceStable(outcomes, func(i, j int) bool {
 		if outcomes[i].Kind != outcomes[j].Kind {
 			return outcomes[i].Kind < outcomes[j].Kind
+		}
+		if outcomes[i].ServiceID != outcomes[j].ServiceID {
+			return outcomes[i].ServiceID < outcomes[j].ServiceID
 		}
 		return outcomes[i].SourceName < outcomes[j].SourceName
 	})

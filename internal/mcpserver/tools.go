@@ -244,6 +244,7 @@ func (a *App) toolServiceStatus(ctx context.Context, _ *mcp.CallToolRequest, in 
 		add := func(o evidence.SourceOutcome, its ...evidence.Item) {
 			mu.Lock()
 			defer mu.Unlock()
+			o.ServiceID = svc.ID
 			sources = append(sources, o)
 			items = append(items, its...)
 		}
@@ -356,6 +357,7 @@ func (a *App) toolIncidentContext(ctx context.Context, _ *mcp.CallToolRequest, i
 		add := func(o evidence.SourceOutcome, its ...evidence.Item) {
 			mu.Lock()
 			defer mu.Unlock()
+			o.ServiceID = svc.ID
 			sources = append(sources, o)
 			items = append(items, its...)
 		}
@@ -494,6 +496,7 @@ func (a *App) toolSearchLogs(ctx context.Context, _ *mcp.CallToolRequest, in sea
 		ctx, cancel := context.WithTimeout(ctx, a.Cfg.Limits.TotalTimeout)
 		defer cancel()
 		o, items := a.collectLoki(ctx, svc.ID, svc.Sources.Loki, winStart, winEnd, in.Text, in.Regex, limit)
+		o.ServiceID = svc.ID
 		if o.Status != "ok" {
 			sourceErr := errors.New(o.Error)
 			if o.Error == "" {
@@ -554,6 +557,7 @@ func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in fa
 				return a.toolError("failed_crons", sid, fmt.Errorf("service %s has no healthchecks binding", sid))
 			}
 			o, its := a.collectHCWindow(ctx, svc.ID, svc.Sources.Healthchecks, winStart, winEnd)
+			o.ServiceID = svc.ID
 			sources = append(sources, o)
 			items = append(items, its...)
 		} else {
