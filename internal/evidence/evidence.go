@@ -73,6 +73,8 @@ type Item struct {
 	// SourceFreshness keeps the source-derived age after a cache delivery
 	// changes Freshness to cached.
 	SourceFreshness Freshness `json:"source_freshness,omitempty"`
+	// IdentityUnverified marks a source record without a stable unique identity.
+	IdentityUnverified bool `json:"identity_unverified,omitempty"`
 	// CacheReadAt records the current cache read without changing the source
 	// collection time in RetrievedAt.
 	CacheReadAt *time.Time `json:"cache_read_at,omitempty"`
