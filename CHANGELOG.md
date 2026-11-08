@@ -31,6 +31,12 @@ This file records project changes. Its format uses
 
 ### Fixed
 
+- Validate every returned Loki stream against the configured equality labels
+  and discard a mismatched stream with an incomplete source outcome.
+- Derive a bounded process-local Loki stream identity from the complete label
+  map, so distinct streams cannot collide after label allowlisting.
+- Prefer a Loki `level`/`severity` label and structured level field over
+  keyword guesses, and do not report negated or zero-count phrases as errors.
 - Rebuild the incident `factual_summary` and item warnings from the retained
   items after compact selection, while source coverage warnings stay visible.
 - Enforce the compact byte budget after the summary rebuild. A metadata-only

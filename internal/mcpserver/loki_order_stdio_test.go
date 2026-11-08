@@ -43,7 +43,7 @@ func TestStdioLokiStableOrdering(t *testing.T) {
 				"resultType": "streams",
 				"result": []map[string]any{
 					{"stream": map[string]string{"container": "one"}, "values": values},
-					{"stream": map[string]string{"container": "two"}, "values": [][]string{
+					{"stream": map[string]string{"container": "one", "pod": "two"}, "values": [][]string{
 						{strconv.FormatInt(t0.UnixNano(), 10), "other-stream"},
 					}},
 				},
