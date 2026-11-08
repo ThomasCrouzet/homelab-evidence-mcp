@@ -3,6 +3,11 @@ package loki
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -31,6 +37,7 @@ var allowedLabels = map[string]struct{}{
 	"service":   {},
 	"filename":  {},
 	"level":     {},
+	"severity":  {},
 	"compose":   {},
 }
 
@@ -42,6 +49,9 @@ type Client struct {
 	Redact       *redaction.Engine
 	Now          func() time.Time
 	MaxLineBytes int
+
+	streamOnce sync.Once
+	streamKey  []byte
 }
 
 // QueryOptions contains the limits for a log search.
@@ -63,11 +73,14 @@ type QueryOptions struct {
 type QueryStats struct {
 	InvalidTimestamps int
 	IncompleteRecords int
+	// MismatchedRecords counts lines in a stream that does not satisfy the
+	// configured equality selector.
+	MismatchedRecords int
 }
 
 // Discarded gives the number of unusable source records.
 func (s QueryStats) Discarded() int {
-	return s.InvalidTimestamps + s.IncompleteRecords
+	return s.InvalidTimestamps + s.IncompleteRecords + s.MismatchedRecords
 }
 
 // Search sends a query_range request and gives lines as evidence items.
@@ -89,6 +102,10 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 		return nil, false, fmt.Errorf("invalid time window")
 	}
 
+	equality, err := parseEqualitySelector(opt.Selector)
+	if err != nil {
+		return nil, false, err
+	}
 	q, err := buildQuery(opt.Selector, opt.Text, opt.Regex)
 	if err != nil {
 		return nil, false, err
@@ -147,6 +164,13 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 	var items []evidence.Item
 	position := 0
 	for _, stream := range raw.Data.Result {
+		if !labelsMatch(stream.Stream, equality) {
+			if opt.Stats != nil {
+				opt.Stats.MismatchedRecords += len(stream.Values)
+			}
+			continue
+		}
+		streamID := c.streamRef(stream.Stream)
 		labels, labelRedactions, labelsTruncated := c.filterLabels(stream.Stream)
 		for _, pair := range stream.Values {
 			if len(pair) < 2 {
@@ -179,8 +203,10 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 			if utf8.RuneCountInString(sum) > 200 {
 				sum, summaryTruncated = redaction.Truncate(sum, 200)
 			}
+			severity, severitySource := severityFor(labels, cleaned)
 			attrs := map[string]any{
-				"line": cleaned,
+				"line":            cleaned,
+				"severity_source": severitySource,
 			}
 			for k, v := range labels {
 				attrs["label_"+k] = v
@@ -189,14 +215,14 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 				ID:                evidence.NewOpaqueID("ev"),
 				ServiceID:         opt.ServiceID,
 				Source:            evidence.SourceLoki,
-				SourceID:          streamSourceID(labels),
+				SourceID:          streamID,
 				Kind:              evidence.KindLogLine,
 				ObservedAt:        ts,
 				RetrievedAt:       retrievedAt,
 				WindowStart:       timePtr(opt.Start),
 				WindowEnd:         timePtr(opt.End),
 				Summary:           sum,
-				Severity:          severityFromLine(cleaned),
+				Severity:          severity,
 				Attributes:        attrs,
 				Truncated:         lineTruncated || summaryTruncated || labelsTruncated,
 				RedactionsApplied: rn + labelRedactions,
@@ -212,20 +238,120 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 	return kept, truncated, nil
 }
 
-func streamSourceID(labels map[string]string) string {
-	if len(labels) == 0 {
-		return "stream"
-	}
+// streamRef gives a bounded process-local stream identity from the complete
+// label map. It is stable for the process lifetime and never exposes a label
+// that the output allowlist removes.
+func (c *Client) streamRef(labels map[string]string) string {
+	c.streamOnce.Do(func() {
+		key := make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			key = []byte("homelab-evidence-loki-stream-identity")
+		}
+		c.streamKey = key
+	})
+	mac := hmac.New(sha256.New, c.streamKey)
 	keys := make([]string, 0, len(labels))
-	for k := range labels {
-		keys = append(keys, k)
+	for key := range labels {
+		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	parts := make([]string, 0, len(keys))
-	for _, k := range keys {
-		parts = append(parts, k+"="+labels[k])
+	var length [8]byte
+	for _, key := range keys {
+		value := labels[key]
+		binary.BigEndian.PutUint64(length[:], uint64(len(key)))
+		_, _ = mac.Write(length[:])
+		_, _ = mac.Write([]byte(key))
+		binary.BigEndian.PutUint64(length[:], uint64(len(value)))
+		_, _ = mac.Write(length[:])
+		_, _ = mac.Write([]byte(value))
 	}
-	return strings.Join(parts, ",")
+	return "stream_" + hex.EncodeToString(mac.Sum(nil)[:10])
+}
+
+var equalityRe = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"`)
+
+// parseEqualitySelector extracts the label equality predicates from the
+// configured selector. It fails closed on a selector that has no equality set.
+func parseEqualitySelector(selector string) (map[string]string, error) {
+	start := strings.Index(selector, "{")
+	end := strings.Index(selector, "}")
+	if start < 0 || end <= start {
+		return nil, fmt.Errorf("loki selector must contain an equality label set")
+	}
+	body := selector[start+1 : end]
+	if strings.Contains(body, "=~") || strings.Contains(body, "!=") {
+		return nil, fmt.Errorf("loki selector supports equality labels only")
+	}
+	out := map[string]string{}
+	for _, match := range equalityRe.FindAllStringSubmatch(body, -1) {
+		out[match[1]] = match[2]
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("loki selector must contain an equality label")
+	}
+	return out, nil
+}
+
+func labelsMatch(labels, want map[string]string) bool {
+	for key, value := range want {
+		have, ok := labels[key]
+		if !ok || have != value {
+			return false
+		}
+	}
+	return true
+}
+
+var (
+	structuredLevelRe = regexp.MustCompile(`(?i)(?:^|[\s,;{])\s*"?(?:level|severity|lvl)"?\s*[=:]\s*"?([a-z]+)"?`)
+	negatedIssueRe    = regexp.MustCompile(`(?i)\b(?:no|zero|without|not)\s+(?:errors?|failures?|warnings?|timeouts?|fails?)\b`)
+	errorWordRe       = regexp.MustCompile(`(?i)\b(?:error|errors|failed|failure|timeout|timeouts)\b`)
+	warningWordRe     = regexp.MustCompile(`(?i)\bwarn(?:ing)?s?\b`)
+)
+
+// severityFor prefers a source label, then a bounded structured level field,
+// then conservative whole-word keywords. It never claims critical from an
+// arbitrary word in an untrusted message.
+func severityFor(labels map[string]string, line string) (evidence.Severity, string) {
+	for _, key := range []string{"level", "severity"} {
+		if value, ok := labels[key]; ok {
+			if severity, known := severityFromLevel(value); known {
+				return severity, "label"
+			}
+			return evidence.SeverityUnknown, "label"
+		}
+	}
+	if match := structuredLevelRe.FindStringSubmatch(line); match != nil {
+		if severity, known := severityFromLevel(match[1]); known {
+			return severity, "structured"
+		}
+		return evidence.SeverityUnknown, "structured"
+	}
+	// Remove explicit negated phrases so "no errors detected" is not an error.
+	stripped := negatedIssueRe.ReplaceAllString(line, " ")
+	switch {
+	case errorWordRe.MatchString(stripped):
+		return evidence.SeverityError, "text"
+	case warningWordRe.MatchString(stripped):
+		return evidence.SeverityWarning, "text"
+	default:
+		return evidence.SeverityInfo, "text"
+	}
+}
+
+func severityFromLevel(value string) (evidence.Severity, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "trace", "debug", "info", "notice":
+		return evidence.SeverityInfo, true
+	case "warn", "warning":
+		return evidence.SeverityWarning, true
+	case "error", "err":
+		return evidence.SeverityError, true
+	case "fatal", "crit", "critical", "panic":
+		return evidence.SeverityCritical, true
+	default:
+		return evidence.SeverityUnknown, false
+	}
 }
 
 type lokiResponse struct {
@@ -320,20 +446,6 @@ func parseNano(s string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return time.Unix(sec, nsec).UTC(), true
-}
-
-func severityFromLine(line string) evidence.Severity {
-	l := strings.ToLower(line)
-	switch {
-	case strings.Contains(l, "fatal"), strings.Contains(l, "panic"):
-		return evidence.SeverityCritical
-	case strings.Contains(l, "error"), strings.Contains(l, "timeout"), strings.Contains(l, "fail"):
-		return evidence.SeverityError
-	case strings.Contains(l, "warn"):
-		return evidence.SeverityWarning
-	default:
-		return evidence.SeverityInfo
-	}
 }
 
 func (c *Client) redact(s string) (string, int) {

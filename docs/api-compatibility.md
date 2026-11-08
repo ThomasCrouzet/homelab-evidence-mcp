@@ -86,8 +86,20 @@ The Loki adapter has this behavior:
 - The request asks for one more line than the requested limit.
 - The adapter sorts lines chronologically and keeps the newest requested lines.
 - Equal timestamps in one stream keep their response position. Across streams,
-  the allowlisted stream identity is the stable tie-break. Opaque evidence ids
-  do not decide order or truncation.
+  the stream identity is the stable tie-break. Opaque evidence ids do not
+  decide order or truncation.
+- The adapter parses the equality labels in the configured selector before the
+  request. A returned stream that does not contain every configured label
+  value is discarded. It cannot become evidence for the service.
+- `source_id` is a bounded process-local HMAC of the complete label map before
+  allowlisting and redaction. Different full label maps cannot collapse into
+  one identity, and labels outside the allowlist never appear in output. The
+  identity is stable for the process lifetime and can change after a restart.
+- Severity prefers an allowlisted `level` or `severity` label, then a bounded
+  `level=`/`severity=` field or JSON field. A negated phrase such as "no
+  errors detected" and a token such as `failure_count=0` is not an error. The
+  `attributes.severity_source` value shows `label`, `structured`, or `text`.
+  Severity is presentation only and does not prove an incident.
 - Duplicate lines are preserved.
 - The additional line sets `truncated` when the result reaches the limit.
 - The response contains streams with `[nanosecond_timestamp, line]` pairs.

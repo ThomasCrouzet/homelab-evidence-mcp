@@ -37,8 +37,9 @@ decide the boundary. ntfy same-second messages keep the source receipt order.
 Before emission, the server cleans and redacts source identifiers, summaries,
 and text attributes. It uses size limits for these values. Numeric fields and
 closed vocabularies keep their structure. The server derives the Loki
-`source_id` from allowlisted stream labels. ntfy keeps the message body with
-a size limit in
+`source_id` from a bounded process-local HMAC of the complete stream label map.
+Allowlisted labels stay in readable attributes. ntfy keeps the message body
+with a size limit in
 `attributes.message`.
 
 ## Meaning of `observed_at`

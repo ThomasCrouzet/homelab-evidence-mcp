@@ -130,6 +130,114 @@ func TestSearch_InstructionLikeMarked(t *testing.T) {
 	}
 }
 
+func TestSearch_RejectsMismatchedStream(t *testing.T) {
+	t0 := time.Date(2026, 7, 25, 11, 12, 0, 0, time.UTC)
+	cli := setup(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "success",
+			"data": map[string]any{
+				"resultType": "streams",
+				"result": []map[string]any{
+					{"stream": map[string]string{"container": "api"}, "values": [][]string{{nano(t0), "owned"}}},
+					{"stream": map[string]string{"container": "database"}, "values": [][]string{{nano(t0), "foreign"}, {nano(t0), "foreign-two"}}},
+				},
+			},
+		})
+	})
+	stats := QueryStats{}
+	items, _, err := cli.Search(context.Background(), QueryOptions{
+		ServiceID: "api", Selector: `{container="api"}`, Start: t0.Add(-time.Minute), End: t0.Add(time.Minute),
+		Limit: 10, Stats: &stats,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Attributes["line"] != "owned" {
+		t.Fatalf("mismatched stream attributed to the service: %+v", items)
+	}
+	if stats.MismatchedRecords != 2 || stats.Discarded() != 2 {
+		t.Fatalf("stats=%+v", stats)
+	}
+}
+
+func TestSearch_StreamIdentityIsCollisionResistant(t *testing.T) {
+	t0 := time.Date(2026, 7, 25, 11, 12, 0, 0, time.UTC)
+	cli := setup(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "success",
+			"data": map[string]any{
+				"resultType": "streams",
+				"result": []map[string]any{
+					{"stream": map[string]string{"service": "backend", "job": "api,namespace=prod"}, "values": [][]string{{nano(t0), "a"}}},
+					{"stream": map[string]string{"service": "backend", "job": "api", "namespace": "prod"}, "values": [][]string{{nano(t0), "b"}}},
+					{"stream": map[string]string{"service": "backend", "job": "api", "namespace": "prod", "instance": "private-one"}, "values": [][]string{{nano(t0), "c"}}},
+				},
+			},
+		})
+	})
+	items, _, err := cli.Search(context.Background(), QueryOptions{
+		ServiceID: "backend", Selector: `{service="backend"}`, Start: t0.Add(-time.Minute), End: t0.Add(time.Minute), Limit: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("items=%d", len(items))
+	}
+	seen := map[string]bool{}
+	for _, item := range items {
+		if !strings.HasPrefix(item.SourceID, "stream_") || seen[item.SourceID] {
+			t.Fatalf("stream identity collision: %+v", item.SourceID)
+		}
+		seen[item.SourceID] = true
+		for key := range item.Attributes {
+			if strings.Contains(key, "instance") {
+				t.Fatalf("non-allowlisted label leaked: %v", item.Attributes)
+			}
+		}
+	}
+}
+
+func TestSeverityPolicy(t *testing.T) {
+	cases := []struct {
+		name       string
+		labels     map[string]string
+		line       string
+		want       evidence.Severity
+		wantSource string
+	}{
+		{name: "negated errors", line: "no errors detected", want: evidence.SeverityInfo, wantSource: "text"},
+		{name: "zero failure count", line: "failure_count=0", want: evidence.SeverityInfo, wantSource: "text"},
+		{name: "structured error", line: "level=error request failed", want: evidence.SeverityError, wantSource: "structured"},
+		{name: "JSON critical", line: `{"level":"critical","msg":"down"}`, want: evidence.SeverityCritical, wantSource: "structured"},
+		{name: "label warning wins", labels: map[string]string{"level": "warn"}, line: "completed", want: evidence.SeverityWarning, wantSource: "label"},
+		{name: "unknown label", labels: map[string]string{"level": "bogus"}, line: "completed", want: evidence.SeverityUnknown, wantSource: "label"},
+		{name: "timeout word", line: "timeout dialing upstream", want: evidence.SeverityError, wantSource: "text"},
+		{name: "panic is not critical alone", line: "panic handling documented", want: evidence.SeverityInfo, wantSource: "text"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, source := severityFor(tc.labels, tc.line)
+			if got != tc.want || source != tc.wantSource {
+				t.Fatalf("severity=%s source=%s, want %s/%s", got, source, tc.want, tc.wantSource)
+			}
+		})
+	}
+}
+
+func TestParseEqualitySelector(t *testing.T) {
+	got, err := parseEqualitySelector(`{app="api", namespace="prod"} |= "error"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["app"] != "api" || got["namespace"] != "prod" {
+		t.Fatalf("selector=%v", got)
+	}
+	if _, err := parseEqualitySelector(`{app=~"api"}`); err == nil {
+		t.Fatal("regex matcher must fail closed")
+	}
+}
+
 func TestSearch_UsesRFC3339AndEndExclusive(t *testing.T) {
 	start := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
 	end := start.Add(time.Minute)
@@ -297,8 +405,11 @@ func TestSearch_EnforcesLimitAgainstOversizedResponse(t *testing.T) {
 	if items[0].Attributes["line"] != "two" || items[1].Attributes["line"] != "three" {
 		t.Fatalf("wanted newest lines, got %+v %+v", items[0].Attributes, items[1].Attributes)
 	}
-	if items[0].SourceID != "app=x" {
+	if !strings.HasPrefix(items[0].SourceID, "stream_") {
 		t.Fatalf("source_id=%q", items[0].SourceID)
+	}
+	if items[0].Attributes["label_app"] != "x" {
+		t.Fatalf("display label=%v", items[0].Attributes["label_app"])
 	}
 }
 
@@ -309,7 +420,7 @@ func TestSearch_RedactsBeforeTruncation(t *testing.T) {
 			"status": "success",
 			"data": map[string]any{
 				"result": []map[string]any{{
-					"stream": map[string]string{},
+					"stream": map[string]string{"app": "x"},
 					"values": [][]string{{nano(ts), "prefix ghp_abcdefghijklmnopqrstuvwxyz0123456789"}},
 				}},
 			},
@@ -346,7 +457,7 @@ func TestSearch_EqualTimestampOrderIndependentOfOpaqueIDs(t *testing.T) {
 						},
 					},
 					{
-						"stream": map[string]string{"container": "two"},
+						"stream": map[string]string{"container": "one", "pod": "two"},
 						"values": [][]string{{nano(t0), "other-stream"}},
 					},
 				},
@@ -394,7 +505,7 @@ func TestSearch_InvalidTimestampSkipped(t *testing.T) {
 			"status": "success",
 			"data": map[string]any{
 				"result": []map[string]any{{
-					"stream": map[string]string{},
+					"stream": map[string]string{"app": "x"},
 					"values": [][]string{{"not-a-number", "x"}, {nano(now), "ok"}},
 				}},
 			},
