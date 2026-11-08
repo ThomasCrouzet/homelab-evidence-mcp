@@ -308,9 +308,9 @@ func TestIncidentContext_ExcludesCurrentSnapshotsFromHistoricalWindow(t *testing
 	}
 }
 
-func TestFailedCrons_GlobalAllHC(t *testing.T) {
+func TestFailedCrons_GlobalRegistryScope(t *testing.T) {
 	app := fullFixtureApp(t)
-	// Without service_id, get data from all Healthchecks clients.
+	// Without service_id, the global path reads only registered bindings.
 	_, out, err := app.toolFailedCrons(context.Background(), nil, failedCronsIn{
 		Duration: "24h",
 	})
@@ -322,21 +322,24 @@ func TestFailedCrons_GlobalAllHC(t *testing.T) {
 	if strings.Contains(s, "LEAKME") {
 		t.Fatal("ping url leaked")
 	}
-	// The global path must include media-cron and other-cron.
 	if !strings.Contains(s, "media-cron") {
 		t.Fatalf("media-cron missing: %s", s)
 	}
-	if !strings.Contains(s, "other-cron") {
-		t.Fatalf("other-cron missing from global failed_crons: %s", s)
+	// other-cron is not bound by any registered service. The global path must
+	// not disclose it.
+	if strings.Contains(s, "other-cron") {
+		t.Fatalf("unregistered check disclosed: %s", s)
 	}
 	var parsed struct {
-		Items []map[string]any `json:"items"`
+		Items []struct {
+			ServiceID string `json:"service_id"`
+		} `json:"items"`
 	}
 	if err := json.Unmarshal(b, &parsed); err != nil {
 		t.Fatal(err)
 	}
-	if len(parsed.Items) < 2 {
-		t.Fatalf("expected >=2 global cron items, got %d: %s", len(parsed.Items), s)
+	if len(parsed.Items) != 1 || parsed.Items[0].ServiceID != "media" {
+		t.Fatalf("global item attribution=%+v: %s", parsed.Items, s)
 	}
 }
 

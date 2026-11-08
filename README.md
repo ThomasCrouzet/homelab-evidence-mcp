@@ -101,6 +101,13 @@ Invalid arguments and exhausted budgets produce tool errors.
 It collects Gatus, Docker, Healthchecks, and Beszel snapshots.
 `search_logs` accepts optional `text`, `regex`, and `limit` arguments.
 `failed_crons` selects current `down`, `grace`, and `paused` states.
+Without `service_id`, it reads only Healthchecks bindings declared in the
+service registry. It does not enumerate unbound checks in a source. When a
+configured Healthchecks source has no registered binding, the result reports
+`outside_registry_scope` and stays incomplete.
+A `check_name` that matches more than one check by name or slug fails with
+`ambiguous_binding`. Use `check_unique_key` or `check_uuid` for one check, or
+`check_tags` for deliberate multi-check aggregation.
 `get_evidence` reports an error when its item expires or is evicted.
 
 Follow the [incident playbook](docs/playbook.md) to choose tools and interpret

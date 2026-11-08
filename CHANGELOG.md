@@ -31,6 +31,15 @@ This file records project changes. Its format uses
 
 ### Fixed
 
+- Send Healthchecks `flips` time filters as Unix seconds, widen the exclusive
+  upstream bounds, and keep the requested inclusive window locally.
+- Reject an ambiguous Healthchecks `check_name` that matches more than one
+  check by name or slug, and keep tag aggregation for deliberate multi-check
+  bindings.
+- Keep validated Healthchecks transitions when a later check returns 401 or
+  403, and report query, failure, unauthorized, and missing-identity counts.
+- Scope `failed_crons` without `service_id` to registered bindings and report
+  `outside_registry_scope` for a configured source with no registered binding.
 - Redact complete `Cookie` and `Set-Cookie` header values instead of the first
   cookie pair only.
 - Check the caller context before a source cache read or network request, and

@@ -496,17 +496,10 @@ func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in fa
 		defer cancel()
 
 		var (
-			mu      sync.Mutex
 			items   []evidence.Item
 			sources []evidence.SourceOutcome
-			wg      sync.WaitGroup
 		)
-		add := func(o evidence.SourceOutcome, its ...evidence.Item) {
-			mu.Lock()
-			defer mu.Unlock()
-			sources = append(sources, o)
-			items = append(items, its...)
-		}
+		scopeExcluded := false
 
 		if sid := serviceID; sid != "" {
 			svc, err := a.Registry.Require(sid)
@@ -520,24 +513,24 @@ func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in fa
 			sources = append(sources, o)
 			items = append(items, its...)
 		} else {
-			for name, cli := range a.hc {
-				name, cli := name, cli
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					o, its := a.collectHCAllFailed(ctx, name, cli, winStart, winEnd)
-					add(o, its...)
-				}()
-			}
-			wg.Wait()
+			// Default global scope is the declared service registry. A
+			// configured source with no registered binding stays excluded and
+			// explicitly reports that limit instead of exposing every check.
+			registeredOutcomes, registeredItems, excluded := a.collectRegisteredFailedCrons(ctx, winStart, winEnd)
+			sources = append(sources, registeredOutcomes...)
+			items = append(items, registeredItems...)
 			if len(a.hc) == 0 {
 				sources = append(sources, evidence.SourceOutcome{Kind: evidence.SourceHealthchecks, Status: "absent"})
 			}
+			scopeExcluded = excluded
 		}
 		evidence.SortItems(items)
 		evidence.SortOutcomes(sources)
 		normalizeOutcomes(sources)
 		complete, anyOK, configured := outcomeCoverage(sources)
+		if scopeExcluded {
+			complete = false
+		}
 		items, truncated := evidence.KeepNewest(items, a.Cfg.Limits.MaxEvidenceItems)
 		a.Cache.PutAll(items)
 		if items == nil {

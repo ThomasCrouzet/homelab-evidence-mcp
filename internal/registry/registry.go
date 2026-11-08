@@ -104,6 +104,15 @@ func (r *Registry) view(id string) ServiceView {
 // Len gives the number of services.
 func (r *Registry) Len() int { return len(r.order) }
 
+// All gives every service in canonical id order.
+func (r *Registry) All() []config.Service {
+	out := make([]config.Service, 0, len(r.order))
+	for _, id := range r.order {
+		out = append(out, r.byID[id])
+	}
+	return out
+}
+
 // Require gives the service or an error.
 func (r *Registry) Require(id string) (config.Service, error) {
 	s, ok := r.get(id)

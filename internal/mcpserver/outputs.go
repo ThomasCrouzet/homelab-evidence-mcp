@@ -123,7 +123,8 @@ func applyStatusEnum(schema *jsonschema.Schema) {
 				"unsupported_history", "partial_invalid_records", "truncated",
 				"timeout", "canceled", "upstream_error", "authentication_failed",
 				"not_queried_by_tool", "unknown_history_coverage", "partial_fetch",
-				"missing_identity", "omitted_checks")
+				"missing_identity", "omitted_checks", "ambiguous_binding",
+				"outside_registry_scope")
 		case "cache_state":
 			property.Enum = stringEnum("", "hit", "miss", "disabled")
 		}

@@ -182,7 +182,12 @@
                 "additionalProperties": false,
                 "properties": {
                   "source": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
-                  "check_name": { "type": "string", "minLength": 1, "maxLength": 256 },
+                  "check_name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "description": "Match one check by name or slug. More than one match is an ambiguous_binding error. Prefer check_unique_key or check_uuid for one check."
+                  },
                   "check_tags": {
                     "type": "array",
                     "minItems": 1,

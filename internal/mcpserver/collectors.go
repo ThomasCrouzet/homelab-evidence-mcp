@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/adapters/healthchecks"
@@ -144,27 +145,33 @@ func (a *App) collectHCWindow(ctx context.Context, serviceID string, ref *config
 			transition, err = cli.Transitions(ctx, serviceID, f, start, end)
 			return transition.Items, err
 		})
-		if outcome.Status != "ok" {
-			return outcome, items
-		}
+		outcome.QueriedChecks = transition.Requests
+		outcome.FailedChecks = transition.Failures
+		outcome.UnauthorizedChecks = transition.Unauthorized
+		outcome.MissingIdentityChecks = transition.MissingIdentity
 		outcome.Omitted = transition.Omitted
 		outcome.Discarded = transition.Discarded
 		outcome.LocalTruncated = transition.Truncated
 		outcome.Truncated = transition.Truncated
 		// The upstream history endpoint does not document complete retention.
 		outcome.Complete = false
-		outcome.Reason = "unknown_history_coverage"
-		switch {
-		case transition.Failures > 0:
-			outcome.Reason = "partial_fetch"
-			outcome.Error = fmt.Sprintf("%d healthcheck history request(s) failed", transition.Failures)
-		case transition.MissingIdentity > 0 && len(items) == 0:
-			outcome.Reason = "missing_identity"
-			outcome.Error = "no selected check exposes a unique_key for history"
-		case transition.Omitted > 0:
-			outcome.Reason = "omitted_checks"
-		case transition.Truncated:
-			outcome.Reason = "truncated"
+		if outcome.Status == "ok" {
+			outcome.Reason = "unknown_history_coverage"
+			switch {
+			case transition.Unauthorized > 0:
+				outcome.Reason = "authentication_failed"
+				outcome.Error = fmt.Sprintf("%d healthcheck history request(s) returned 401 or 403", transition.Unauthorized)
+			case transition.Failures > 0:
+				outcome.Reason = "partial_fetch"
+				outcome.Error = fmt.Sprintf("%d healthcheck history request(s) failed", transition.Failures)
+			case transition.MissingIdentity > 0:
+				outcome.Reason = "missing_identity"
+				outcome.Error = fmt.Sprintf("%d selected check(s) expose no unique_key for history", transition.MissingIdentity)
+			case transition.Omitted > 0:
+				outcome.Reason = "omitted_checks"
+			case transition.Truncated:
+				outcome.Reason = "truncated"
+			}
 		}
 		return outcome, items
 	}
@@ -184,13 +191,49 @@ func (a *App) collectHCWindow(ctx context.Context, serviceID string, ref *config
 	return outcome, items
 }
 
-func (a *App) collectHCAllFailed(ctx context.Context, name string, cli *healthchecks.Client, start, end time.Time) (evidence.SourceOutcome, []evidence.Item) {
-	outcome, items := a.withSourceTimeout(ctx, name, evidence.SourceHealthchecks, func(ctx context.Context) ([]evidence.Item, error) {
-		return cli.FailedInWindow(ctx, "", healthchecks.Filter{}, start, end)
-	})
-	markSnapshotHistory(&outcome, start, end)
-	markEmpty(&outcome)
-	return outcome, items
+// collectRegisteredFailedCrons queries only the Healthchecks bindings declared
+// in the service registry. It does not enumerate unbound checks in a source.
+func (a *App) collectRegisteredFailedCrons(ctx context.Context, start, end time.Time) ([]evidence.SourceOutcome, []evidence.Item, bool) {
+	var (
+		mu       sync.Mutex
+		items    []evidence.Item
+		outcomes []evidence.SourceOutcome
+		wg       sync.WaitGroup
+		bound    = map[string]bool{}
+		excluded bool
+	)
+	for _, svc := range a.Registry.All() {
+		ref := svc.Sources.Healthchecks
+		if ref == nil {
+			continue
+		}
+		bound[ref.Source] = true
+		svc, ref := svc, ref
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			o, its := a.collectHCWindow(ctx, svc.ID, ref, start, end)
+			mu.Lock()
+			defer mu.Unlock()
+			outcomes = append(outcomes, o)
+			items = append(items, its...)
+		}()
+	}
+	wg.Wait()
+	for name := range a.hc {
+		if bound[name] {
+			continue
+		}
+		excluded = true
+		outcomes = append(outcomes, evidence.SourceOutcome{
+			SourceName: name,
+			Kind:       evidence.SourceHealthchecks,
+			Status:     "skipped",
+			Reason:     "outside_registry_scope",
+			Complete:   false,
+		})
+	}
+	return outcomes, items, excluded
 }
 
 func (a *App) collectBeszel(ctx context.Context, serviceID string, ref *config.BeszelRef) (evidence.SourceOutcome, []evidence.Item) {
@@ -265,8 +308,9 @@ func (a *App) withSourceTimeout(ctx context.Context, sourceName string, kind evi
 	cacheState, cacheAge := info.Snapshot()
 	if err != nil {
 		outcome := a.sourceErrorOutcome(ctx, sctx, sourceName, kind, err, t0)
+		outcome.ItemCount = len(items)
 		outcome.CacheState, outcome.CacheAgeS = cacheState, cacheAge
-		return outcome, nil
+		return outcome, items
 	}
 	return evidence.SourceOutcome{
 		SourceName: sourceName,
@@ -306,6 +350,9 @@ func (a *App) sourceErrorOutcome(ctx, sourceCtx context.Context, sourceName stri
 func reasonForError(err error) string {
 	if errors.Is(err, healthchecks.ErrNoMatch) {
 		return "unmatched_binding"
+	}
+	if errors.Is(err, healthchecks.ErrAmbiguousBinding) {
+		return "ambiguous_binding"
 	}
 	if err == nil {
 		return "upstream_error"
