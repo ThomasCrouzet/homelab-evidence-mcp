@@ -83,7 +83,7 @@ func TestStdioRedactionRules(t *testing.T) {
 					"data": map[string]any{
 						"resultType": "streams",
 						"result": []map[string]any{{
-							"stream": map[string]string{},
+							"stream": map[string]string{"service": ""},
 							"values": [][]string{{fmt.Sprint(time.Now().UTC().Add(-time.Minute).UnixNano()), test.line}},
 						}},
 					},
@@ -110,7 +110,7 @@ services:
     sources:
       loki:
         source: loki
-        selector: '{service="fixture"}'
+        selector: '{service=""}'
 %s`, upstream.URL, redactConfig.String())
 			if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
 				t.Fatal(err)

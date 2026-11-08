@@ -37,7 +37,9 @@ func TestStdioEvidenceCacheByteBudget(t *testing.T) {
 			return
 		}
 		streamValues := values
+		container := "fixture"
 		if strings.Contains(r.URL.Query().Get("query"), `container="huge"`) {
+			container = "huge"
 			streamValues = [][]string{{
 				strconv.FormatInt(base.UnixNano(), 10),
 				"huge " + strings.Repeat("y", 5000),
@@ -48,7 +50,7 @@ func TestStdioEvidenceCacheByteBudget(t *testing.T) {
 			"data": map[string]any{
 				"resultType": "streams",
 				"result": []map[string]any{{
-					"stream": map[string]string{"container": "fixture"},
+					"stream": map[string]string{"container": container},
 					"values": streamValues,
 				}},
 			},
