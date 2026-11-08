@@ -37,6 +37,12 @@ This file records project changes. Its format uses
   overflow returns an explicit tool error instead of an oversized success.
 - Add `source_complete`, `delivery_complete`, and separate selection and byte
   omission fields. Top-level `truncated` now includes source truncation.
+- Select a Docker container by canonical name and exact case before aliases or
+  case folding, and reject more than one matching container with
+  `ambiguous_binding`.
+- Add an optional Docker `api_version` source setting for explicit versioned
+  Engine API read routes, with a configuration error for a duplicate version
+  in `base_url`.
 - Sample `retrieved_at` after the source response is decoded in all adapters,
   so a slow request cannot report retrieval before collection.
 - Keep the source freshness in `source_freshness` and the cache read time in

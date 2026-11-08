@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/adapters/docker"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/adapters/gatus"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/adapters/healthchecks"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/adapters/loki"
@@ -404,6 +405,9 @@ func reasonForError(err error) string {
 		return "ambiguous_binding"
 	}
 	if errors.Is(err, gatus.ErrEndpointAmbiguous) {
+		return "ambiguous_binding"
+	}
+	if errors.Is(err, docker.ErrAmbiguousContainer) {
 		return "ambiguous_binding"
 	}
 	if err == nil {

@@ -37,6 +37,46 @@ services:
 	}
 }
 
+func TestParse_DockerAPIVersion(t *testing.T) {
+	base := `
+version: 1
+sources:
+  docker:
+    kind: docker
+    base_url: %s
+%s
+services:
+  - id: app
+    sources:
+      docker: { source: docker, container_name: app }
+`
+	cfg, err := Parse([]byte(fmt.Sprintf(base, "http://docker.example.internal", "    api_version: 1.56")))
+	if err != nil {
+		t.Fatalf("valid api_version: %v", err)
+	}
+	if cfg.Sources["docker"].APIVersion != "v1.56" {
+		t.Fatalf("api_version=%q", cfg.Sources["docker"].APIVersion)
+	}
+	for name, tc := range map[string]struct {
+		baseURL string
+		extra   string
+	}{
+		"non docker": {baseURL: "http://docker.example.internal", extra: "    api_version: 1.56"},
+		"bad value":  {baseURL: "http://docker.example.internal", extra: "    api_version: latest"},
+		"duplicate":  {baseURL: "http://docker.example.internal/v1.56", extra: "    api_version: v1.56"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw := fmt.Sprintf(base, tc.baseURL, tc.extra)
+			if name == "non docker" {
+				raw = strings.Replace(raw, "kind: docker", "kind: gatus", 1)
+			}
+			if _, err := Parse([]byte(raw)); err == nil {
+				t.Fatal("expected an error")
+			}
+		})
+	}
+}
+
 func TestParse_RejectsTemplate(t *testing.T) {
 	_, err := Parse([]byte("version: 1\nsources: {{ . }}"))
 	if err == nil {

@@ -4,6 +4,7 @@ package docker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -22,10 +23,16 @@ type Client struct {
 	Headers  map[string]string
 	Redact   *redaction.Engine
 	Now      func() time.Time
+	// APIVersion adds an explicit /vX.Y Engine API prefix to read routes.
+	APIVersion string
 }
+
+// ErrAmbiguousContainer reports more than one container that matches a name.
+var ErrAmbiguousContainer = errors.New("docker container selection is ambiguous")
 
 // containerSummary holds only the Docker fields used.
 type containerSummary struct {
+	ID      string            `json:"Id"`
 	Names   []string          `json:"Names"`
 	Image   string            `json:"Image"`
 	State   string            `json:"State"`
@@ -42,7 +49,10 @@ func (c *Client) Status(ctx context.Context, serviceID, containerName string) (e
 		return evidence.Item{}, err
 	}
 	retrievedAt := c.now()
-	ct, ok := findContainer(list, containerName)
+	ct, ok, err := findContainer(list, containerName)
+	if err != nil {
+		return evidence.Item{}, err
+	}
 	if !ok {
 		cleanName, redactions, truncated := redaction.ApplyAndTruncate(c.Redact, containerName, 256)
 		return evidence.Item{
@@ -78,7 +88,14 @@ func (c *Client) Evidence(ctx context.Context, serviceID, containerName string) 
 
 func (c *Client) list(ctx context.Context, fallback time.Time) ([]containerSummary, time.Time, error) {
 	// all=true includes stopped containers. The name filter stays local.
-	path := "/containers/json?" + url.Values{"all": {"true"}}.Encode()
+	prefix := ""
+	if v := strings.TrimSpace(c.APIVersion); v != "" {
+		if !strings.HasPrefix(v, "v") {
+			v = "v" + v
+		}
+		prefix = "/" + v
+	}
+	path := prefix + "/containers/json?" + url.Values{"all": {"true"}}.Encode()
 	// LockedClient.Get closes the body before it gives the response.
 	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
 	if err != nil {
@@ -98,16 +115,63 @@ func (c *Client) list(ctx context.Context, fallback time.Time) ([]containerSumma
 	return list, httpx.CollectionTime(resp, fallback), nil
 }
 
-func findContainer(list []containerSummary, want string) (containerSummary, bool) {
-	want = normalizeName(want)
-	for _, c := range list {
-		for _, n := range c.Names {
-			if normalizeName(n) == want {
-				return c, true
+// findContainer chooses one container. Exact case wins over case folding, and
+// a canonical Names[0] entry wins over an alias. More than one distinct
+// container in the winning stage is ambiguous.
+func findContainer(list []containerSummary, want string) (containerSummary, bool, error) {
+	want = strings.TrimSpace(want)
+	if want == "" {
+		return containerSummary{}, false, nil
+	}
+	want = strings.TrimPrefix(want, "/")
+	for _, fold := range []bool{false, true} {
+		for _, canonical := range []bool{true, false} {
+			matched := map[string]int{}
+			for index, c := range list {
+				names := c.Names
+				if canonical {
+					if len(names) == 0 {
+						continue
+					}
+					names = names[:1]
+				} else {
+					if len(names) <= 1 {
+						continue
+					}
+					names = names[1:]
+				}
+				for _, name := range names {
+					if nameEqual(name, want, fold) {
+						key := strings.TrimSpace(c.ID)
+						if key == "" {
+							key = fmt.Sprintf("#%d", index)
+						}
+						matched[key] = index
+						break
+					}
+				}
+			}
+			if len(matched) == 0 {
+				continue
+			}
+			if len(matched) > 1 {
+				return containerSummary{}, false, ErrAmbiguousContainer
+			}
+			for _, index := range matched {
+				return list[index], true, nil
 			}
 		}
 	}
-	return containerSummary{}, false
+	return containerSummary{}, false, nil
+}
+
+func nameEqual(name, want string, fold bool) bool {
+	name = strings.TrimPrefix(strings.TrimSpace(name), "/")
+	if fold {
+		name = strings.ToLower(name)
+		want = strings.ToLower(want)
+	}
+	return name == want
 }
 
 func normalizeName(n string) string {

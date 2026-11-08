@@ -56,10 +56,16 @@ The Gatus adapter has this behavior:
 The Docker adapter has this behavior:
 
 - The adapter sends a `GET /containers/json?all=true` request.
+- A docker source can set `api_version: v1.56` to send
+  `GET /v1.56/containers/json?all=true`. Unversioned Engine API routes are
+  deprecated. Do not put a version in both `base_url` and `api_version`.
 - The adapter reads `Names`, `Image`, `State`, `Status`, some `Labels`, and
   `Created`.
-- The adapter ignores letter case when it compares names. It also ignores a
-  leading `/`.
+- A canonical `Names[0]` match wins over an alias. An exact-case match wins
+  over a case-folded match. More than one distinct container in the winning
+  stage gives an `ambiguous_binding` source error. Row order cannot select a
+  container.
+- A missing container gives a missing item, not an empty list.
 - A network error or invalid JSON does not give an empty array without an error.
 - The adapter sends no request to `inspect`, `create`, `start`, `stop`, or
   `exec` endpoints.
