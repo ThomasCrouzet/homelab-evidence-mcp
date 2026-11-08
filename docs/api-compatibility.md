@@ -73,7 +73,10 @@ The Loki adapter has this behavior:
 
 - The adapter sends a `GET /loki/api/v1/query_range` request.
 - The request contains `query`, `start`, `end`, `limit`, and
-  `direction=backward`.
+  `direction=backward`. `start` and `end` use RFC3339Nano, so distant years do
+  not wrap through the undefined `UnixNano` range.
+- The adapter applies the documented half-open interval `[start, end)`.
+- A window outside the RFC3339 year range gives a source error before any GET.
 - The request asks for one more line than the requested limit.
 - The adapter sorts lines chronologically and keeps the newest requested lines.
 - Equal timestamps in one stream keep their response position. Across streams,

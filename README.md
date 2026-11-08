@@ -95,8 +95,10 @@ Every tool uses call budgets and emits audit events.
 | `get_evidence` | Opaque `id` from a previous result | Temporary cached item |
 
 A window uses `duration`, such as `1h`, or RFC3339 `start` and `end` values.
-Server limits bound windows, evidence counts, body sizes, and concurrency.
-Invalid arguments and exhausted budgets produce tool errors.
+Do not set `start` and `duration` together. A window that starts in the future
+is invalid. Negative limits and offsets are invalid. Server limits bound
+windows, evidence counts, body sizes, and concurrency. Invalid arguments and
+exhausted budgets produce tool errors with stable reason codes.
 `service_status` marks Loki and ntfy as `skipped`.
 It collects Gatus, Docker, Healthchecks, and Beszel snapshots.
 `search_logs` accepts optional `text`, `regex`, and `limit` arguments.

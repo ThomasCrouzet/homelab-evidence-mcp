@@ -130,6 +130,91 @@ func TestSearch_InstructionLikeMarked(t *testing.T) {
 	}
 }
 
+func TestSearch_UsesRFC3339AndEndExclusive(t *testing.T) {
+	start := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
+	end := start.Add(time.Minute)
+	var gotStart, gotEnd time.Time
+	cli := setup(t, func(w http.ResponseWriter, r *http.Request) {
+		q, _ := url.ParseQuery(r.URL.RawQuery)
+		var err error
+		gotStart, err = time.Parse(time.RFC3339Nano, q.Get("start"))
+		if err != nil {
+			t.Errorf("start is not RFC3339: %q", q.Get("start"))
+		}
+		gotEnd, err = time.Parse(time.RFC3339Nano, q.Get("end"))
+		if err != nil {
+			t.Errorf("end is not RFC3339: %q", q.Get("end"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "success",
+			"data": map[string]any{
+				"resultType": "streams",
+				"result": []map[string]any{{
+					"stream": map[string]string{"container": "app"},
+					"values": [][]string{
+						{nano(start), "at start"},
+						{nano(end.Add(-time.Nanosecond)), "just before end"},
+						{nano(end), "at end"},
+					},
+				}},
+			},
+		})
+	})
+	items, _, err := cli.Search(context.Background(), QueryOptions{
+		ServiceID: "svc", Selector: `{container="app"}`, Start: start, End: end, Limit: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gotStart.Equal(start) || !gotEnd.Equal(end) {
+		t.Fatalf("encoded window=%s..%s", gotStart, gotEnd)
+	}
+	if len(items) != 2 {
+		t.Fatalf("end-exclusive window returned %d items: %+v", len(items), items)
+	}
+}
+
+func TestSearch_EncodesDistantYearWithoutOverflow(t *testing.T) {
+	start := time.Date(2500, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	var gotStart time.Time
+	cli := setup(t, func(w http.ResponseWriter, r *http.Request) {
+		q, _ := url.ParseQuery(r.URL.RawQuery)
+		var err error
+		gotStart, err = time.Parse(time.RFC3339Nano, q.Get("start"))
+		if err != nil {
+			t.Errorf("start is not RFC3339: %q", q.Get("start"))
+		}
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"streams","result":[]}}`))
+	})
+	if _, _, err := cli.Search(context.Background(), QueryOptions{
+		ServiceID: "svc", Selector: `{container="app"}`, Start: start, End: end, Limit: 10,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !gotStart.Equal(start) {
+		t.Fatalf("distant year wrapped: got %s want %s", gotStart, start)
+	}
+}
+
+func TestSearch_RejectsUnrepresentableWindow(t *testing.T) {
+	calls := 0
+	cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"streams","result":[]}}`))
+	})
+	start := time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	if _, _, err := cli.Search(context.Background(), QueryOptions{
+		ServiceID: "svc", Selector: `{container="app"}`, Start: start, End: end, Limit: 10,
+	}); err == nil {
+		t.Fatal("year 10000 must fail before an upstream request")
+	}
+	if calls != 0 {
+		t.Fatalf("invalid window issued %d request(s)", calls)
+	}
+}
+
 func TestSearch_429(t *testing.T) {
 	cli := setup(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(429)

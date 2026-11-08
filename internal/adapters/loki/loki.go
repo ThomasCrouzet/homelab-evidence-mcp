@@ -94,10 +94,15 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 		return nil, false, err
 	}
 
+	if !rfc3339Representable(opt.Start) || !rfc3339Representable(opt.End) {
+		return nil, false, fmt.Errorf("loki window is outside the RFC3339 range")
+	}
 	vals := url.Values{}
 	vals.Set("query", q)
-	vals.Set("start", strconv.FormatInt(opt.Start.UnixNano(), 10))
-	vals.Set("end", strconv.FormatInt(opt.End.UnixNano(), 10))
+	// Loki accepts RFC3339Nano bounds. It avoids the undefined UnixNano range
+	// below 1678 and above 2262.
+	vals.Set("start", opt.Start.UTC().Format(time.RFC3339Nano))
+	vals.Set("end", opt.End.UTC().Format(time.RFC3339Nano))
 	// Ask for one additional line so the response can report a reached limit.
 	vals.Set("limit", strconv.Itoa(opt.Limit+1))
 	// Loki applies the limit before this client can sort the response.
@@ -157,7 +162,8 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 				}
 				continue
 			}
-			if ts.Before(opt.Start) || ts.After(opt.End) {
+			// Loki query_range uses a half-open [start, end) interval.
+			if ts.Before(opt.Start) || !ts.Before(opt.End) {
 				continue
 			}
 			line := pair[1]
@@ -335,6 +341,11 @@ func (c *Client) redact(s string) (string, int) {
 		return redaction.SanitizeControl(s), 0
 	}
 	return c.Redact.Apply(s)
+}
+
+func rfc3339Representable(t time.Time) bool {
+	year := t.Year()
+	return year >= 0 && year <= 9999
 }
 
 func (c *Client) now() time.Time {
