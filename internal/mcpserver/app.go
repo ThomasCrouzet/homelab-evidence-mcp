@@ -139,7 +139,7 @@ func NewApp(cfg *config.Config, log *slog.Logger, aud *audit.Logger) (*App, erro
 		case "gatus":
 			app.gatus[name] = &gatus.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng}
 		case "docker":
-			app.dock[name] = &docker.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng}
+			app.dock[name] = &docker.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng, APIVersion: src.APIVersion}
 		case "loki":
 			app.loki[name] = &loki.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng, MaxLineBytes: cfg.Limits.MaxLogLineBytes}
 		case "healthchecks":

@@ -84,6 +84,7 @@ type TLS struct {
 type Source struct {
 	Kind        string // gatus | docker | loki | healthchecks | beszel | ntfy
 	BaseURL     string
+	APIVersion  string // optional Docker Engine API prefix, for example v1.56
 	TokenEnv    string
 	TokenFile   string
 	TokenHeader string // optional. Use X-Api-Key for Healthchecks and Authorization for other sources.
@@ -201,6 +202,7 @@ type fileTLS struct {
 type fileSource struct {
 	Kind        string            `yaml:"kind"`
 	BaseURL     string            `yaml:"base_url"`
+	APIVersion  string            `yaml:"api_version"`
 	TokenEnv    string            `yaml:"token_env"`
 	TokenFile   string            `yaml:"token_file"`
 	TokenHeader string            `yaml:"token_header"`
@@ -294,6 +296,8 @@ var (
 	headerNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$")
 	// A Healthchecks unique key becomes a URL path segment in later reads.
 	healthcheckKeyRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,256}$`)
+	dockerVersionRe  = regexp.MustCompile(`^[0-9]+\.[0-9]+$`)
+	dockerPathRe     = regexp.MustCompile(`(^|/)v[0-9]+\.[0-9]+$`)
 	yamlScalarRe     = regexp.MustCompile(`!![[:alnum:]_-]+\s+('[^']*'|"[^"]*")`)
 	// A Loki selector accepts labels then simple |= or |~ filters.
 	lokiSelectorRe = regexp.MustCompile(`^\{[a-zA-Z_][a-zA-Z0-9_]*="[^"]*"(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*="[^"]*")*\}(?:\s*\|\s*[=~]\s*"[^"]*")*$`)
@@ -648,6 +652,18 @@ func parseSource(name string, fs fileSource) (Source, ValidationErrors) {
 	default:
 		errs = append(errs, ValidationError{"sources." + name + ".kind", "must be gatus, docker, loki, healthchecks, beszel, or ntfy"})
 	}
+	apiVersion := strings.TrimSpace(fs.APIVersion)
+	if apiVersion != "" {
+		if kind != "docker" {
+			errs = append(errs, ValidationError{"sources." + name + ".api_version", "only a docker source accepts api_version"})
+		}
+		normalized := strings.TrimPrefix(apiVersion, "v")
+		if !dockerVersionRe.MatchString(normalized) {
+			errs = append(errs, ValidationError{"sources." + name + ".api_version", "must be a version such as 1.56 or v1.56"})
+		} else {
+			apiVersion = "v" + normalized
+		}
+	}
 	base := strings.TrimSpace(fs.BaseURL)
 	if base == "" {
 		errs = append(errs, ValidationError{"sources." + name + ".base_url", "required"})
@@ -668,6 +684,9 @@ func parseSource(name string, fs fileSource) (Source, ValidationErrors) {
 		}
 		if u != nil && invalidLockedPath(u.Path) {
 			errs = append(errs, ValidationError{"sources." + name + ".base_url", "path contains a control character, backslash, or dot segment"})
+		}
+		if u != nil && apiVersion != "" && dockerPathRe.MatchString(strings.TrimRight(u.Path, "/")) {
+			errs = append(errs, ValidationError{"sources." + name + ".api_version", "base_url already contains an API version prefix"})
 		}
 	}
 	if fs.TokenEnv != "" && fs.TokenFile != "" {
@@ -766,6 +785,7 @@ func parseSource(name string, fs fileSource) (Source, ValidationErrors) {
 	return Source{
 		Kind:        kind,
 		BaseURL:     strings.TrimRight(base, "/"),
+		APIVersion:  apiVersion,
 		TokenEnv:    fs.TokenEnv,
 		TokenFile:   tokenFile,
 		TokenHeader: th,

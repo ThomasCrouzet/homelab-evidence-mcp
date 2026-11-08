@@ -60,6 +60,9 @@ sources:
     # Use a Docker socket proxy that lets the client use only GET routes.
     # The client cannot use the unix:///var/run/docker.sock socket.
     base_url: http://docker-proxy.example.internal:2375
+    # Optional. Use a versioned Engine API route and allow that exact read
+    # route in the socket proxy. Unversioned routes are deprecated.
+    # api_version: v1.56
 
   healthchecks:
     kind: healthchecks

@@ -202,7 +202,8 @@ These risks remain:
 
 Do these steps:
 
-1. Use a Docker proxy with access only to `GET /containers/json`.
+1. Use a Docker proxy with access only to `GET /containers/json` or the
+   matching versioned route, such as `GET /v1.56/containers/json`.
 2. Use a read-only Healthchecks key.
 3. Store configuration and tokens in a directory that is not in the repository.
 4. On Unix, use mode `0600`.

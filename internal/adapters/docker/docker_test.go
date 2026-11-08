@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -76,6 +77,74 @@ func TestStatus_RetrievedAfterCollection(t *testing.T) {
 	}
 	if item.RetrievedAt.Before(item.ObservedAt) {
 		t.Fatalf("retrieved_at %s is before observed_at %s", item.RetrievedAt, item.ObservedAt)
+	}
+}
+
+func TestFindContainer_CanonicalPrecedenceAndAmbiguity(t *testing.T) {
+	list := []containerSummary{
+		{ID: "1", Names: []string{"/alias", "/shared"}},
+		{ID: "2", Names: []string{"/app", "/shared"}},
+	}
+	got, ok, err := findContainer(list, "app")
+	if err != nil || !ok || got.ID != "2" {
+		t.Fatalf("canonical exact: %+v ok=%v err=%v", got, ok, err)
+	}
+	if _, _, err := findContainer(list, "shared"); !errors.Is(err, ErrAmbiguousContainer) {
+		t.Fatalf("shared alias err=%v", err)
+	}
+	// The same container listed twice with one ID is not ambiguous.
+	duplicate := []containerSummary{
+		{ID: "same", Names: []string{"/app"}},
+		{ID: "same", Names: []string{"/app"}},
+	}
+	if got, ok, err := findContainer(duplicate, "app"); err != nil || !ok || got.ID != "same" {
+		t.Fatalf("duplicate row: %+v ok=%v err=%v", got, ok, err)
+	}
+	// Exact case wins over a case-folded match.
+	caseList := []containerSummary{
+		{ID: "upper", Names: []string{"/App"}},
+		{ID: "lower", Names: []string{"/app"}},
+	}
+	got, ok, err = findContainer(caseList, "App")
+	if err != nil || !ok || got.ID != "upper" {
+		t.Fatalf("case precedence: %+v ok=%v err=%v", got, ok, err)
+	}
+	// Two case-only canonical matches are ambiguous when no exact case exists.
+	if _, _, err := findContainer(caseList, "APP"); !errors.Is(err, ErrAmbiguousContainer) {
+		t.Fatalf("case-only collision err=%v", err)
+	}
+}
+
+func TestStatus_AmbiguousContainerIsError(t *testing.T) {
+	cli := setup(t, []map[string]any{
+		{"Id": "1", "Names": []string{"/app"}, "State": "running"},
+		{"Id": "2", "Names": []string{"/app"}, "State": "exited"},
+	}, http.StatusOK)
+	if _, err := cli.Status(context.Background(), "svc", "app"); !errors.Is(err, ErrAmbiguousContainer) {
+		t.Fatalf("err=%v, want ErrAmbiguousContainer", err)
+	}
+}
+
+func TestStatus_ExplicitAPIVersion(t *testing.T) {
+	var gotPath string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if r.URL.Query().Get("all") != "true" {
+			t.Errorf("query=%s", r.URL.RawQuery)
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"Id": "abc", "Names": []string{"/app"}, "State": "running",
+		}})
+	}))
+	defer ts.Close()
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
+	_ = hc.RegisterDestination("docker", ts.URL)
+	cli := &Client{HTTP: hc, DestName: "docker", APIVersion: "v1.56"}
+	if _, err := cli.Status(context.Background(), "svc", "app"); err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/v1.56/containers/json" {
+		t.Fatalf("path=%s", gotPath)
 	}
 }
 

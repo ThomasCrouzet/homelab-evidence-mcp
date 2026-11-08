@@ -59,6 +59,8 @@ All routes below use `GET`.
 
 Gatus selects the latest status by the greatest valid timestamp.
 Docker requires a read-limited HTTP socket proxy; the Unix socket is unsupported.
+Set `api_version` on a docker source to use an explicit versioned route. Do not
+also put the version in `base_url`.
 Docker evidence excludes `Config.Env` and raw mounts.
 Healthchecks evidence excludes ping URLs and UUIDs.
 Beszel also supports `/api/systems` and compatible fallback routes.
