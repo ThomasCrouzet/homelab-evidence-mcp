@@ -9,21 +9,36 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/evidence"
 )
 
-// BuildTimeline puts evidence in order and gives a summary that contains facts only.
+// BuildTimeline puts evidence in order and gives source-derived coverage.
 func BuildTimeline(serviceID string, start, end time.Time, items []evidence.Item, sources []evidence.SourceOutcome, maxItems int) evidence.Bundle {
 	now := time.Now().UTC()
 	cp := append([]evidence.Item(nil), items...)
 	var timelineTruncated bool
 	cp, timelineTruncated = evidence.KeepNewest(cp, maxItems)
-	truncated := timelineTruncated
 
+	bundle := evidence.Bundle{
+		ServiceID:          serviceID,
+		RequestedStart:     start.UTC(),
+		RequestedEnd:       end.UTC(),
+		EffectiveStart:     start.UTC(),
+		EffectiveEnd:       end.UTC(),
+		Items:              cp,
+		Sources:            sources,
+		SelectionTruncated: timelineTruncated,
+		OmittedItems:       len(items) - len(cp),
+		Truncated:          timelineTruncated || sourcesTruncated(sources),
+		RetrievedAt:        now,
+	}
+	RebuildDerived(&bundle, maxItems)
+	return bundle
+}
+
+// RebuildDerived recomputes item counts and item warnings from the retained
+// items. Source coverage warnings stay present when related items are omitted.
+func RebuildDerived(bundle *evidence.Bundle, maxItems int) {
 	var warnings []string
-	failed := 0
-	ok := 0
-	incomplete := 0
-	for _, s := range sources {
+	for _, s := range bundle.Sources {
 		if s.Truncated {
-			truncated = true
 			warnings = append(warnings, fmt.Sprintf(
 				"source %s (%s): truncated upstream=%v local=%v",
 				s.SourceName, s.Kind, s.UpstreamTruncated, s.LocalTruncated,
@@ -34,19 +49,16 @@ func BuildTimeline(serviceID string, start, end time.Time, items []evidence.Item
 				"source %s (%s): %d unusable source record(s)", s.SourceName, s.Kind, s.Discarded,
 			))
 		}
+		if s.UnknownTimeRecords > 0 {
+			warnings = append(warnings, fmt.Sprintf(
+				"source %s (%s): %d record(s) without a usable source time", s.SourceName, s.Kind, s.UnknownTimeRecords,
+			))
+		}
 		switch s.Status {
-		case "ok":
-			ok++
-			if !s.Complete {
-				incomplete++
-			}
 		case "error", "timeout", "canceled":
-			failed++
 			warnings = append(warnings, fmt.Sprintf(
 				"source %s (%s): %s (%s)", s.SourceName, s.Kind, s.Status, s.Reason,
 			))
-		case "absent", "skipped":
-			// This status does not count as a failure.
 		}
 		if s.Status == "ok" && !s.Complete && s.Reason != "" && s.Reason != "truncated" &&
 			s.Reason != "partial_invalid_records" {
@@ -55,41 +67,73 @@ func BuildTimeline(serviceID string, start, end time.Time, items []evidence.Item
 			))
 		}
 	}
-	if timelineTruncated {
-		warnings = append(warnings, fmt.Sprintf("timeline truncated to %d items", maxItems))
+	if bundle.SelectionTruncated {
+		if maxItems > 0 {
+			warnings = append(warnings, fmt.Sprintf("timeline truncated to %d items", maxItems))
+		} else {
+			warnings = append(warnings, "timeline truncated")
+		}
+	}
+	if bundle.SelectionTruncated && bundle.OmittedItems > 0 {
+		warnings = append(warnings, fmt.Sprintf(
+			"selection omitted %d retrieved item(s)", bundle.OmittedItems))
+	}
+	if bundle.ByteBudgetTruncated {
+		warnings = append(warnings, fmt.Sprintf(
+			"byte budget omitted retrieved evidence; byte_size=%d budget=%d", bundle.ByteSize, bundle.ByteBudget))
 	}
 
-	// Flag critical or error evidence that has become stale.
-	for _, it := range cp {
+	// Flag critical or error evidence that remains in the final result.
+	for _, it := range bundle.Items {
 		if it.Freshness == evidence.FreshnessStale && (it.Severity == evidence.SeverityError || it.Severity == evidence.SeverityCritical) {
 			warnings = append(warnings, fmt.Sprintf("stale %s evidence from %s (observed %s)", it.Severity, it.Source, it.ObservedAt.Format(time.RFC3339)))
 		}
 	}
 
-	summary := factualSummary(serviceID, start, end, cp, ok, failed, incomplete)
-
-	return evidence.Bundle{
-		ServiceID:      serviceID,
-		RequestedStart: start.UTC(),
-		RequestedEnd:   end.UTC(),
-		EffectiveStart: start.UTC(),
-		EffectiveEnd:   end.UTC(),
-		Items:          cp,
-		Sources:        sources,
-		Truncated:      truncated,
-		Warnings:       unique(warnings),
-		FactualSummary: summary,
-		RetrievedAt:    now,
-	}
+	bundle.Warnings = boundWarnings(unique(warnings))
+	bundle.FactualSummary = factualSummary(bundle.ServiceID, bundle.RequestedStart, bundle.RequestedEnd, bundle.Items, bundle.Sources)
 }
 
-func factualSummary(serviceID string, start, end time.Time, items []evidence.Item, sourcesOK, sourcesFailed, sourcesIncomplete int) string {
+// boundWarnings keeps source failures visible while it bounds the detail.
+func boundWarnings(warnings []string) []string {
+	const maxWarnings = 40
+	const maxBytes = 8 << 10
+	if len(warnings) == 0 {
+		return nil
+	}
+	out := make([]string, 0, maxWarnings)
+	total := 0
+	for index, warning := range warnings {
+		if index >= maxWarnings || total+len(warning) > maxBytes {
+			out = append(out, fmt.Sprintf("%d warning(s) omitted by output bound", len(warnings)-index))
+			return out
+		}
+		out = append(out, warning)
+		total += len(warning)
+	}
+	return out
+}
+
+func factualSummary(serviceID string, start, end time.Time, items []evidence.Item, sources []evidence.SourceOutcome) string {
+	ok, failed, incomplete := 0, 0, 0
+	for _, source := range sources {
+		switch source.Status {
+		case "ok":
+			ok++
+			if !source.Complete {
+				incomplete++
+			}
+		case "error", "timeout", "canceled":
+			failed++
+		}
+	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Service %s: %d evidence item(s) between %s and %s UTC.",
+	fmt.Fprintf(&b, "Service %s: %d returned evidence item(s) between %s and %s UTC.",
 		serviceID, len(items), start.UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339))
 	fmt.Fprintf(&b, " Sources with status ok=%d. Sources with status error, timeout, or canceled=%d.",
-		sourcesOK, sourcesFailed)
-	fmt.Fprintf(&b, " Sources with incomplete coverage=%d.", sourcesIncomplete)
+		ok, failed)
+	fmt.Fprintf(&b, " Sources with incomplete coverage=%d.", incomplete)
+	b.WriteString(" Item counts describe returned evidence, not total upstream records.")
 
 	var gatusFail, dockerBad, logErr, cronDown, beszelBad, ntfyBad int
 	for _, it := range items {
@@ -148,6 +192,15 @@ func factualSummary(serviceID string, start, end time.Time, items []evidence.Ite
 	b.WriteString(".")
 	b.WriteString(" The timeline uses observed_at order. Correlation does not identify a root cause.")
 	return b.String()
+}
+
+func sourcesTruncated(sources []evidence.SourceOutcome) bool {
+	for _, source := range sources {
+		if source.Truncated {
+			return true
+		}
+	}
+	return false
 }
 
 func unique(in []string) []string {
