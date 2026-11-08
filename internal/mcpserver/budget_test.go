@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"testing"
@@ -60,7 +61,7 @@ func TestWithBudget_DeniesWhenConcurrentExceeded(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, _, _ = app.withBudget("service_status", func() (*mcp.CallToolResult, any, error) {
+		_, _, _ = app.withBudget(context.Background(), "service_status", func() (*mcp.CallToolResult, any, error) {
 			close(started)
 			<-releaseHold
 			return textResult(map[string]string{"ok": "held"}), map[string]string{"ok": "held"}, nil
@@ -71,7 +72,7 @@ func TestWithBudget_DeniesWhenConcurrentExceeded(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("holder did not start")
 	}
-	res, _, err := app.withBudget("service_status", func() (*mcp.CallToolResult, any, error) {
+	res, _, err := app.withBudget(context.Background(), "service_status", func() (*mcp.CallToolResult, any, error) {
 		t.Fatal("second call must not run under concurrent budget of 1")
 		return nil, nil, nil
 	})
@@ -92,7 +93,7 @@ func TestWithBudget_DeniesWhenConcurrentExceeded(t *testing.T) {
 func TestWithBudget_DeniesWhenRateExceeded(t *testing.T) {
 	app := &App{budget: newToolBudget(2, 8)}
 	for i := 0; i < 2; i++ {
-		res, _, err := app.withBudget("service_status", func() (*mcp.CallToolResult, any, error) {
+		res, _, err := app.withBudget(context.Background(), "service_status", func() (*mcp.CallToolResult, any, error) {
 			return textResult(map[string]string{"ok": "yes"}), nil, nil
 		})
 		if err != nil {
@@ -102,7 +103,7 @@ func TestWithBudget_DeniesWhenRateExceeded(t *testing.T) {
 			t.Fatalf("call %d should succeed: %+v", i, res)
 		}
 	}
-	res, _, err := app.withBudget("service_status", func() (*mcp.CallToolResult, any, error) {
+	res, _, err := app.withBudget(context.Background(), "service_status", func() (*mcp.CallToolResult, any, error) {
 		t.Fatal("third call must not run")
 		return nil, nil, nil
 	})

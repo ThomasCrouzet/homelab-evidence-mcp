@@ -341,6 +341,20 @@ func (a *App) withSourceTimeout(ctx context.Context, sourceName string, kind evi
 	items, err := fn(sctx)
 	evidence.MarkSourceFreshness(items)
 	cacheState, cacheAge := info.Snapshot()
+	if err == nil {
+		cancelErr := ctx.Err()
+		if cancelErr == nil {
+			cancelErr = sctx.Err()
+		}
+		if cancelErr != nil {
+			// Keep validated partial evidence but never report a canceled or
+			// timed-out collection as a successful one.
+			outcome := a.sourceErrorOutcome(ctx, sctx, sourceName, kind, cancelErr, t0)
+			outcome.ItemCount = len(items)
+			outcome.CacheState, outcome.CacheAgeS = cacheState, cacheAge
+			return outcome, items
+		}
+	}
 	if err != nil {
 		outcome := a.sourceErrorOutcome(ctx, sctx, sourceName, kind, err, t0)
 		outcome.ItemCount = len(items)
@@ -531,6 +545,9 @@ func utcTimePtr(t time.Time) *time.Time {
 func (a *App) parseWindow(startS, endS, durS string, def, max time.Duration) (time.Time, time.Time, error) {
 	now := time.Now().UTC()
 	var start, end time.Time
+	if startS != "" && durS != "" {
+		return time.Time{}, time.Time{}, fmt.Errorf("set only one of start or duration")
+	}
 	if endS != "" {
 		t, err := time.Parse(time.RFC3339, endS)
 		if err != nil {
@@ -564,6 +581,11 @@ func (a *App) parseWindow(startS, endS, durS string, def, max time.Duration) (ti
 	}
 	if end.Sub(start) > max {
 		return time.Time{}, time.Time{}, fmt.Errorf("window exceeds max %s", max)
+	}
+	// Allow the snapshot grace and ordinary clock skew. A window that starts
+	// later cannot describe an incident that has already happened.
+	if start.After(now.Add(30 * time.Second)) {
+		return time.Time{}, time.Time{}, fmt.Errorf("window starts in the future")
 	}
 	return start, end, nil
 }

@@ -43,6 +43,12 @@ This file records project changes. Its format uses
   `cache_read_at` when `get_evidence` serves an item from memory.
 - Store and return defensive copies of cached evidence attributes so caller
   mutation cannot change retained evidence or byte accounting.
+- Reject conflicting `start` and `duration`, future-start windows, and
+  negative limits or offsets with a stable `invalid_arguments` tool error.
+- Encode Loki query bounds as RFC3339Nano, apply the half-open `[start, end)`
+  window, and reject years outside the RFC3339 range before any GET.
+- Check caller cancellation before local-only tool work and before the tool
+  budget, and never report a canceled source callback as a successful result.
 - Validate ntfy message `id`, `event`, and `topic`, reject cross-topic rows,
   collapse duplicate ids, and count invalid or undated records without losing
   valid notifications.

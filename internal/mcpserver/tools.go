@@ -24,8 +24,8 @@ type emptyIn struct{}
 
 type listServicesIn struct {
 	Prefix string `json:"prefix,omitempty" jsonschema:"Use an optional prefix filter for id or display_name."`
-	Offset int    `json:"offset,omitempty" jsonschema:"Set the pagination offset."`
-	Limit  int    `json:"limit,omitempty" jsonschema:"Set the page size. The maximum is 200."`
+	Offset int    `json:"offset,omitempty" jsonschema:"Set the pagination offset. Must not be negative."`
+	Limit  int    `json:"limit,omitempty" jsonschema:"Set the page size. The maximum is 200. Must not be negative."`
 }
 
 type serviceIDIn struct {
@@ -34,39 +34,57 @@ type serviceIDIn struct {
 
 type incidentIn struct {
 	ServiceID string `json:"service_id" jsonschema:"Use a service id from the registry."`
-	Start     string `json:"start,omitempty" jsonschema:"Set the RFC3339 start time in UTC."`
+	Start     string `json:"start,omitempty" jsonschema:"Set the RFC3339 start time in UTC. Do not also set duration."`
 	End       string `json:"end,omitempty" jsonschema:"Set the RFC3339 end time in UTC."`
-	Duration  string `json:"duration,omitempty" jsonschema:"Set a Go duration that ends at the current time, for example 1h."`
-	MaxItems  int    `json:"max_items,omitempty" jsonschema:"Set an optional limit below the server max_evidence_items value."`
+	Duration  string `json:"duration,omitempty" jsonschema:"Set a Go duration that ends at the current time, for example 1h. Do not also set start."`
+	MaxItems  int    `json:"max_items,omitempty" jsonschema:"Set an optional limit below the server max_evidence_items value. Must not be negative."`
 	Compact   bool   `json:"compact,omitempty" jsonschema:"Reserve one item per contributing source and enforce the configured response byte budget."`
 }
 
 type searchLogsIn struct {
 	ServiceID string `json:"service_id" jsonschema:"Use a service id from the registry."`
-	Start     string `json:"start,omitempty" jsonschema:"Set the RFC3339 start time."`
+	Start     string `json:"start,omitempty" jsonschema:"Set the RFC3339 start time. Do not also set duration."`
 	End       string `json:"end,omitempty" jsonschema:"Set the RFC3339 end time."`
-	Duration  string `json:"duration,omitempty" jsonschema:"Set a Go duration that ends at the current time."`
+	Duration  string `json:"duration,omitempty" jsonschema:"Set a Go duration that ends at the current time. Do not also set start."`
 	Text      string `json:"text,omitempty" jsonschema:"Use an optional safe substring filter."`
 	Regex     string `json:"regex,omitempty" jsonschema:"Use an optional regex filter with built-in limits."`
-	Limit     int    `json:"limit,omitempty" jsonschema:"Set the maximum line count. The server limit can decrease this value."`
+	Limit     int    `json:"limit,omitempty" jsonschema:"Set the maximum line count. The server limit can decrease this value. Must not be negative."`
 }
 
 type failedCronsIn struct {
 	ServiceID string `json:"service_id,omitempty" jsonschema:"Use an optional service filter."`
-	Start     string `json:"start,omitempty" jsonschema:"Set the RFC3339 start time."`
+	Start     string `json:"start,omitempty" jsonschema:"Set the RFC3339 start time. Do not also set duration."`
 	End       string `json:"end,omitempty" jsonschema:"Set the RFC3339 end time."`
-	Duration  string `json:"duration,omitempty" jsonschema:"Set a Go duration that ends at the current time."`
+	Duration  string `json:"duration,omitempty" jsonschema:"Set a Go duration that ends at the current time. Do not also set start."`
 }
 
 type getEvidenceIn struct {
 	ID string `json:"id" jsonschema:"Use an opaque evidence id from a previous response."`
 }
 
-func (a *App) withBudget(tool string, fn func() (*mcp.CallToolResult, any, error)) (*mcp.CallToolResult, any, error) {
+func (a *App) withBudget(ctx context.Context, tool string, fn func() (*mcp.CallToolResult, any, error)) (*mcp.CallToolResult, any, error) {
+	if err := ctx.Err(); err != nil {
+		return a.toolErrorWithReason(tool, "", "canceled", err)
+	}
 	if err := a.budget.acquire(); err != nil {
 		return a.toolError(tool, "", err)
 	}
-	defer a.budget.release()
+	var once sync.Once
+	release := func() { once.Do(a.budget.release) }
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			// A canceled caller must not wait for the handler to unwind before
+			// the next call can use the concurrent slot.
+			release()
+		case <-done:
+		}
+	}()
+	defer func() {
+		close(done)
+		release()
+	}()
 	return fn()
 }
 
@@ -99,8 +117,10 @@ func (a *App) toolErrorWithReason(tool, serviceID, reason string, err error) (*m
 }
 
 func (a *App) toolCapabilities(ctx context.Context, _ *mcp.CallToolRequest, _ emptyIn) (*mcp.CallToolResult, any, error) {
-	return a.withBudget("evidence_capabilities", func() (*mcp.CallToolResult, any, error) {
-		_ = ctx
+	return a.withBudget(ctx, "evidence_capabilities", func() (*mcp.CallToolResult, any, error) {
+		if err := ctx.Err(); err != nil {
+			return a.toolErrorWithReason("evidence_capabilities", "", "canceled", err)
+		}
 		adapters := make([]AdapterRow, 0, len(a.Cfg.Sources))
 		for name, src := range a.Cfg.Sources {
 			adapters = append(adapters, AdapterRow{Name: name, Kind: evidence.SourceKind(src.Kind)})
@@ -175,15 +195,20 @@ func (a *App) toolCapabilities(ctx context.Context, _ *mcp.CallToolRequest, _ em
 }
 
 func (a *App) toolListServices(ctx context.Context, _ *mcp.CallToolRequest, in listServicesIn) (*mcp.CallToolResult, any, error) {
-	return a.withBudget("list_services", func() (*mcp.CallToolResult, any, error) {
-		_ = ctx
+	return a.withBudget(ctx, "list_services", func() (*mcp.CallToolResult, any, error) {
+		if err := ctx.Err(); err != nil {
+			return a.toolErrorWithReason("list_services", "", "canceled", err)
+		}
 		if len(in.Prefix) > 128 {
 			return a.toolError("list_services", "", fmt.Errorf("prefix is too long"))
 		}
-		offset := in.Offset
-		if offset < 0 {
-			offset = 0
+		if in.Offset < 0 {
+			return a.toolErrorWithReason("list_services", "", "invalid_arguments", fmt.Errorf("offset must not be negative"))
 		}
+		if in.Limit < 0 {
+			return a.toolErrorWithReason("list_services", "", "invalid_arguments", fmt.Errorf("limit must not be negative"))
+		}
+		offset := in.Offset
 		limit := clamp(in.Limit, 50, 200)
 		items, total := a.Registry.List(in.Prefix, offset, limit)
 		if items == nil {
@@ -201,7 +226,7 @@ func (a *App) toolListServices(ctx context.Context, _ *mcp.CallToolRequest, in l
 }
 
 func (a *App) toolServiceStatus(ctx context.Context, _ *mcp.CallToolRequest, in serviceIDIn) (*mcp.CallToolResult, any, error) {
-	return a.withBudget("service_status", func() (*mcp.CallToolResult, any, error) {
+	return a.withBudget(ctx, "service_status", func() (*mcp.CallToolResult, any, error) {
 		start := time.Now()
 		svc, err := a.Registry.Require(strings.TrimSpace(in.ServiceID))
 		if err != nil {
@@ -301,7 +326,7 @@ func (a *App) toolServiceStatus(ctx context.Context, _ *mcp.CallToolRequest, in 
 }
 
 func (a *App) toolIncidentContext(ctx context.Context, _ *mcp.CallToolRequest, in incidentIn) (*mcp.CallToolResult, any, error) {
-	return a.withBudget("incident_context", func() (*mcp.CallToolResult, any, error) {
+	return a.withBudget(ctx, "incident_context", func() (*mcp.CallToolResult, any, error) {
 		startAll := time.Now()
 		svc, err := a.Registry.Require(strings.TrimSpace(in.ServiceID))
 		if err != nil {
@@ -309,7 +334,10 @@ func (a *App) toolIncidentContext(ctx context.Context, _ *mcp.CallToolRequest, i
 		}
 		winStart, winEnd, err := a.parseWindow(in.Start, in.End, in.Duration, a.Cfg.Limits.DefaultWindow, a.Cfg.Limits.MaxIncidentWindow)
 		if err != nil {
-			return a.toolError("incident_context", svc.ID, err)
+			return a.toolErrorWithReason("incident_context", svc.ID, "invalid_arguments", err)
+		}
+		if in.MaxItems < 0 {
+			return a.toolErrorWithReason("incident_context", svc.ID, "invalid_arguments", fmt.Errorf("max_items must not be negative"))
 		}
 		maxItems := in.MaxItems
 		if maxItems <= 0 || maxItems > a.Cfg.Limits.MaxEvidenceItems {
@@ -444,7 +472,7 @@ func (a *App) toolIncidentContext(ctx context.Context, _ *mcp.CallToolRequest, i
 }
 
 func (a *App) toolSearchLogs(ctx context.Context, _ *mcp.CallToolRequest, in searchLogsIn) (*mcp.CallToolResult, any, error) {
-	return a.withBudget("search_logs", func() (*mcp.CallToolResult, any, error) {
+	return a.withBudget(ctx, "search_logs", func() (*mcp.CallToolResult, any, error) {
 		svc, err := a.Registry.Require(strings.TrimSpace(in.ServiceID))
 		if err != nil {
 			return a.toolError("search_logs", strings.TrimSpace(in.ServiceID), err)
@@ -454,7 +482,10 @@ func (a *App) toolSearchLogs(ctx context.Context, _ *mcp.CallToolRequest, in sea
 		}
 		winStart, winEnd, err := a.parseWindow(in.Start, in.End, in.Duration, a.Cfg.Limits.DefaultWindow, a.Cfg.Limits.MaxIncidentWindow)
 		if err != nil {
-			return a.toolError("search_logs", svc.ID, err)
+			return a.toolErrorWithReason("search_logs", svc.ID, "invalid_arguments", err)
+		}
+		if in.Limit < 0 {
+			return a.toolErrorWithReason("search_logs", svc.ID, "invalid_arguments", fmt.Errorf("limit must not be negative"))
 		}
 		limit := in.Limit
 		if limit <= 0 || limit > a.Cfg.Limits.MaxLogLines {
@@ -495,7 +526,7 @@ func (a *App) toolSearchLogs(ctx context.Context, _ *mcp.CallToolRequest, in sea
 }
 
 func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in failedCronsIn) (*mcp.CallToolResult, any, error) {
-	return a.withBudget("failed_crons", func() (*mcp.CallToolResult, any, error) {
+	return a.withBudget(ctx, "failed_crons", func() (*mcp.CallToolResult, any, error) {
 		serviceID := strings.TrimSpace(in.ServiceID)
 		cronDefault := 24 * time.Hour
 		if a.Cfg.Limits.MaxCronWindow > 0 && a.Cfg.Limits.MaxCronWindow < cronDefault {
@@ -503,7 +534,7 @@ func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in fa
 		}
 		winStart, winEnd, err := a.parseWindow(in.Start, in.End, in.Duration, cronDefault, a.Cfg.Limits.MaxCronWindow)
 		if err != nil {
-			return a.toolError("failed_crons", serviceID, err)
+			return a.toolErrorWithReason("failed_crons", serviceID, "invalid_arguments", err)
 		}
 		ctx, cancel := context.WithTimeout(ctx, a.Cfg.Limits.TotalTimeout)
 		defer cancel()
@@ -569,8 +600,10 @@ func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in fa
 }
 
 func (a *App) toolGetEvidence(ctx context.Context, _ *mcp.CallToolRequest, in getEvidenceIn) (*mcp.CallToolResult, any, error) {
-	return a.withBudget("get_evidence", func() (*mcp.CallToolResult, any, error) {
-		_ = ctx
+	return a.withBudget(ctx, "get_evidence", func() (*mcp.CallToolResult, any, error) {
+		if err := ctx.Err(); err != nil {
+			return a.toolErrorWithReason("get_evidence", "", "canceled", err)
+		}
 		id := strings.TrimSpace(in.ID)
 		if id == "" {
 			return a.toolError("get_evidence", "", fmt.Errorf("id is required"))
