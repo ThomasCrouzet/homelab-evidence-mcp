@@ -11,12 +11,14 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"regexp"
 	"strings"
 	"syscall"
 
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/audit"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/config"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/mcpserver"
+	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/version"
 )
 
@@ -68,8 +70,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	cfg, err := config.LoadFile(*configPath)
 	if err != nil {
-		log.Error("config invalid", "err", err)
-		return 1
+		return startupError(startupMode(*doctor, *validateOnly), *jsonOutput, stdout, stderr, log, "configuration_error", err)
 	}
 
 	auditOut := io.Writer(stderr)
@@ -90,8 +91,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	app, err := mcpserver.NewApp(cfg, log, aud)
 	if err != nil {
-		log.Error("startup failed", "err", err)
-		return 1
+		return startupError(startupMode(*doctor, *validateOnly), *jsonOutput, stdout, stderr, log, "startup_error", err)
 	}
 
 	if *validateOnly {
@@ -132,6 +132,59 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+var startupPathRe = regexp.MustCompile(`(^|[\s"'(=])((?:[A-Za-z]:\\|/)[^\s"':,)]+)`)
+
+// startupError sanitizes a failure before the application redaction engine is
+// available. It keeps a category and field names, not local paths or secrets.
+func startupMode(doctor, validate bool) string {
+	switch {
+	case doctor:
+		return "doctor"
+	case validate:
+		return "validate"
+	default:
+		return "startup"
+	}
+}
+
+func startupError(mode string, jsonOutput bool, stdout, stderr io.Writer, log *slog.Logger, reason string, err error) int {
+	message := sanitizeStartupError(err)
+	switch mode {
+	case "doctor":
+		if jsonOutput {
+			encoder := json.NewEncoder(stdout)
+			encoder.SetIndent("", "  ")
+			_ = encoder.Encode(map[string]string{"error": message, "reason": reason})
+		} else {
+			_, _ = fmt.Fprintf(stderr, "doctor error: %s\n", message)
+		}
+		return 2
+	case "validate":
+		_, _ = fmt.Fprintf(stderr, "error: %s\n", message)
+		return 2
+	default:
+		if reason == "configuration_error" {
+			_, _ = fmt.Fprintf(stderr, "error: %s\n", message)
+		} else {
+			log.Error("startup failed", "err", message)
+		}
+		return 1
+	}
+}
+
+func sanitizeStartupError(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := err.Error()
+	if engine, engineErr := redaction.New(nil); engineErr == nil {
+		message, _ = engine.Apply(message)
+	}
+	message = startupPathRe.ReplaceAllString(message, "${1}[path]")
+	message, _ = redaction.Truncate(message, 300)
+	return message
 }
 
 func writeDoctorHuman(out io.Writer, report mcpserver.DoctorReport) {
