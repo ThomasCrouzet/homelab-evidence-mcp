@@ -259,8 +259,8 @@ func openRegularAuditFile(path string, appendMode bool) (*os.File, error) {
 }
 
 // MultiWriter copies each write to every writer. A failure in one destination
-// does not stop the others. It reports an error only when every destination
-// fails, because one successful destination retained the event.
+// does not stop the others, but the combined writer reports it so the operator
+// learns that a configured destination lost an event.
 func MultiWriter(writers ...io.Writer) io.Writer {
 	return &fanoutWriter{writers: writers}
 }
@@ -275,24 +275,20 @@ func (f *fanoutWriter) Write(p []byte) (int, error) {
 	}
 	maxWritten := 0
 	var firstErr error
-	successes := 0
 	for _, writer := range f.writers {
 		written, err := writer.Write(p)
 		if written > maxWritten {
 			maxWritten = written
 		}
-		if err == nil && written == len(p) {
-			successes++
-		} else if firstErr == nil {
-			if err != nil {
-				firstErr = err
-			} else {
-				firstErr = io.ErrShortWrite
+		if err != nil || written != len(p) {
+			if firstErr == nil {
+				if err != nil {
+					firstErr = err
+				} else {
+					firstErr = io.ErrShortWrite
+				}
 			}
 		}
-	}
-	if successes > 0 {
-		return maxWritten, nil
 	}
 	return maxWritten, firstErr
 }

@@ -218,8 +218,8 @@ func (f failingWriter) Write([]byte) (int, error) { return 0, f.err }
 func TestMultiWriter_ContinuesAfterOneFailure(t *testing.T) {
 	var buf bytes.Buffer
 	writer := MultiWriter(failingWriter{err: io.ErrClosedPipe}, &buf)
-	if _, err := writer.Write([]byte("event\n")); err != nil {
-		t.Fatalf("a healthy destination must keep the write successful: %v", err)
+	if _, err := writer.Write([]byte("event\n")); err == nil {
+		t.Fatal("a failed destination must be reported")
 	}
 	if buf.String() != "event\n" {
 		t.Fatalf("healthy destination got %q", buf.String())
