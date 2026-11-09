@@ -23,7 +23,7 @@ carries the same facts in pretty-printed JSON.
   `upstream_truncated` and `local_truncated`.
 - `service_id` is optional and identifies a per-binding source outcome.
 - `discarded` counts unusable source records. `cache_state` is `hit`, `miss`,
-  or `disabled`; `cache_age_seconds` is optional.
+  `mixed`, or `disabled`; `cache_age_seconds` is optional.
 - Compact `incident_context` adds `compact`, `byte_budget`, `byte_size`,
   `selection_truncated`, `byte_budget_truncated`, `omitted_items`, and
   `omitted_sources`. See [compact incident context](incident-context.md).

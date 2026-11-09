@@ -83,6 +83,13 @@ This file records project changes. Its format uses
   including token and CA file paths.
 - Return exit code `2` for doctor and validate configuration or prerequisite
   failures, and emit one sanitized JSON error under `--doctor --json`.
+- Resolve a Beszel system by canonical `name`/`system` across the complete
+  inventory before host aliases, and report `ambiguous_binding` for a tie.
+- Follow paginated Beszel alternate routes, use the oldest page collection
+  time, and report mixed page age, overlapping pages, or unverified record
+  identities as incomplete coverage.
+- Emit explicit Beszel `cpu_percent` and `memory_percent` values, keep legacy
+  values unit-unknown, and mark out-of-range samples invalid.
 - Reject method, URL, representation, and conditional override headers in
   static headers and `token_header`, while keeping benign tenant headers.
 - Honor upstream `Cache-Control: no-store`, `no-cache`, `max-age`, and
