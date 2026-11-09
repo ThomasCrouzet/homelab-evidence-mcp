@@ -176,9 +176,10 @@ services:
 		WindowStart *time.Time     `json:"window_start"`
 	}
 	type outcome struct {
-		Complete bool   `json:"complete"`
-		Items    []item `json:"items"`
-		Sources  []struct {
+		Complete  bool   `json:"complete"`
+		TimeBasis string `json:"time_basis"`
+		Items     []item `json:"items"`
+		Sources   []struct {
 			Kind               string `json:"kind"`
 			Status             string `json:"status"`
 			Reason             string `json:"reason"`
@@ -228,6 +229,9 @@ services:
 	}
 	if recovered.Items[0].WindowStart == nil || recovered.Items[1].WindowStart == nil {
 		t.Fatal("history items have no window")
+	}
+	if recovered.TimeBasis != "historical_transitions" {
+		t.Fatalf("time_basis=%q", recovered.TimeBasis)
 	}
 	recoveredSource := find(recovered, "healthchecks")
 	if recoveredSource.status != "ok" || recoveredSource.reason != "unknown_history_coverage" || recoveredSource.complete {

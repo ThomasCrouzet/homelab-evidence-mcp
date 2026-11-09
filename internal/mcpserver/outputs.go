@@ -90,6 +90,7 @@ type FailedCronsOut struct {
 	SourceComplete      bool                     `json:"source_complete"`
 	DeliveryComplete    bool                     `json:"delivery_complete"`
 	Truncated           bool                     `json:"truncated"`
+	TimeBasis           string                   `json:"time_basis"`
 	ByteBudget          int                      `json:"byte_budget"`
 	ByteSize            int                      `json:"byte_size"`
 	ByteBudgetTruncated bool                     `json:"byte_budget_truncated"`
