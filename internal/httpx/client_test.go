@@ -1,6 +1,8 @@
 package httpx
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/x509"
 	"errors"
@@ -574,5 +576,50 @@ func TestGet_CacheKeyDoesNotLeakQueryText(t *testing.T) {
 		if strings.Contains(key, secret) || strings.Contains(key, "query=") {
 			t.Fatalf("cache key contains request text: %q", key)
 		}
+	}
+}
+
+func TestGet_DecodesGzipResponse(t *testing.T) {
+	calls := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		var buf bytes.Buffer
+		zw := gzip.NewWriter(&buf)
+		_, _ = zw.Write([]byte(`{"ok":true}`))
+		_ = zw.Close()
+		w.Header().Set("Content-Encoding", "gzip")
+		_, _ = w.Write(buf.Bytes())
+	}))
+	defer ts.Close()
+	client := NewLockedClient(Options{Timeout: time.Second, CacheTTL: time.Minute})
+	_ = client.RegisterDestination("src", ts.URL)
+	_, body, err := client.Get(context.Background(), "src", "/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != `{"ok":true}` {
+		t.Fatalf("body=%q", body)
+	}
+	// The cached representation is the decoded body.
+	_, cached, err := client.Get(context.Background(), "src", "/", nil)
+	if err != nil || string(cached) != `{"ok":true}` || calls != 1 {
+		t.Fatalf("cache calls=%d body=%q err=%v", calls, cached, err)
+	}
+}
+
+func TestGet_BoundsDecompressedGzip(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		var buf bytes.Buffer
+		zw := gzip.NewWriter(&buf)
+		_, _ = zw.Write(bytes.Repeat([]byte("a"), 4096))
+		_ = zw.Close()
+		w.Header().Set("Content-Encoding", "gzip")
+		_, _ = w.Write(buf.Bytes())
+	}))
+	defer ts.Close()
+	client := NewLockedClient(Options{Timeout: time.Second, MaxBody: 512})
+	_ = client.RegisterDestination("src", ts.URL)
+	if _, _, err := client.Get(context.Background(), "src", "/", nil); err == nil {
+		t.Fatal("decompressed body above the cap was accepted")
 	}
 }

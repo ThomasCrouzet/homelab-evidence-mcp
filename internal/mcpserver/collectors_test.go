@@ -118,3 +118,35 @@ func TestWithSourceTimeoutLimitsConcurrency(t *testing.T) {
 		}
 	}
 }
+
+func TestHistoricalSnapshotWindowsSkipUpstream(t *testing.T) {
+	app := &App{Cfg: &config.Config{Limits: config.Limits{PerSourceTimeout: time.Second}}}
+	past := time.Now().UTC().Add(-2 * time.Hour)
+	end := past.Add(time.Hour)
+	ctx := context.Background()
+	cases := []struct {
+		name    string
+		collect func() (evidence.SourceOutcome, []evidence.Item)
+	}{
+		{name: "docker", collect: func() (evidence.SourceOutcome, []evidence.Item) {
+			return app.collectDockerWindow(ctx, "svc", &config.DockerRef{Source: "docker"}, past, end)
+		}},
+		{name: "beszel", collect: func() (evidence.SourceOutcome, []evidence.Item) {
+			return app.collectBeszelWindow(ctx, "svc", &config.BeszelRef{Source: "beszel"}, past, end)
+		}},
+		{name: "healthchecks snapshot", collect: func() (evidence.SourceOutcome, []evidence.Item) {
+			return app.collectHCWindow(ctx, "svc", &config.HealthchecksRef{Source: "hc"}, past, end)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			outcome, items := tc.collect()
+			if outcome.Reason != "unsupported_history" || outcome.Complete || len(items) != 0 {
+				t.Fatalf("outcome=%+v items=%d", outcome, len(items))
+			}
+			if outcome.Status != "ok" {
+				t.Fatalf("status=%s", outcome.Status)
+			}
+		})
+	}
+}

@@ -1034,7 +1034,7 @@ func isReservedHeaderName(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "host", "content-length", "user-agent", "accept", "connection",
 		"transfer-encoding", "trailer", "upgrade", "proxy-connection",
-		"keep-alive", "te":
+		"keep-alive", "te", "x-loki-response-encoding-flags":
 		return true
 	default:
 		return false
