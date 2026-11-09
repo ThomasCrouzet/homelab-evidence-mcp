@@ -88,6 +88,11 @@ The server and the operator use these controls for secrets:
 - The server rejects a static header that equals the effective authentication
   header in any letter case. This rule includes adapter default headers.
   Header names are canonical, so each logical header has one value.
+- The server rejects method and URL override headers, including
+  `X-HTTP-Method-Override`, `X-Method-Override`, `X-Original-URL`, and
+  `X-Rewrite-URL`. It also rejects representation and conditional headers such
+  as `Accept-Encoding`, `Range`, `If-None-Match`, and `If-Modified-Since`.
+  A tenant header that does not change the method or target remains valid.
 - The server does not accept query strings, fragments, and userinfo in `base_url`.
 - Errors and capabilities do not show tokens, URLs, or destination hostnames.
   They use the logical source name.
@@ -113,6 +118,9 @@ The server and the operator use these controls for secrets:
 - The source response cache does not keep response headers. This includes
   `Set-Cookie` and authentication challenges. It keeps only the ntfy
   `X-Messages-Truncated` signal as a boolean for cache hits.
+- The source response cache honors upstream `Cache-Control: no-store` and
+  `no-cache` by not storing the body. A `max-age` value caps the configured
+  source TTL. A `Pragma: no-cache` response also bypasses storage.
 - Make sure that only the owner can access the YAML configuration.
 - On Unix, the server creates the audit file in mode `0600`.
 - On Windows, use a user-only ACL for the audit file path. Token files are

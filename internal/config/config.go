@@ -1056,7 +1056,17 @@ func isReservedHeaderName(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "host", "content-length", "user-agent", "accept", "connection",
 		"transfer-encoding", "trailer", "upgrade", "proxy-connection",
-		"keep-alive", "te", "x-loki-response-encoding-flags":
+		"keep-alive", "te", "x-loki-response-encoding-flags",
+		"content-type", "content-encoding",
+		// Method and target overrides can change the effective GET or path
+		// when a downstream proxy honors them.
+		"x-http-method", "x-http-method-override", "x-method-override",
+		"x-original-url", "x-rewrite-url", "x-forwarded-method",
+		"x-forwarded-uri", "x-original-uri", "destination", "overwrite",
+		// Representation and conditional headers change the body or status
+		// rather than the locked destination.
+		"accept-encoding", "range", "if-range", "if-match", "if-none-match",
+		"if-modified-since", "if-unmodified-since":
 		return true
 	default:
 		return false

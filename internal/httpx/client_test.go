@@ -694,3 +694,60 @@ func TestGet_DoesNotCoalesceDifferentAuth(t *testing.T) {
 		t.Fatalf("different auth shared a response: calls=%d", calls.Load())
 	}
 }
+
+func TestGet_HonorsUpstreamCacheDirectives(t *testing.T) {
+	cases := []struct {
+		name   string
+		header string
+		want   string
+	}{
+		{name: "no-store", header: "no-store", want: "2"},
+		{name: "no-cache", header: "no-cache", want: "2"},
+		{name: "max-age zero", header: "max-age=0", want: "2"},
+		{name: "max-age one", header: "max-age=1", want: "1"},
+		{name: "no directive", header: "", want: "1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls++
+				if tc.header != "" {
+					w.Header().Set("Cache-Control", tc.header)
+				}
+				_, _ = w.Write([]byte{byte('0' + calls)})
+			}))
+			defer ts.Close()
+			client := NewLockedClient(Options{Timeout: time.Second, CacheTTL: time.Minute})
+			_ = client.RegisterDestination("src", ts.URL)
+			_, first, err := client.Get(context.Background(), "src", "/", nil) //nolint:bodyclose
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, second, err := client.Get(context.Background(), "src", "/", nil) //nolint:bodyclose
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(first) == "" || string(second) != tc.want {
+				t.Fatalf("first=%q second=%q want=%q calls=%d", first, second, tc.want, calls)
+			}
+		})
+	}
+}
+
+func TestGet_PragmaNoCache(t *testing.T) {
+	calls := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Header().Set("Pragma", "no-cache")
+		_, _ = w.Write([]byte{byte('0' + calls)})
+	}))
+	defer ts.Close()
+	client := NewLockedClient(Options{Timeout: time.Second, CacheTTL: time.Minute})
+	_ = client.RegisterDestination("src", ts.URL)
+	_, _, _ = client.Get(context.Background(), "src", "/", nil)       //nolint:bodyclose
+	_, second, _ := client.Get(context.Background(), "src", "/", nil) //nolint:bodyclose
+	if string(second) != "2" {
+		t.Fatalf("Pragma no-cache reused the body: %q", second)
+	}
+}
