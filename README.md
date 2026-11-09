@@ -152,11 +152,16 @@ The demo does not exercise the stdio executable.
 
 ### Installation
 
-Install the command with Go:
+Install the latest published release with Go:
 
 ```bash
-go install github.com/ThomasCrouzet/homelab-evidence-mcp/cmd/homelab-evidence-mcp@latest
+go install github.com/ThomasCrouzet/homelab-evidence-mcp/cmd/homelab-evidence-mcp@v0.1.3
 ```
+
+`@latest` resolves to the newest published tag. It does not install `main`.
+Some features in this README are unreleased. See
+[release status](docs/release-status.md) for the feature table and the
+development build path.
 
 Add the Go binary directory to `PATH`, or use the installed binary's absolute
 path. Alternatively, build from the cloned repository:

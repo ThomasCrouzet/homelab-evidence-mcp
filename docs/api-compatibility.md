@@ -169,8 +169,13 @@ The Healthchecks adapter has this behavior:
   `missing_identity`.
 - Per-check history failures are reported as `partial_fetch`; successful
   transitions from other checks remain available.
-- Healthchecks does not document complete transition retention. Transition
-  results therefore report `unknown_history_coverage` and `complete: false`.
+- Hosted Healthchecks documents flip retention for the current month and the
+  two complete preceding months, subject to periodic cleanup. Self-hosted
+  deployments and older versions can differ. A transition window that starts
+  before that horizon is not fully provable. Transition results therefore
+  report `unknown_history_coverage`, set `retention_limited: true` when the
+  window reaches before the horizon, and keep `complete: false`. An empty
+  result never proves that no incident occurred.
 - `service_status` remains a current snapshot. A historical window in a
   snapshot-only mode gives `unsupported_history` before any GET and does not
   include the current state.

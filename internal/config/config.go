@@ -338,13 +338,9 @@ func Parse(raw []byte) (*Config, error) {
 	if len(raw) > maxConfigBytes {
 		return nil, ValidationErrors{{Path: ".", Message: fmt.Sprintf("configuration exceeds %d bytes", maxConfigBytes)}}
 	}
-	// Give an error for clearly executable or include syntax.
-	s := string(raw)
-	for _, bad := range []string{"{{", "}}", "!!python", "!!js", "${", "`$(", "include:", "!include"} {
-		if strings.Contains(s, bad) {
-			return nil, ValidationErrors{{Path: ".", Message: "disallowed template or include syntax: " + bad}}
-		}
-	}
+	// yaml.v3 does not evaluate tags, templates, environment substitutions, or
+	// includes. KnownFields rejects unknown keys, and unsupported tags fail
+	// during decode. Inert comments and quoted literals are not scanned.
 
 	var fc fileConfig
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
