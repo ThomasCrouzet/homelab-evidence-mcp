@@ -133,9 +133,14 @@ Overlapping or adjacent matches form one redacted region. Empty matches add no t
 
 Each audit write contains one complete JSONL record.
 The file writer refuses a record larger than `audit.max_bytes` before rotation.
-If an audit write fails, stderr receives the fixed diagnostic `audit write failed`.
-The server gives one diagnostic per continuous failure period.
-The diagnostic contains no writer error, path, or event data.
+A failed stderr write does not stop a configured audit file from receiving the
+record. A partial append is rolled back, and an incomplete final JSONL record is
+repaired when the file is opened again.
+On Unix, one process takes an exclusive sidecar lock for an audit path. A second
+process receives a clear `audit file is in use by another process` error.
+If every audit destination fails, stderr receives the fixed diagnostic
+`audit write failed`. The server gives one diagnostic per continuous failure
+period. The diagnostic contains no writer error, path, or event data.
 Tool calls continue, and the server attempts subsequent audit writes.
 A rotation or reopen failure is recoverable: the next write reopens the file
 with the regular-file, mode `0600`, and size checks. `Close` stops recovery.

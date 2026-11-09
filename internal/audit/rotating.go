@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,9 @@ import (
 // The error has no path or record content. A later Write retries the open.
 var ErrStorageUnavailable = errors.New("audit storage unavailable")
 
+// ErrStorageInUse reports a second process that owns the same audit path.
+var ErrStorageInUse = errors.New("audit file is in use by another process")
+
 // RotatingFile sets a maximum size and does numbered rotation.
 // Callers must not pass secrets to it.
 type RotatingFile struct {
@@ -22,6 +26,7 @@ type RotatingFile struct {
 	maxFiles int
 	size     int64
 	f        *os.File
+	lock     *os.File
 	closed   bool
 }
 
@@ -39,16 +44,28 @@ func OpenRotating(path string, maxBytes int64, maxFiles int) (*RotatingFile, err
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil && filepath.Dir(path) != "." {
 		return nil, err
 	}
+	lock, err := lockAuditPath(path)
+	if err != nil {
+		return nil, err
+	}
 	f, err := openRegularAuditFile(path, true)
 	if err != nil {
+		unlockAuditPath(lock)
 		return nil, err
 	}
 	st, err := f.Stat()
 	if err != nil {
 		_ = f.Close()
+		unlockAuditPath(lock)
 		return nil, err
 	}
-	return &RotatingFile{path: path, maxBytes: maxBytes, maxFiles: maxFiles, size: st.Size(), f: f}, nil
+	size, err := repairTornTail(f, st.Size())
+	if err != nil {
+		_ = f.Close()
+		unlockAuditPath(lock)
+		return nil, ErrStorageUnavailable
+	}
+	return &RotatingFile{path: path, maxBytes: maxBytes, maxFiles: maxFiles, size: size, f: f, lock: lock}, nil
 }
 
 // Write is the io.Writer implementation.
@@ -72,8 +89,24 @@ func (r *RotatingFile) Write(p []byte) (int, error) {
 			return 0, err
 		}
 	}
+	start := r.size
 	n, err := r.f.Write(p)
-	r.size += int64(n)
+	if n == len(p) && err == nil {
+		r.size += int64(n)
+		return n, nil
+	}
+	// Roll back a partial append so the next JSONL record cannot join a torn
+	// record. If rollback fails, close the file; the next open repairs the tail.
+	if rollbackErr := r.f.Truncate(start); rollbackErr != nil {
+		_ = r.f.Close()
+		r.f = nil
+		r.size = 0
+	} else {
+		r.size = start
+	}
+	if err == nil {
+		err = io.ErrShortWrite
+	}
 	return n, err
 }
 
@@ -82,11 +115,13 @@ func (r *RotatingFile) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.closed = true
-	if r.f == nil {
-		return nil
+	var err error
+	if r.f != nil {
+		err = r.f.Close()
+		r.f = nil
 	}
-	err := r.f.Close()
-	r.f = nil
+	unlockAuditPath(r.lock)
+	r.lock = nil
 	return err
 }
 
@@ -132,13 +167,57 @@ func (r *RotatingFile) reopenLocked() error {
 		_ = f.Close()
 		return ErrStorageUnavailable
 	}
+	size, err := repairTornTail(f, st.Size())
+	if err != nil {
+		_ = f.Close()
+		return ErrStorageUnavailable
+	}
 	r.f = f
-	r.size = st.Size()
+	r.size = size
 	return nil
 }
 
+// repairTornTail truncates an incomplete final JSONL record. It keeps every
+// complete prior record.
+func repairTornTail(f *os.File, size int64) (int64, error) {
+	if size == 0 {
+		return 0, nil
+	}
+	last := make([]byte, 1)
+	if _, err := f.ReadAt(last, size-1); err != nil {
+		return size, err
+	}
+	if last[0] == '\n' {
+		return size, nil
+	}
+	const chunk = 4096
+	position := size
+	for position > 0 {
+		start := position - chunk
+		if start < 0 {
+			start = 0
+		}
+		buf := make([]byte, position-start)
+		if _, err := f.ReadAt(buf, start); err != nil && !errors.Is(err, io.EOF) {
+			return size, err
+		}
+		if index := bytes.LastIndexByte(buf, '\n'); index >= 0 {
+			cut := start + int64(index) + 1
+			if err := f.Truncate(cut); err != nil {
+				return size, err
+			}
+			return cut, nil
+		}
+		position = start
+	}
+	if err := f.Truncate(0); err != nil {
+		return size, err
+	}
+	return 0, nil
+}
+
 func openRegularAuditFile(path string, appendMode bool) (*os.File, error) {
-	flags := os.O_CREATE | os.O_WRONLY
+	flags := os.O_CREATE | os.O_RDWR
 	if appendMode {
 		flags |= os.O_APPEND
 	}
@@ -179,7 +258,37 @@ func openRegularAuditFile(path string, appendMode bool) (*os.File, error) {
 	return f, nil
 }
 
-// MultiWriter copies writes to all outputs.
+// MultiWriter copies each write to every writer. A failure in one destination
+// does not stop the others, but the combined writer reports it so the operator
+// learns that a configured destination lost an event.
 func MultiWriter(writers ...io.Writer) io.Writer {
-	return io.MultiWriter(writers...)
+	return &fanoutWriter{writers: writers}
+}
+
+type fanoutWriter struct {
+	writers []io.Writer
+}
+
+func (f *fanoutWriter) Write(p []byte) (int, error) {
+	if len(f.writers) == 0 {
+		return 0, io.ErrClosedPipe
+	}
+	maxWritten := 0
+	var firstErr error
+	for _, writer := range f.writers {
+		written, err := writer.Write(p)
+		if written > maxWritten {
+			maxWritten = written
+		}
+		if err != nil || written != len(p) {
+			if firstErr == nil {
+				if err != nil {
+					firstErr = err
+				} else {
+					firstErr = io.ErrShortWrite
+				}
+			}
+		}
+	}
+	return maxWritten, firstErr
 }

@@ -71,6 +71,13 @@ This file records project changes. Its format uses
   map, so distinct streams cannot collide after label allowlisting.
 - Prefer a Loki `level`/`severity` label and structured level field over
   keyword guesses, and do not report negated or zero-count phrases as errors.
+- Keep the persistent audit file independent of a failed stderr writer, roll
+  back a partial append, repair an incomplete final JSONL record, and take an
+  exclusive Unix sidecar lock against a second process.
+- Sanitize configuration and startup failures before stderr or doctor JSON,
+  including token and CA file paths.
+- Return exit code `2` for doctor and validate configuration or prerequisite
+  failures, and emit one sanitized JSON error under `--doctor --json`.
 - Rebuild the incident `factual_summary` and item warnings from the retained
   items after compact selection, while source coverage warnings stay visible.
 - Enforce the compact byte budget after the summary rebuild. A metadata-only
