@@ -100,7 +100,9 @@ A grouped response contains:
 - The state and truncation of each source: `ok`, `error`, `timeout`,
   `canceled`, `skipped`, or `absent`
 - `source_complete` reports whether every queried source answered with
-  complete coverage. `complete` keeps the same value for older clients.
+  complete coverage. A service with no bound source reports
+  `reason: no_bound_sources` and `complete: false`; it does not claim a
+  successful investigation. `complete` keeps the same value for older clients.
 - `delivery_complete` reports whether the response includes every retrieved
   item. It is false when item selection or the response byte budget omitted a
   retrieved item.

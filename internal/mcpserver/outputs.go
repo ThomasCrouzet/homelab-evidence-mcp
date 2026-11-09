@@ -56,6 +56,7 @@ type ServiceStatusOut struct {
 	ByteSize            int                      `json:"byte_size"`
 	ByteBudgetTruncated bool                     `json:"byte_budget_truncated"`
 	OmittedItems        int                      `json:"omitted_items"`
+	Reason              string                   `json:"reason,omitempty"`
 	RetrievedAt         string                   `json:"retrieved_at"`
 	Note                string                   `json:"note"`
 }
@@ -95,6 +96,7 @@ type FailedCronsOut struct {
 	ByteSize            int                      `json:"byte_size"`
 	ByteBudgetTruncated bool                     `json:"byte_budget_truncated"`
 	OmittedItems        int                      `json:"omitted_items"`
+	Reason              string                   `json:"reason,omitempty"`
 	Note                string                   `json:"note"`
 }
 
@@ -146,7 +148,8 @@ func applyStatusEnum(schema *jsonschema.Schema) {
 				"not_queried_by_tool", "unknown_history_coverage", "partial_fetch",
 				"missing_identity", "omitted_checks", "ambiguous_binding",
 				"outside_registry_scope", "retention_limited",
-				"status_filter_no_match", "identity_unverified", "request_budget_exceeded")
+				"status_filter_no_match", "identity_unverified", "request_budget_exceeded",
+				"no_bound_sources")
 		case "cache_state":
 			property.Enum = stringEnum("", "hit", "miss", "disabled")
 		}
