@@ -48,6 +48,9 @@ sources:
     # ca_file: /etc/homelab-evidence/gatus-ca.pem
     # The client keeps path prefixes.
     # For example, use https://proxy.example/gatus.
+    # Optional per-source address policy. Every dial must resolve inside one
+    # of these networks. This is opt-in and keeps TLS verification active.
+    # allowed_cidrs: ["192.0.2.0/24", "2001:db8::/32"]
     # Use optional static headers without secrets.
     # headers:
     #   X-Scope-OrgID: lab

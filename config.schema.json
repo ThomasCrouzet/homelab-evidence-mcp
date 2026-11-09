@@ -104,6 +104,12 @@
             "maxLength": 4096,
             "description": "Add extra CA trust for this source only. It replaces the global tls.ca_file for this source. TLS hostname verification stays active."
           },
+          "allowed_cidrs": {
+            "type": "array",
+            "maxItems": 32,
+            "items": { "type": "string", "description": "Use an IPv4 or IPv6 CIDR. Every dial must resolve to an address in one of these networks." },
+            "description": "Optional per-source dial-time address policy. It mitigates DNS rebinding and limits a source to approved networks. TLS hostname verification stays active."
+          },
           "token_env": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
           "token_file": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Use a regular file with a maximum size of 4 KiB. On Unix, let only the owner access the file. Use mode 0600. The binary does not accept files that a group or other users can access. On Windows, use a user-only ACL. The binary does not examine Windows ACLs." },
           "token_header": {
