@@ -37,6 +37,19 @@ This file records project changes. Its format uses
   and mark a check without a stable unique identity as unverified.
 - Reuse one Healthchecks inventory per source for global `failed_crons`, bound
   the worker count, and add a per-source sliding request budget.
+- Redact a configured service display name in `list_services` and
+  `service_status` before MCP emission.
+- Reject the unsupported Loki categorized-encoding header, decode gzip response
+  bodies with a decoded-size limit, and skip a snapshot GET for a wholly
+  historical window with `unsupported_history`.
+- Replace raw YAML substring bans with parser-aware validation, so comments and
+  quoted literals are allowed while unsupported tags still fail.
+- Add a schema/runtime parity test for the shipped example and unknown keys.
+- Extend the tracked-file privacy check to RFC1918, IPv6 ULA, private DNS, and
+  the existing Tailscale patterns, with safe documentation ranges excluded.
+- Make the release matrix recipe use POSIX `sh` without `pipefail`.
+- Document the latest release versus `main`, the feature availability table,
+  the development build path, and Healthchecks flip retention.
 - Add an optional `service_id` to a per-binding source outcome, and use the
   binding and service identity as stable sort tie-breakers before opaque ids.
 - Validate every returned Loki stream against the configured equality labels

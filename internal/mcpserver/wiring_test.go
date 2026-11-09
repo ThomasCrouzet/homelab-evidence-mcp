@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -498,5 +499,56 @@ services:
 	}
 	if len(parsed.Items) != 2 {
 		t.Fatalf("per-service items=%+v", parsed.Items)
+	}
+}
+
+func TestRegistryPresentation_RedactsDisplayName(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"name": "api", "key": "api",
+			"results": []map[string]any{{"success": true, "status": 200, "timestamp": time.Now().UTC().Format(time.RFC3339)}},
+		}})
+	}))
+	defer server.Close()
+	raw := fmt.Sprintf(`version: 1
+sources:
+  gatus:
+    kind: gatus
+    base_url: %s
+services:
+  - id: api
+    display_name: "Ops ops@example.com"
+    sources:
+      gatus: { source: gatus, endpoint_key: api }
+`, server.URL)
+	cfg, err := config.Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := NewApp(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), audit.New(io.Discard))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, call := range map[string]func() (any, error){
+		"list_services": func() (any, error) {
+			_, out, err := app.toolListServices(context.Background(), nil, listServicesIn{})
+			return out, err
+		},
+		"service_status": func() (any, error) {
+			_, out, err := app.toolServiceStatus(context.Background(), nil, serviceIDIn{ServiceID: "api"})
+			return out, err
+		},
+	} {
+		out, err := call()
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(out)
+		if bytes.Contains(raw, []byte("ops@example.com")) {
+			t.Fatalf("%s disclosed the display name: %s", name, raw)
+		}
+		if !bytes.Contains(raw, []byte("[REDACTED]")) {
+			t.Fatalf("%s did not mark the redaction: %s", name, raw)
+		}
 	}
 }

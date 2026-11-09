@@ -341,13 +341,9 @@ func Parse(raw []byte) (*Config, error) {
 	if len(raw) > maxConfigBytes {
 		return nil, ValidationErrors{{Path: ".", Message: fmt.Sprintf("configuration exceeds %d bytes", maxConfigBytes)}}
 	}
-	// Give an error for clearly executable or include syntax.
-	s := string(raw)
-	for _, bad := range []string{"{{", "}}", "!!python", "!!js", "${", "`$(", "include:", "!include"} {
-		if strings.Contains(s, bad) {
-			return nil, ValidationErrors{{Path: ".", Message: "disallowed template or include syntax: " + bad}}
-		}
-	}
+	// yaml.v3 does not evaluate tags, templates, environment substitutions, or
+	// includes. KnownFields rejects unknown keys, and unsupported tags fail
+	// during decode. Inert comments and quoted literals are not scanned.
 
 	var fc fileConfig
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
@@ -1043,7 +1039,7 @@ func isReservedHeaderName(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "host", "content-length", "user-agent", "accept", "connection",
 		"transfer-encoding", "trailer", "upgrade", "proxy-connection",
-		"keep-alive", "te":
+		"keep-alive", "te", "x-loki-response-encoding-flags":
 		return true
 	default:
 		return false

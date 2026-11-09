@@ -102,6 +102,9 @@ func (a *App) collectDockerStatus(ctx context.Context, serviceID string, ref *co
 }
 
 func (a *App) collectDockerWindow(ctx context.Context, serviceID string, ref *config.DockerRef, start, end time.Time) (evidence.SourceOutcome, []evidence.Item) {
+	if windowIsHistorical(end) {
+		return unsupportedHistory(ref.Source, evidence.SourceDocker), nil
+	}
 	outcome, items := a.withSourceTimeout(ctx, ref.Source, evidence.SourceDocker, func(ctx context.Context) ([]evidence.Item, error) {
 		cli := a.dock[ref.Source]
 		if cli == nil {
@@ -199,6 +202,9 @@ func (a *App) collectHCWindow(ctx context.Context, serviceID string, ref *config
 		})
 		a.applyHCTransition(&outcome, transition, items)
 		return outcome, items
+	}
+	if windowIsHistorical(end) {
+		return unsupportedHistory(ref.Source, evidence.SourceHealthchecks), nil
 	}
 	outcome, items := a.withSourceTimeout(ctx, ref.Source, evidence.SourceHealthchecks, func(ctx context.Context) ([]evidence.Item, error) {
 		cli := a.hc[ref.Source]
@@ -418,6 +424,9 @@ func (a *App) collectBeszel(ctx context.Context, serviceID string, ref *config.B
 }
 
 func (a *App) collectBeszelWindow(ctx context.Context, serviceID string, ref *config.BeszelRef, start, end time.Time) (evidence.SourceOutcome, []evidence.Item) {
+	if windowIsHistorical(end) {
+		return unsupportedHistory(ref.Source, evidence.SourceBeszel), nil
+	}
 	outcome, items := a.withSourceTimeout(ctx, ref.Source, evidence.SourceBeszel, func(ctx context.Context) ([]evidence.Item, error) {
 		cli := a.beszel[ref.Source]
 		if cli == nil {
@@ -604,6 +613,20 @@ func markDiscarded(outcome *evidence.SourceOutcome, discarded int) {
 
 // markSnapshotHistory reports that a snapshot-only source cannot answer a
 // window that ends in the past.
+func windowIsHistorical(end time.Time) bool {
+	return end.Before(time.Now().UTC().Add(-30 * time.Second))
+}
+
+func unsupportedHistory(sourceName string, kind evidence.SourceKind) evidence.SourceOutcome {
+	return evidence.SourceOutcome{
+		SourceName: sourceName,
+		Kind:       kind,
+		Status:     "ok",
+		Reason:     "unsupported_history",
+		Complete:   false,
+	}
+}
+
 func markSnapshotHistory(outcome *evidence.SourceOutcome, _, end time.Time) {
 	if outcome.Status != "ok" {
 		return

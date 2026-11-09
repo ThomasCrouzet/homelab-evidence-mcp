@@ -216,6 +216,9 @@ func (a *App) toolListServices(ctx context.Context, _ *mcp.CallToolRequest, in l
 		if items == nil {
 			items = []registry.ServiceView{}
 		}
+		for index := range items {
+			items[index].DisplayName = a.safeDisplayName(items[index].DisplayName)
+		}
 		out := ListServicesOut{
 			Services: items,
 			Total:    total,
@@ -309,7 +312,7 @@ func (a *App) toolServiceStatus(ctx context.Context, _ *mcp.CallToolRequest, in 
 		}
 		out := ServiceStatusOut{
 			ServiceID:        svc.ID,
-			DisplayName:      svc.DisplayName,
+			DisplayName:      a.safeDisplayName(svc.DisplayName),
 			Items:            items,
 			Sources:          sources,
 			Complete:         complete,
@@ -635,6 +638,12 @@ func textResult(v any) *mcp.CallToolResult {
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(b)}},
 	}
+}
+
+// safeDisplayName redacts trusted operator text before MCP presentation.
+func (a *App) safeDisplayName(name string) string {
+	clean, _, _ := redaction.ApplyAndTruncate(a.Redact, name, 256)
+	return clean
 }
 
 // sanitizeErr redacts errors. Built-in rules are always active.
