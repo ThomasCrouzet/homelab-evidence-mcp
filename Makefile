@@ -1,4 +1,4 @@
-.PHONY: build build-matrix print-version test test-e2e test-quick race lint lint-docs lint-private vet fmt fuzz demo clean coverage
+.PHONY: build build-matrix print-version test test-e2e test-quick race lint lint-docs lint-private vet fmt fuzz bench demo clean coverage test-live
 
 # The source file is authoritative. Override VERSION only for a local build.
 VERSION ?= $(shell tr -d '[:space:]' < internal/version/version.txt)
@@ -76,7 +76,18 @@ lint-private:
 fuzz:
 	go test ./internal/config -fuzz=FuzzParse -fuzztime=10s
 	go test ./internal/redaction -fuzz=FuzzApply -fuzztime=10s
-	go test ./internal/adapters/loki -fuzz=FuzzParseNano -fuzztime=5s
+	go test ./internal/adapters/loki -fuzz=FuzzParseNanoAndResponse -fuzztime=5s
+	go test ./internal/adapters/ntfy -fuzz=FuzzDecodeMessages -fuzztime=5s
+	go test ./internal/adapters/healthchecks -fuzz=FuzzDecodeFlips -fuzztime=5s
+	go test ./internal/adapters/beszel -fuzz=FuzzDecodeSystemPage -fuzztime=5s
+	go test ./internal/adapters/gatus -fuzz=FuzzDecodeEndpointStatuses -fuzztime=5s
+	go test ./internal/adapters/docker -fuzz=FuzzDecodeContainers -fuzztime=5s
+
+bench:
+	go test ./internal/evidence ./internal/mcpserver ./internal/adapters/ntfy ./internal/adapters/loki -run '^$$' -bench . -benchtime=100x -count=1
+
+test-live:
+	./scripts/check-live-upstreams.sh
 
 demo:
 	go run ./demo

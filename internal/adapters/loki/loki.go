@@ -161,7 +161,14 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 		maxLineBytes = 2048
 	}
 
-	var items []evidence.Item
+	type candidate struct {
+		stream   map[string]string
+		streamID string
+		ts       time.Time
+		line     string
+		order    int
+	}
+	var candidates []candidate
 	position := 0
 	for _, stream := range raw.Data.Result {
 		if !labelsMatch(stream.Stream, equality) {
@@ -171,7 +178,6 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 			continue
 		}
 		streamID := c.streamRef(stream.Stream)
-		labels, labelRedactions, labelsTruncated := c.filterLabels(stream.Stream)
 		for _, pair := range stream.Values {
 			if len(pair) < 2 {
 				if opt.Stats != nil {
@@ -190,52 +196,67 @@ func (c *Client) Search(ctx context.Context, opt QueryOptions) ([]evidence.Item,
 			if ts.Before(opt.Start) || !ts.Before(opt.End) {
 				continue
 			}
-			line := pair[1]
-			// Untrusted content is data. Sanitize it, then redact it.
-			line = redaction.SanitizeControl(line)
-			cleaned, rn := c.redact(line)
-			// Mark instruction-like text. Do not run it.
-			cleaned = redaction.NeutralizeInstructionLike(cleaned)
-			cleaned, lineTruncated := redaction.TruncateBytes(cleaned, maxLineBytes)
-
-			sum := cleaned
-			summaryTruncated := false
-			if utf8.RuneCountInString(sum) > 200 {
-				sum, summaryTruncated = redaction.Truncate(sum, 200)
-			}
-			severity, severitySource := severityFor(labels, cleaned)
-			attrs := map[string]any{
-				"line":            cleaned,
-				"severity_source": severitySource,
-			}
-			for k, v := range labels {
-				attrs["label_"+k] = v
-			}
-			items = append(items, evidence.Item{
-				ID:                evidence.NewOpaqueID("ev"),
-				ServiceID:         opt.ServiceID,
-				Source:            evidence.SourceLoki,
-				SourceID:          streamID,
-				Kind:              evidence.KindLogLine,
-				ObservedAt:        ts,
-				RetrievedAt:       retrievedAt,
-				WindowStart:       timePtr(opt.Start),
-				WindowEnd:         timePtr(opt.End),
-				Summary:           sum,
-				Severity:          severity,
-				Attributes:        attrs,
-				Truncated:         lineTruncated || summaryTruncated || labelsTruncated,
-				RedactionsApplied: rn + labelRedactions,
-				Freshness:         evidence.ComputeFreshness(ts, retrievedAt),
-				Order:             position,
+			candidates = append(candidates, candidate{
+				stream: stream.Stream, streamID: streamID, ts: ts, line: pair[1], order: position,
 			})
 			position++
 		}
 	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if !candidates[i].ts.Equal(candidates[j].ts) {
+			return candidates[i].ts.Before(candidates[j].ts)
+		}
+		return candidates[i].order < candidates[j].order
+	})
+	truncated := len(candidates) > opt.Limit
+	if truncated {
+		candidates = candidates[len(candidates)-opt.Limit:]
+	}
+	// Build evidence only for the retained candidates. Decoding and selecting
+	// a large response therefore stays bounded by the source body and limit.
+	items := make([]evidence.Item, 0, len(candidates))
+	for _, entry := range candidates {
+		labels, labelRedactions, labelsTruncated := c.filterLabels(entry.stream)
+		line := redaction.SanitizeControl(entry.line)
+		cleaned, rn := c.redact(line)
+		cleaned = redaction.NeutralizeInstructionLike(cleaned)
+		cleaned, lineTruncated := redaction.TruncateBytes(cleaned, maxLineBytes)
+		sum := cleaned
+		summaryTruncated := false
+		if utf8.RuneCountInString(sum) > 200 {
+			sum, summaryTruncated = redaction.Truncate(sum, 200)
+		}
+		severity, severitySource := severityFor(labels, cleaned)
+		attrs := map[string]any{
+			"line":            cleaned,
+			"severity_source": severitySource,
+		}
+		for k, v := range labels {
+			attrs["label_"+k] = v
+		}
+		items = append(items, evidence.Item{
+			ID:                evidence.NewOpaqueID("ev"),
+			ServiceID:         opt.ServiceID,
+			Source:            evidence.SourceLoki,
+			SourceID:          entry.streamID,
+			Kind:              evidence.KindLogLine,
+			ObservedAt:        entry.ts,
+			RetrievedAt:       retrievedAt,
+			WindowStart:       timePtr(opt.Start),
+			WindowEnd:         timePtr(opt.End),
+			Summary:           sum,
+			Severity:          severity,
+			Attributes:        attrs,
+			Truncated:         lineTruncated || summaryTruncated || labelsTruncated,
+			RedactionsApplied: rn + labelRedactions,
+			Freshness:         evidence.ComputeFreshness(entry.ts, retrievedAt),
+			Order:             entry.order,
+		})
+	}
 	// KeepNewest sorts by timestamp, source, identity, and then the stable
 	// response position. Opaque ids never decide which equal-time line survives.
-	kept, truncated := evidence.KeepNewest(items, opt.Limit)
-	return kept, truncated, nil
+	kept, trimmed := evidence.KeepNewest(items, opt.Limit)
+	return kept, truncated || trimmed, nil
 }
 
 // streamRef gives a bounded process-local stream identity from the complete
@@ -435,17 +456,13 @@ func (c *Client) filterLabels(in map[string]string) (map[string]string, int, boo
 }
 
 func parseNano(s string) (time.Time, bool) {
-	n, err := strconv.ParseInt(s, 10, 64)
+	n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
 	if err != nil {
 		return time.Time{}, false
 	}
-	// Loki uses nanoseconds.
-	sec := n / 1e9
-	nsec := n % 1e9
-	if sec < 0 {
-		return time.Time{}, false
-	}
-	return time.Unix(sec, nsec).UTC(), true
+	// time.Unix normalizes negative nanoseconds and keeps valid pre-1970
+	// signed epochs consistent with -1 ns and -1 s.
+	return time.Unix(0, n).UTC(), true
 }
 
 func (c *Client) redact(s string) (string, int) {

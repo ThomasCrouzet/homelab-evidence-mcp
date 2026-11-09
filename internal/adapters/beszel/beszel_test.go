@@ -3,6 +3,7 @@ package beszel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -199,5 +200,172 @@ func TestStatus_RedactsAllTextAttributes(t *testing.T) {
 	}
 	if item.RedactionsApplied == 0 {
 		t.Fatal("redaction data is missing")
+	}
+}
+
+func TestFindSystem_CanonicalPrecedenceAndAmbiguity(t *testing.T) {
+	rows := []systemRow{
+		{ID: "1", Name: "agent-a", Host: "prod"},
+		{ID: "2", Name: "prod", Host: "node-b"},
+	}
+	got, ok, err := findSystem(rows, "prod")
+	if err != nil || !ok || got.ID != "2" {
+		t.Fatalf("canonical precedence: %+v ok=%v err=%v", got, ok, err)
+	}
+	// Reversing the rows must not change the result.
+	rows[0], rows[1] = rows[1], rows[0]
+	if got, ok, err := findSystem(rows, "prod"); err != nil || !ok || got.ID != "2" {
+		t.Fatalf("row order changed identity: %+v ok=%v err=%v", got, ok, err)
+	}
+	if _, _, err := findSystem([]systemRow{
+		{ID: "1", Name: "same"},
+		{ID: "2", Name: "same"},
+	}, "same"); !errors.Is(err, ErrSystemAmbiguous) {
+		t.Fatalf("duplicate canonical name err=%v", err)
+	}
+	// A unique host alias remains compatible.
+	if got, ok, err := findSystem(rows, "node-b"); err != nil || !ok || got.ID != "2" {
+		t.Fatalf("alias lookup: %+v ok=%v err=%v", got, ok, err)
+	}
+}
+
+func TestStatus_MixedPageAgeIsConservative(t *testing.T) {
+	page1At := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	page2At := page1At.Add(-20 * time.Second)
+	times := []time.Time{page1At, page2At}
+	call := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		if page == "1" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"items": []map[string]any{{"id": "a", "name": "one"}},
+				"page":  1, "perPage": 200, "totalItems": 2, "totalPages": 2,
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{{"id": "b", "name": "two"}},
+			"page":  2, "perPage": 200, "totalItems": 2, "totalPages": 2,
+		})
+	}))
+	defer upstream.Close()
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second, Now: func() time.Time {
+		value := times[call]
+		if call < len(times)-1 {
+			call++
+		}
+		return value
+	}})
+	_ = hc.RegisterDestination("beszel", upstream.URL)
+	cli := &Client{HTTP: hc, DestName: "beszel"}
+	item, err := cli.Status(context.Background(), "svc", "two")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Attributes["mixed_page_age"] != true || item.Attributes["pages"] != 2 {
+		t.Fatalf("mixed age metadata=%+v", item.Attributes)
+	}
+	if !item.ObservedAt.Equal(page2At) {
+		t.Fatalf("observed_at=%s, want oldest page %s", item.ObservedAt, page2At)
+	}
+}
+
+func TestStatus_OverlappingPagesAreReported(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "1" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"items": []map[string]any{{"id": "a", "name": "one"}, {"id": "b", "name": "two"}},
+				"page":  1, "perPage": 200, "totalItems": 4, "totalPages": 2,
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{{"id": "b", "name": "two"}, {"id": "c", "name": "three"}},
+			"page":  2, "perPage": 200, "totalItems": 4, "totalPages": 2,
+		})
+	}))
+	defer upstream.Close()
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
+	_ = hc.RegisterDestination("beszel", upstream.URL)
+	cli := &Client{HTTP: hc, DestName: "beszel"}
+	item, err := cli.Status(context.Background(), "svc", "three")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Attributes["pagination_overlap"] != true {
+		t.Fatalf("overlap not reported: %+v", item.Attributes)
+	}
+}
+
+func TestStatus_AlternateRouteFollowsPagination(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/collections/systems/records":
+			http.NotFound(w, r)
+		case r.URL.Path == "/api/systems" && r.URL.Query().Get("page") == "":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"items": []map[string]any{{"id": "a", "name": "one"}},
+				"page":  1, "perPage": 200, "totalItems": 2, "totalPages": 2,
+			})
+		case r.URL.Path == "/api/systems" && r.URL.Query().Get("page") == "2":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"items": []map[string]any{{"id": "b", "name": "target"}},
+				"page":  2, "perPage": 200, "totalItems": 2, "totalPages": 2,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
+	_ = hc.RegisterDestination("beszel", upstream.URL)
+	cli := &Client{HTTP: hc, DestName: "beszel"}
+	item, err := cli.Status(context.Background(), "svc", "target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Attributes["found"] != true || item.Attributes["system_name"] != "target" {
+		t.Fatalf("page-2 target not found: %+v", item.Attributes)
+	}
+}
+
+func TestStatus_MetricUnitsAndBounds(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"id": "valid", "name": "valid", "info": map[string]any{"cpu": 0, "mp": 100}},
+			{"id": "invalid", "name": "invalid", "info": map[string]any{"cpu": 101, "mp": -1}},
+			{"id": "legacy", "name": "legacy", "cpu": 42.0, "mem": 60.0},
+		})
+	}))
+	defer upstream.Close()
+	hc := httpx.NewLockedClient(httpx.Options{Timeout: time.Second})
+	_ = hc.RegisterDestination("beszel", upstream.URL)
+	cli := &Client{HTTP: hc, DestName: "beszel"}
+	valid, err := cli.Status(context.Background(), "svc", "valid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if valid.Attributes["cpu_percent"] != float64(0) || valid.Attributes["memory_percent"] != float64(100) {
+		t.Fatalf("valid percent metrics=%+v", valid.Attributes)
+	}
+	invalid, err := cli.Status(context.Background(), "svc", "invalid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invalid.Attributes["cpu_invalid"] != true || invalid.Attributes["memory_invalid"] != true {
+		t.Fatalf("out-of-range metrics were accepted: %+v", invalid.Attributes)
+	}
+	if _, ok := invalid.Attributes["cpu_percent"]; ok {
+		t.Fatalf("invalid cpu became a percentage: %+v", invalid.Attributes)
+	}
+	legacy, err := cli.Status(context.Background(), "svc", "legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy.Attributes["cpu_legacy"] != 42.0 || legacy.Attributes["cpu_unit"] != "unknown" {
+		t.Fatalf("legacy metrics relabeled: %+v", legacy.Attributes)
+	}
+	if _, ok := legacy.Attributes["cpu_percent"]; ok {
+		t.Fatalf("legacy metric became a percentage: %+v", legacy.Attributes)
 	}
 }

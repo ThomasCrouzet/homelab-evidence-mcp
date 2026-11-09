@@ -150,3 +150,29 @@ func TestHistoricalSnapshotWindowsSkipUpstream(t *testing.T) {
 		})
 	}
 }
+
+func TestMarkBeszelCollectionReasons(t *testing.T) {
+	cases := []struct {
+		attrs  map[string]any
+		reason string
+	}{
+		{attrs: map[string]any{"mixed_page_age": true}, reason: "mixed_page_age"},
+		{attrs: map[string]any{"pagination_overlap": true}, reason: "pagination_overlap"},
+		{attrs: map[string]any{"pagination_unverified": true}, reason: "pagination_unverified"},
+	}
+	for _, tc := range cases {
+		outcome := evidence.SourceOutcome{Status: "ok", Complete: true}
+		markBeszelCollection(&outcome, []evidence.Item{{Attributes: tc.attrs}})
+		if outcome.Reason != tc.reason || outcome.Complete {
+			t.Fatalf("attrs=%v outcome=%+v", tc.attrs, outcome)
+		}
+	}
+	// Overlap has priority over mixed age.
+	outcome := evidence.SourceOutcome{Status: "ok", Complete: true}
+	markBeszelCollection(&outcome, []evidence.Item{{Attributes: map[string]any{
+		"mixed_page_age": true, "pagination_overlap": true,
+	}}})
+	if outcome.Reason != "pagination_overlap" {
+		t.Fatalf("priority=%s", outcome.Reason)
+	}
+}

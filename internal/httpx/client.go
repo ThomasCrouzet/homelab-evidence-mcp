@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -47,11 +48,22 @@ type destination struct {
 
 // CacheStats gives data about local GET response cache usage.
 type CacheStats struct {
-	Hits   uint64 `json:"hits"`
-	Misses uint64 `json:"misses"`
-	Size   int    `json:"size"`
-	Bytes  int64  `json:"bytes"`
-	TTL    string `json:"ttl"`
+	Hits      uint64 `json:"hits"`
+	Misses    uint64 `json:"misses"`
+	Coalesced uint64 `json:"coalesced"`
+	Size      int    `json:"size"`
+	Bytes     int64  `json:"bytes"`
+	TTL       string `json:"ttl"`
+}
+
+type flight struct {
+	done        chan struct{}
+	status      int
+	header      http.Header
+	body        []byte
+	collectedAt time.Time
+	truncated   bool
+	err         error
 }
 
 type cacheEntry struct {
@@ -74,8 +86,11 @@ type LockedClient struct {
 	cacheOrder   []string
 	cacheBytes   int64
 	cacheKey     [32]byte
+	flightMu     sync.Mutex
+	flights      map[string]*flight
 	hits         atomic.Uint64
 	misses       atomic.Uint64
+	coalesced    atomic.Uint64
 	now          func() time.Time
 }
 
@@ -98,6 +113,9 @@ type Options struct {
 	RootCAs *x509.CertPool
 	// Now supplies the clock for snapshot collection times. Nil uses time.Now.
 	Now func() time.Time
+	// AllowedCIDRs limits every dial to an address in one of these networks.
+	// An empty slice keeps the normal resolver and dial behavior.
+	AllowedCIDRs []*net.IPNet
 }
 
 // NewLockedClient makes a client with TLS certificate verification. Redirects cannot occur.
@@ -111,12 +129,39 @@ func NewLockedClient(opts Options) *LockedClient {
 	if opts.UserAgent == "" {
 		opts.UserAgent = "homelab-evidence-mcp/0.1"
 	}
+	dialer := &net.Dialer{
+		Timeout:   5 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	dialContext := dialer.DialContext
+	if len(opts.AllowedCIDRs) > 0 {
+		allowed := opts.AllowedCIDRs
+		dialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, errors.New("network address rejected")
+			}
+			var addresses []net.IPAddr
+			if parsed := net.ParseIP(host); parsed != nil {
+				addresses = []net.IPAddr{{IP: parsed}}
+			} else {
+				addresses, err = net.DefaultResolver.LookupIPAddr(ctx, host)
+				if err != nil {
+					return nil, errors.New("destination resolution failed")
+				}
+			}
+			for _, candidate := range addresses {
+				if !addressAllowed(candidate.IP, allowed) {
+					continue
+				}
+				return dialer.DialContext(ctx, network, net.JoinHostPort(candidate.IP.String(), port))
+			}
+			return nil, errors.New("destination resolved outside the allowed address policy")
+		}
+	}
 	transport := &http.Transport{
-		Proxy: nil, // Do not use HTTP_PROXY for adapter traffic.
-		DialContext: (&net.Dialer{
-			Timeout:   5 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
+		Proxy:               nil, // Do not use HTTP_PROXY for adapter traffic.
+		DialContext:         dialContext,
 		TLSHandshakeTimeout: 5 * time.Second,
 		MaxIdleConns:        16,
 		IdleConnTimeout:     60 * time.Second,
@@ -135,6 +180,7 @@ func NewLockedClient(opts Options) *LockedClient {
 		cacheTTL:     opts.CacheTTL,
 		now:          opts.Now,
 		cache:        make(map[string]cacheEntry),
+		flights:      make(map[string]*flight),
 	}
 	if _, err := rand.Read(lc.cacheKey[:]); err != nil {
 		// If there is no random key, deactivate the cache. This prevents a weak authentication fingerprint.
@@ -237,11 +283,12 @@ func (c *LockedClient) Stats() CacheStats {
 	ttl := c.cacheTTL
 	c.mu.Unlock()
 	return CacheStats{
-		Hits:   c.hits.Load(),
-		Misses: c.misses.Load(),
-		Size:   size,
-		Bytes:  bytes,
-		TTL:    ttl.String(),
+		Hits:      c.hits.Load(),
+		Misses:    c.misses.Load(),
+		Coalesced: c.coalesced.Load(),
+		Size:      size,
+		Bytes:     bytes,
+		TTL:       ttl.String(),
 	}
 }
 
@@ -318,6 +365,50 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 		info.recordDisabled()
 	}
 
+	for {
+		c.flightMu.Lock()
+		if existing, ok := c.flights[cacheKey]; ok {
+			c.flightMu.Unlock()
+			select {
+			case <-existing.done:
+				if existing.err != nil {
+					// A canceled or failed leader must not poison other callers.
+					if err := ctx.Err(); err != nil {
+						return nil, nil, err
+					}
+					continue
+				}
+				c.coalesced.Add(1)
+				info.recordCoalesced(existing.collectedAt)
+				header := existing.header.Clone()
+				return &http.Response{StatusCode: existing.status, Header: header, Body: http.NoBody}, existing.body, nil
+			case <-ctx.Done():
+				return nil, nil, ctx.Err()
+			}
+		}
+		current := &flight{done: make(chan struct{})}
+		c.flights[cacheKey] = current
+		c.flightMu.Unlock()
+
+		resp, body, fetchErr := c.fetch(ctx, destName, full, headers, cacheKey, info)
+		if fetchErr != nil {
+			current.err = fetchErr
+		} else {
+			current.status = resp.StatusCode
+			current.header = resp.Header.Clone()
+			current.body = body
+			current.collectedAt = CollectionTime(resp, c.clock())
+			current.truncated = headerFlag(resp.Header, UpstreamTruncatedHeader)
+		}
+		c.flightMu.Lock()
+		delete(c.flights, cacheKey)
+		c.flightMu.Unlock()
+		close(current.done)
+		return resp, body, fetchErr
+	}
+}
+
+func (c *LockedClient) fetch(ctx context.Context, destName string, full *url.URL, headers map[string]string, cacheKey string, info *RequestInfo) (*http.Response, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, full.String(), nil)
 	if err != nil {
 		return nil, nil, errors.New("request construction failed")
@@ -373,12 +464,75 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 	// every later cache hit. The header is internal and set after remote headers
 	// are removed. CollectionTime reads it in both paths.
 	collectedAt := c.clock()
+	info.recordMissTime(collectedAt)
 	resp.Header.Set(cacheTimeHeader, collectedAt.Format(time.RFC3339Nano))
 
 	if c.cacheTTL > 0 && resp.StatusCode == http.StatusOK {
-		c.cachePut(cacheKey, resp.StatusCode, body, collectedAt, headerFlag(resp.Header, UpstreamTruncatedHeader))
+		if lifetime, storable := sourceCacheLifetime(resp.Header, c.cacheTTL); storable && lifetime > 0 {
+			c.cachePutWithTTL(cacheKey, resp.StatusCode, body, collectedAt, lifetime, headerFlag(resp.Header, UpstreamTruncatedHeader))
+		}
 	}
 	return resp, body, nil
+}
+
+func addressAllowed(ip net.IP, allowed []*net.IPNet) bool {
+	for _, network := range allowed {
+		if network != nil && network.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// sourceCacheLifetime applies the origin cache directives. no-store and
+// no-cache bypass storage. A max-age value caps the operator TTL.
+func sourceCacheLifetime(header http.Header, ttl time.Duration) (time.Duration, bool) {
+	directives := parseCacheControl(header)
+	if _, ok := directives["no-store"]; ok {
+		return 0, false
+	}
+	if _, ok := directives["no-cache"]; ok {
+		return 0, false
+	}
+	// This is a private in-process cache, so a private response is safe here.
+	if value, ok := directives["max-age"]; ok {
+		seconds, err := strconv.Atoi(value)
+		if err != nil || seconds < 0 {
+			return 0, false
+		}
+		maxAge := time.Duration(seconds) * time.Second
+		if maxAge > ttl {
+			maxAge = ttl
+		}
+		if maxAge <= 0 {
+			return 0, false
+		}
+		return maxAge, true
+	}
+	if strings.Contains(strings.ToLower(strings.Join(header.Values("Pragma"), ",")), "no-cache") {
+		return 0, false
+	}
+	return ttl, true
+}
+
+func parseCacheControl(header http.Header) map[string]string {
+	out := map[string]string{}
+	for _, raw := range header.Values("Cache-Control") {
+		for _, part := range strings.Split(raw, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			key, value, found := strings.Cut(part, "=")
+			key = strings.ToLower(strings.TrimSpace(key))
+			if !found {
+				out[key] = ""
+				continue
+			}
+			out[key] = strings.Trim(strings.TrimSpace(value), `"`)
+		}
+	}
+	return out
 }
 
 func headerFlag(header http.Header, name string) bool {
@@ -432,6 +586,10 @@ func (c *LockedClient) cacheGet(key string) ([]byte, int, time.Time, bool, bool)
 }
 
 func (c *LockedClient) cachePut(key string, status int, body []byte, collectedAt time.Time, truncated bool) {
+	c.cachePutWithTTL(key, status, body, collectedAt, c.cacheTTL, truncated)
+}
+
+func (c *LockedClient) cachePutWithTTL(key string, status int, body []byte, collectedAt time.Time, ttl time.Duration, truncated bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	bodyBytes := int64(len(body))
@@ -455,7 +613,7 @@ func (c *LockedClient) cachePut(key string, status int, body []byte, collectedAt
 		status:      status,
 		body:        cp,
 		collectedAt: collectedAt.UTC(),
-		expiresAt:   time.Now().Add(c.cacheTTL),
+		expiresAt:   now.Add(ttl),
 		truncated:   truncated,
 	}
 	c.cacheOrder = append(c.cacheOrder, key)
@@ -522,4 +680,23 @@ func sanitizeNetErr(err error, destination string) error {
 		return fmt.Errorf("request to %s failed: timeout", destination)
 	}
 	return fmt.Errorf("request to %s failed: network or TLS error", destination)
+}
+
+// CombinedStats sums cache counters across clients.
+func CombinedStats(clients ...*LockedClient) CacheStats {
+	var out CacheStats
+	for _, client := range clients {
+		if client == nil {
+			continue
+		}
+		stats := client.Stats()
+		out.Hits += stats.Hits
+		out.Misses += stats.Misses
+		out.Size += stats.Size
+		out.Bytes += stats.Bytes
+		if out.TTL == "" {
+			out.TTL = stats.TTL
+		}
+	}
+	return out
 }

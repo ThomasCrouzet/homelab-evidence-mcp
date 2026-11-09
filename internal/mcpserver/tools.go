@@ -15,6 +15,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/audit"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/correlation"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/evidence"
+	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/httpx"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/registry"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/version"
@@ -69,22 +70,9 @@ func (a *App) withBudget(ctx context.Context, tool string, fn func() (*mcp.CallT
 	if err := a.budget.acquire(); err != nil {
 		return a.toolError(tool, "", err)
 	}
-	var once sync.Once
-	release := func() { once.Do(a.budget.release) }
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			// A canceled caller must not wait for the handler to unwind before
-			// the next call can use the concurrent slot.
-			release()
-		case <-done:
-		}
-	}()
-	defer func() {
-		close(done)
-		release()
-	}()
+	// Keep the slot until the handler callback exits. Cancellation must propagate
+	// through the callback instead of admitting a second handler early.
+	defer a.budget.release()
 	return fn()
 }
 
@@ -161,7 +149,7 @@ func (a *App) toolCapabilities(ctx context.Context, _ *mcp.CallToolRequest, _ em
 				"evidence_cache_max":             a.Cfg.Limits.EvidenceCacheMax,
 				"evidence_cache_max_bytes":       a.Cfg.Limits.EvidenceCacheMaxBytes,
 			},
-			SourceCache:   a.HTTP.Stats(),
+			SourceCache:   httpx.CombinedStats(append([]*httpx.LockedClient{a.HTTP}, a.SourceClients...)...),
 			EvidenceCache: a.Cache.Stats(),
 			Features: []string{
 				"canonical_service_registry",
@@ -301,6 +289,9 @@ func (a *App) toolServiceStatus(ctx context.Context, _ *mcp.CallToolRequest, in 
 		evidence.SortOutcomes(sources)
 		normalizeOutcomes(sources)
 		complete, anyOK, configured := outcomeCoverage(sources)
+		if configured == 0 {
+			complete = false
+		}
 		items, selectionTruncated := evidence.KeepNewest(items, a.Cfg.Limits.MaxEvidenceItems)
 		if items == nil {
 			items = []evidence.Item{}
@@ -317,6 +308,7 @@ func (a *App) toolServiceStatus(ctx context.Context, _ *mcp.CallToolRequest, in 
 			SourceComplete:   complete,
 			DeliveryComplete: !selectionTruncated,
 			Truncated:        selectionTruncated || anySourceTruncated(sources),
+			Reason:           coverageReason(configured),
 			RetrievedAt:      time.Now().UTC().Format(time.RFC3339),
 			Note:             "This response is a snapshot. The tool does not get data from Loki or ntfy. The response can contain zero checks in a failure state. This condition does not prove health for sources without configuration.",
 		}
@@ -452,6 +444,10 @@ func (a *App) toolIncidentContext(ctx context.Context, _ *mcp.CallToolRequest, i
 			buildMax = 0
 		}
 		bundle := correlation.BuildTimeline(svc.ID, winStart, winEnd, items, sources, buildMax)
+		if configured == 0 {
+			complete = false
+			bundle.Reason = "no_bound_sources"
+		}
 		bundle.Complete = complete
 		bundle.SourceComplete = complete
 		selectionTruncated := bundle.SelectionTruncated
@@ -627,7 +623,7 @@ func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in fa
 		evidence.SortOutcomes(sources)
 		normalizeOutcomes(sources)
 		complete, anyOK, configured := outcomeCoverage(sources)
-		if scopeExcluded {
+		if scopeExcluded || configured == 0 {
 			complete = false
 		}
 		items, selectionTruncated := evidence.KeepNewest(items, a.Cfg.Limits.MaxEvidenceItems)
@@ -648,6 +644,7 @@ func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in fa
 			SourceComplete:   complete,
 			DeliveryComplete: !selectionTruncated,
 			Truncated:        selectionTruncated || anySourceTruncated(sources),
+			Reason:           coverageReason(configured),
 			Note:             "The checks list API gives only the current down, grace, and paused states. It cannot prove past failures or recoveries. The response does not include ping URLs or API keys.",
 		}
 		out.ByteBudget = a.Cfg.Limits.MaxIncidentBytes

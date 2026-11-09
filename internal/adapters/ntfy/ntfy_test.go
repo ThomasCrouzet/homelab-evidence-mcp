@@ -497,3 +497,30 @@ func TestItemFrom_SummaryTruncationIsReported(t *testing.T) {
 		t.Fatalf("message body exceeds the limit: %q", body)
 	}
 }
+
+func TestDecodeMessages_ArrayTermination(t *testing.T) {
+	valid := `{"id":"a","time":1794175200,"event":"message","topic":"alerts","message":"ok"}`
+	cases := []struct {
+		name      string
+		body      string
+		wantItems int
+		wantDrop  int
+		truncated bool
+	}{
+		{name: "complete array", body: `[` + valid + `]`, wantItems: 1},
+		{name: "missing bracket", body: `[` + valid, wantItems: 1, wantDrop: 1, truncated: true},
+		{name: "trailing bytes", body: `[` + valid + `]garbage`, wantItems: 1, wantDrop: 1, truncated: true},
+		{name: "second JSON value", body: `[` + valid + `] ` + valid, wantItems: 1, wantDrop: 1, truncated: true},
+		{name: "trailing comma", body: `[` + valid + `,]`, wantItems: 1, wantDrop: 1, truncated: true},
+		{name: "null item", body: `[null,` + valid + `]`, wantItems: 1, wantDrop: 1},
+		{name: "empty array", body: `[]`, wantItems: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			items, dropped, truncated := decodeMessages([]byte(tc.body), false)
+			if len(items) != tc.wantItems || dropped != tc.wantDrop || truncated != tc.truncated {
+				t.Fatalf("items=%d dropped=%d truncated=%v", len(items), dropped, truncated)
+			}
+		})
+	}
+}

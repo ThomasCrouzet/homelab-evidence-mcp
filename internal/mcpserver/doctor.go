@@ -2,14 +2,19 @@ package mcpserver
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/config"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/evidence"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/version"
 )
+
+const maxDoctorBindings = 100
 
 // DoctorBinding gives one service binding that the doctor checked.
 type DoctorBinding struct {
@@ -22,14 +27,15 @@ type DoctorBinding struct {
 
 // DoctorSource gives the state of one configured source.
 type DoctorSource struct {
-	Name         string          `json:"name"`
-	Kind         string          `json:"kind"`
-	Status       string          `json:"status"`
-	Reason       string          `json:"reason,omitempty"`
-	Error        string          `json:"error,omitempty"`
-	Complete     bool            `json:"complete"`
-	Capabilities []string        `json:"capabilities"`
-	Bindings     []DoctorBinding `json:"bindings"`
+	Name            string          `json:"name"`
+	Kind            string          `json:"kind"`
+	Status          string          `json:"status"`
+	Reason          string          `json:"reason,omitempty"`
+	Error           string          `json:"error,omitempty"`
+	Complete        bool            `json:"complete"`
+	Capabilities    []string        `json:"capabilities"`
+	Bindings        []DoctorBinding `json:"bindings"`
+	OmittedBindings int             `json:"omitted_bindings,omitempty"`
 }
 
 // DoctorReport is the machine-readable result of a network diagnostic.
@@ -70,39 +76,57 @@ func (a *App) Doctor(ctx context.Context) DoctorReport {
 	}
 	sort.Strings(names)
 
-	for _, service := range a.Cfg.Services {
-		sources := service.Sources
-		if sources.Gatus != nil {
-			a.doctorBinding(ctx, byName, sources.Gatus.Source, service.ID, func(ctx context.Context) (evidence.SourceOutcome, []evidence.Item) {
-				return a.collectGatusStatus(ctx, service.ID, sources.Gatus)
-			})
-		}
-		if sources.Docker != nil {
-			a.doctorBinding(ctx, byName, sources.Docker.Source, service.ID, func(ctx context.Context) (evidence.SourceOutcome, []evidence.Item) {
-				return a.collectDockerStatus(ctx, service.ID, sources.Docker)
-			})
-		}
-		if sources.Healthchecks != nil {
-			a.doctorBinding(ctx, byName, sources.Healthchecks.Source, service.ID, func(ctx context.Context) (evidence.SourceOutcome, []evidence.Item) {
-				return a.collectHCStatus(ctx, service.ID, sources.Healthchecks)
-			})
-		}
-		if sources.Beszel != nil {
-			a.doctorBinding(ctx, byName, sources.Beszel.Source, service.ID, func(ctx context.Context) (evidence.SourceOutcome, []evidence.Item) {
-				return a.collectBeszel(ctx, service.ID, sources.Beszel)
-			})
-		}
-		if sources.Loki != nil {
-			a.doctorBinding(ctx, byName, sources.Loki.Source, service.ID, func(ctx context.Context) (evidence.SourceOutcome, []evidence.Item) {
-				return a.collectLoki(ctx, service.ID, sources.Loki, windowStart, now, "", "", 1)
-			})
-		}
-		if sources.Ntfy != nil {
-			a.doctorBinding(ctx, byName, sources.Ntfy.Source, service.ID, func(ctx context.Context) (evidence.SourceOutcome, []evidence.Item) {
-				return a.collectNtfy(ctx, service.ID, sources.Ntfy, windowStart, now, 1)
-			})
-		}
+	var mu sync.Mutex
+	services := make(chan config.Service)
+	var wg sync.WaitGroup
+	workers := len(a.Cfg.Services)
+	if workers > maxConcurrentSourceRequests {
+		workers = maxConcurrentSourceRequests
 	}
+	for worker := 0; worker < workers; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for service := range services {
+				sources := service.Sources
+				if sources.Gatus != nil {
+					a.doctorBinding(ctx, &mu, byName, sources.Gatus.Source, service.ID, func(ctx context.Context) (evidence.SourceOutcome, []evidence.Item) {
+						return a.collectGatusStatus(ctx, service.ID, sources.Gatus)
+					})
+				}
+				if sources.Docker != nil {
+					a.doctorBinding(ctx, &mu, byName, sources.Docker.Source, service.ID, func(ctx context.Context) (evidence.SourceOutcome, []evidence.Item) {
+						return a.collectDockerStatus(ctx, service.ID, sources.Docker)
+					})
+				}
+				if sources.Healthchecks != nil {
+					a.doctorBinding(ctx, &mu, byName, sources.Healthchecks.Source, service.ID, func(ctx context.Context) (evidence.SourceOutcome, []evidence.Item) {
+						return a.collectHCStatus(ctx, service.ID, sources.Healthchecks)
+					})
+				}
+				if sources.Beszel != nil {
+					a.doctorBinding(ctx, &mu, byName, sources.Beszel.Source, service.ID, func(ctx context.Context) (evidence.SourceOutcome, []evidence.Item) {
+						return a.collectBeszel(ctx, service.ID, sources.Beszel)
+					})
+				}
+				if sources.Loki != nil {
+					a.doctorBinding(ctx, &mu, byName, sources.Loki.Source, service.ID, func(ctx context.Context) (evidence.SourceOutcome, []evidence.Item) {
+						return a.collectLoki(ctx, service.ID, sources.Loki, windowStart, now, "", "", 1)
+					})
+				}
+				if sources.Ntfy != nil {
+					a.doctorBinding(ctx, &mu, byName, sources.Ntfy.Source, service.ID, func(ctx context.Context) (evidence.SourceOutcome, []evidence.Item) {
+						return a.collectNtfy(ctx, service.ID, sources.Ntfy, windowStart, now, 1)
+					})
+				}
+			}
+		}()
+	}
+	for _, service := range a.Cfg.Services {
+		services <- service
+	}
+	close(services)
+	wg.Wait()
 
 	report := DoctorReport{
 		Version:       version.Version,
@@ -117,6 +141,12 @@ func (a *App) Doctor(ctx context.Context) DoctorReport {
 		sort.Slice(source.Bindings, func(i, j int) bool {
 			return source.Bindings[i].ServiceID < source.Bindings[j].ServiceID
 		})
+		if len(source.Bindings) > maxDoctorBindings {
+			source.OmittedBindings = len(source.Bindings) - maxDoctorBindings
+			source.Bindings = source.Bindings[:maxDoctorBindings]
+			report.Warnings = append(report.Warnings,
+				fmt.Sprintf("source %s has %d more bindings than the doctor output limit", name, source.OmittedBindings))
+		}
 		switch source.Status {
 		case "ok":
 			source.Complete = true
@@ -133,12 +163,14 @@ func (a *App) Doctor(ctx context.Context) DoctorReport {
 	return report
 }
 
-func (a *App) doctorBinding(ctx context.Context, byName map[string]*DoctorSource, sourceName, serviceID string, collect func(context.Context) (evidence.SourceOutcome, []evidence.Item)) {
+func (a *App) doctorBinding(ctx context.Context, mu *sync.Mutex, byName map[string]*DoctorSource, sourceName, serviceID string, collect func(context.Context) (evidence.SourceOutcome, []evidence.Item)) {
+	outcome, _ := collect(ctx)
+	mu.Lock()
+	defer mu.Unlock()
 	source := byName[sourceName]
 	if source == nil {
 		return
 	}
-	outcome, _ := collect(ctx)
 	binding := DoctorBinding{
 		ServiceID: serviceID,
 		Status:    outcome.Status,

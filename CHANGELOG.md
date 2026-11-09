@@ -8,6 +8,11 @@ This file records project changes. Its format uses
 
 ### Added
 
+- Add deterministic fuzz targets and hostile JSON seeds for every adapter
+  decoder, plus repeatable evidence, compact-envelope, and ntfy decode
+  benchmarks (`make fuzz`, `make bench`).
+- Add an opt-in live upstream lane (`make test-live`) that records revision,
+  environment, and doctor result outside the repository.
 - Add a serialized-payload byte budget to the evidence cache, with counters in
   `evidence_capabilities`. The default is 8 MiB and the maximum is 64 MiB.
 - Add a versioned upstream fixture corpus with provenance, offline replay tests,
@@ -55,12 +60,40 @@ This file records project changes. Its format uses
   the development build path, and Healthchecks flip retention.
 - Add an optional `service_id` to a per-binding source outcome, and use the
   binding and service identity as stable sort tie-breakers before opaque ids.
+- Keep a concurrent-tool slot until its handler exits, including a canceled
+  handler, so `max_concurrent_tools` bounds active callbacks.
+- Enforce `max_tool_calls_per_minute` over a sliding minute instead of a fixed
+  window that allows a boundary burst.
+- Treat a Docker healthcheck `starting` state as a warning, add
+  `health_readiness`, and keep runtime state separate from readiness.
+- Keep valid negative Unix-nanosecond Loki timestamps and discard only
+  malformed or overflowing values.
+- Require a closing bracket and no trailing data for an ntfy JSON array, and
+  report a malformed tail as local truncation with discarded records.
 - Validate every returned Loki stream against the configured equality labels
   and discard a mismatched stream with an incomplete source outcome.
 - Derive a bounded process-local Loki stream identity from the complete label
   map, so distinct streams cannot collide after label allowlisting.
 - Prefer a Loki `level`/`severity` label and structured level field over
   keyword guesses, and do not report negated or zero-count phrases as errors.
+- Keep the persistent audit file independent of a failed stderr writer, roll
+  back a partial append, repair an incomplete final JSONL record, and take an
+  exclusive Unix sidecar lock against a second process.
+- Sanitize configuration and startup failures before stderr or doctor JSON,
+  including token and CA file paths.
+- Return exit code `2` for doctor and validate configuration or prerequisite
+  failures, and emit one sanitized JSON error under `--doctor --json`.
+- Resolve a Beszel system by canonical `name`/`system` across the complete
+  inventory before host aliases, and report `ambiguous_binding` for a tie.
+- Follow paginated Beszel alternate routes, use the oldest page collection
+  time, and report mixed page age, overlapping pages, or unverified record
+  identities as incomplete coverage.
+- Emit explicit Beszel `cpu_percent` and `memory_percent` values, keep legacy
+  values unit-unknown, and mark out-of-range samples invalid.
+- Reject method, URL, representation, and conditional override headers in
+  static headers and `token_header`, while keeping benign tenant headers.
+- Honor upstream `Cache-Control: no-store`, `no-cache`, `max-age`, and
+  `Pragma: no-cache` in the source response cache.
 - Rebuild the incident `factual_summary` and item warnings from the retained
   items after compact selection, while source coverage warnings stay visible.
 - Enforce the compact byte budget after the summary rebuild. A metadata-only

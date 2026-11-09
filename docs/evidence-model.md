@@ -19,6 +19,9 @@ Each evidence item has these fields:
 - `truncated` shows that the server truncated the item.
 - `redactions_applied` gives the number of redacted text regions.
   Overlapping or adjacent rule matches form one region.
+- `untrusted` is `true` for evidence whose text and attributes come from an
+  upstream source. The marker is structural; it does not depend on keyword
+  detection. It does not guarantee that every MCP host ignores hostile text.
 - `freshness` is `live`, `recent`, `stale`, `cached`, `missing`, or `unknown`.
   For a `get_evidence` result, `freshness` is `cached` and `source_freshness`
   keeps the original source value.
@@ -100,7 +103,9 @@ A grouped response contains:
 - The state and truncation of each source: `ok`, `error`, `timeout`,
   `canceled`, `skipped`, or `absent`
 - `source_complete` reports whether every queried source answered with
-  complete coverage. `complete` keeps the same value for older clients.
+  complete coverage. A service with no bound source reports
+  `reason: no_bound_sources` and `complete: false`; it does not claim a
+  successful investigation. `complete` keeps the same value for older clients.
 - `delivery_complete` reports whether the response includes every retrieved
   item. It is false when item selection or the response byte budget omitted a
   retrieved item.
@@ -135,9 +140,9 @@ Execution status and evidence coverage are separate:
 - `truncated` combines `upstream_truncated` and `local_truncated`.
 - `discarded` counts unusable source records, such as a Loki line with an
   invalid timestamp.
-- `cache_state` is `hit`, `miss`, or `disabled`. `cache_age_seconds` gives the
-  age of the oldest cached snapshot used. These fields do not change
-  `observed_at`.
+- `cache_state` is `hit`, `miss`, `mixed`, or `disabled`.
+  `cache_age_seconds` gives the age of the oldest cached snapshot used. These
+  fields do not change `observed_at`.
 
 A multi-source result sets `complete` for the whole result. An `ok` source with
 `complete: false` means the source answered only part of the request. A

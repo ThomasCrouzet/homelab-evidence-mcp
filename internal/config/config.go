@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/textproto"
 	"net/url"
 	"os"
@@ -84,12 +85,16 @@ type TLS struct {
 
 // Source contains the configuration for one named adapter.
 type Source struct {
-	Kind        string // gatus | docker | loki | healthchecks | beszel | ntfy
-	BaseURL     string
-	APIVersion  string // optional Docker Engine API prefix, for example v1.56
-	TokenEnv    string
-	TokenFile   string
-	TokenHeader string // optional. Use X-Api-Key for Healthchecks and Authorization for other sources.
+	Kind       string // gatus | docker | loki | healthchecks | beszel | ntfy
+	BaseURL    string
+	APIVersion string // optional Docker Engine API prefix, for example v1.56
+	// CAFile adds trust only for this source. It replaces the global pool.
+	CAFile string
+	// AllowedCIDRs limits dial-time resolved addresses for this source.
+	AllowedCIDRs []*net.IPNet
+	TokenEnv     string
+	TokenFile    string
+	TokenHeader  string // optional. Use X-Api-Key for Healthchecks and Authorization for other sources.
 	// Headers contains only static headers without secrets.
 	Headers map[string]string
 }
@@ -203,13 +208,15 @@ type fileTLS struct {
 }
 
 type fileSource struct {
-	Kind        string            `yaml:"kind"`
-	BaseURL     string            `yaml:"base_url"`
-	APIVersion  string            `yaml:"api_version"`
-	TokenEnv    string            `yaml:"token_env"`
-	TokenFile   string            `yaml:"token_file"`
-	TokenHeader string            `yaml:"token_header"`
-	Headers     map[string]string `yaml:"headers"`
+	Kind         string            `yaml:"kind"`
+	BaseURL      string            `yaml:"base_url"`
+	APIVersion   string            `yaml:"api_version"`
+	CAFile       string            `yaml:"ca_file"`
+	AllowedCIDRs []string          `yaml:"allowed_cidrs"`
+	TokenEnv     string            `yaml:"token_env"`
+	TokenFile    string            `yaml:"token_file"`
+	TokenHeader  string            `yaml:"token_header"`
+	Headers      map[string]string `yaml:"headers"`
 }
 
 type fileService struct {
@@ -689,6 +696,23 @@ func parseSource(name string, fs fileSource) (Source, ValidationErrors) {
 			errs = append(errs, ValidationError{"sources." + name + ".api_version", "base_url already contains an API version prefix"})
 		}
 	}
+	if fs.CAFile != "" {
+		if len([]rune(fs.CAFile)) > 4096 || hasControl(fs.CAFile) {
+			errs = append(errs, ValidationError{"sources." + name + ".ca_file", "must be a valid path of at most 4096 characters"})
+		}
+	}
+	var allowedCIDRs []*net.IPNet
+	if len(fs.AllowedCIDRs) > 32 {
+		errs = append(errs, ValidationError{"sources." + name + ".allowed_cidrs", "must contain at most 32 networks"})
+	}
+	for index, raw := range fs.AllowedCIDRs {
+		_, network, err := net.ParseCIDR(strings.TrimSpace(raw))
+		if err != nil {
+			errs = append(errs, ValidationError{fmt.Sprintf("sources.%s.allowed_cidrs[%d]", name, index), "must be an IPv4 or IPv6 CIDR"})
+			continue
+		}
+		allowedCIDRs = append(allowedCIDRs, network)
+	}
 	if fs.TokenEnv != "" && fs.TokenFile != "" {
 		errs = append(errs, ValidationError{"sources." + name, "set only one of token_env or token_file"})
 	}
@@ -783,13 +807,15 @@ func parseSource(name string, fs fileSource) (Source, ValidationErrors) {
 		return Source{}, errs
 	}
 	return Source{
-		Kind:        kind,
-		BaseURL:     strings.TrimRight(base, "/"),
-		APIVersion:  apiVersion,
-		TokenEnv:    fs.TokenEnv,
-		TokenFile:   tokenFile,
-		TokenHeader: th,
-		Headers:     fs.Headers,
+		Kind:         kind,
+		BaseURL:      strings.TrimRight(base, "/"),
+		APIVersion:   apiVersion,
+		CAFile:       strings.TrimSpace(fs.CAFile),
+		AllowedCIDRs: allowedCIDRs,
+		TokenEnv:     fs.TokenEnv,
+		TokenFile:    tokenFile,
+		TokenHeader:  th,
+		Headers:      fs.Headers,
 	}, nil
 }
 
@@ -1030,7 +1056,17 @@ func isReservedHeaderName(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "host", "content-length", "user-agent", "accept", "connection",
 		"transfer-encoding", "trailer", "upgrade", "proxy-connection",
-		"keep-alive", "te", "x-loki-response-encoding-flags":
+		"keep-alive", "te", "x-loki-response-encoding-flags",
+		"content-type", "content-encoding",
+		// Method and target overrides can change the effective GET or path
+		// when a downstream proxy honors them.
+		"x-http-method", "x-http-method-override", "x-method-override",
+		"x-original-url", "x-rewrite-url", "x-forwarded-method",
+		"x-forwarded-uri", "x-original-uri", "destination", "overwrite",
+		// Representation and conditional headers change the body or status
+		// rather than the locked destination.
+		"accept-encoding", "range", "if-range", "if-match", "if-none-match",
+		"if-modified-since", "if-unmodified-since":
 		return true
 	default:
 		return false
@@ -1131,6 +1167,9 @@ func readSecretFile(path string) (string, error) {
 	}
 	if insecureUnixPermissions(st.Mode()) {
 		return "", errors.New("token file is group or world accessible")
+	}
+	if err := checkCredentialFileACL(path); err != nil {
+		return "", err
 	}
 	b, err := io.ReadAll(io.LimitReader(f, (4<<10)+1))
 	if err != nil {

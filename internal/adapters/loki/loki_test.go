@@ -555,3 +555,39 @@ func FuzzParseNano(f *testing.F) {
 		_, _ = parseNano(s)
 	})
 }
+
+func TestSearch_KeepsNegativeNanosecondTimestamps(t *testing.T) {
+	zero := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+	start := zero.Add(-5 * time.Second)
+	end := zero.Add(5 * time.Second)
+	cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "success",
+			"data": map[string]any{
+				"resultType": "streams",
+				"result": []map[string]any{{
+					"stream": map[string]string{"container": "app"},
+					"values": [][]string{
+						{nano(zero.Add(-2 * time.Second)), "minus two seconds"},
+						{strconv.FormatInt(-1, 10), "minus one nanosecond"},
+						{nano(zero), "epoch"},
+						{nano(zero.Add(time.Second)), "plus one second"},
+					},
+				}},
+			},
+		})
+	})
+	stats := QueryStats{}
+	items, _, err := cli.Search(context.Background(), QueryOptions{
+		ServiceID: "svc", Selector: `{container="app"}`, Start: start, End: end, Limit: 10, Stats: &stats,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 4 || stats.Discarded() != 0 {
+		t.Fatalf("negative epochs lost: items=%d stats=%+v", len(items), stats)
+	}
+	if items[0].ObservedAt.After(items[1].ObservedAt) || items[1].ObservedAt.After(items[2].ObservedAt) {
+		t.Fatalf("negative time order=%v", items)
+	}
+}

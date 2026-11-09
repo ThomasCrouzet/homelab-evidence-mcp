@@ -86,11 +86,23 @@ deadline reports `timeout`.
   Unbound sources produce a warning and do not fail the command.
 - `1`: a source failed or a binding is incomplete. The report still lists all
   sources that answered.
-- `2`: usage or configuration error, including a bad flag combination.
+- `2`: usage or configuration error, including a bad flag combination, a
+  configuration load failure, or a startup prerequisite failure. The doctor
+  performed no source diagnostics in this case.
+
+Under `--doctor --json`, an early configuration or startup failure writes one
+JSON object to stdout, with `error` and `reason` fields, and no report. The
+message is sanitized: it does not contain a local path or a secret. Human mode
+writes the sanitized message to stderr and keeps stdout empty.
+`--validate` also returns `2` for a configuration or prerequisite failure.
 
 The command exits before an MCP session starts. It needs no daemon.
 
 ## Limits
+
+The doctor runs at most eight service bindings at once. It reports at most 100
+bindings per source and sets `omitted_bindings` with a warning above that
+limit. The source status still summarizes every checked binding.
 
 `--doctor` converts snapshots and logs like the MCP tools. It does not prove that
 a credential is read-only at the upstream service. It does not replace the
