@@ -927,3 +927,29 @@ func TestConfigExample_SchemaAndRuntimeParity(t *testing.T) {
 		t.Fatal("schema accepted an unknown key")
 	}
 }
+
+func TestParse_AllowedCIDRs(t *testing.T) {
+	base := `
+version: 1
+sources:
+  gatus:
+    kind: gatus
+    base_url: https://gatus.example.internal
+%s
+services: []
+`
+	raw := fmt.Sprintf(base, "    allowed_cidrs: [\"192.0.2.0/24\", \"2001:db8::/32\"]")
+	cfg, err := Parse([]byte(raw))
+	if err != nil {
+		t.Fatalf("valid CIDRs rejected: %v", err)
+	}
+	if len(cfg.Sources["gatus"].AllowedCIDRs) != 2 {
+		t.Fatalf("cidrs=%v", cfg.Sources["gatus"].AllowedCIDRs)
+	}
+	for _, bad := range []string{"not-a-cidr", "192.0.2.1"} {
+		raw := fmt.Sprintf(base, fmt.Sprintf("    allowed_cidrs: [%q]", bad))
+		if _, err := Parse([]byte(raw)); err == nil {
+			t.Fatalf("invalid CIDR %q was accepted", bad)
+		}
+	}
+}
