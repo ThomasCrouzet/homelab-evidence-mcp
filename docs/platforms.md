@@ -6,15 +6,14 @@ release with evidence. Source revisions after that release are not verified
 until the next release run.
 
 - **Linux amd64** (`ubuntu-latest`): native release smoke and executable E2E.
-  Last verified: v0.1.3.
+  Last verified: v0.2.1.
 - **Linux arm64** (`ubuntu-24.04-arm`): native release smoke. Last verified:
-  not yet run; v0.1.3 was compile-only.
-- **macOS amd64** (`macos-15-intel`): native release smoke. Last verified: not
-  yet run; v0.1.3 was compile-only.
-- **macOS arm64** (`macos-15`): native release smoke. Last verified: not yet
-  run; v0.1.3 was compile-only.
+  v0.2.1.
+- **macOS amd64** (`macos-15-intel`): native release smoke. Last verified:
+  v0.2.1.
+- **macOS arm64** (`macos-15`): native release smoke. Last verified: v0.2.1.
 - **Windows amd64** (`windows-latest`): native release smoke. Last verified:
-  not yet run; v0.1.3 was compile-only.
+  v0.2.1.
 
 The matrix does not list a target without a build in the release workflow.
 Linux arm64 has a GitHub-hosted arm64 runner. macOS Intel uses the remaining

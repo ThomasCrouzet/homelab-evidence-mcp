@@ -5,8 +5,9 @@ commits.
 
 ## Latest public release
 
-The latest public release is `v0.2.1`, published 2026-11-09 from the `v0.2.1`
-tag. This release is mutable and its assets have build-provenance attestations.
+The latest public release is `v0.2.1`, published 2026-11-09 from commit
+`795a860ab9c178d71f69c1ce5238df36996aa03e`. This release is mutable and its
+assets have build-provenance attestations.
 
 The earlier `v0.2.0` tag has no GitHub release. Its release gate stopped on a
 stale native-smoke exit-code check. Use `v0.2.1`, which corrects that check and
