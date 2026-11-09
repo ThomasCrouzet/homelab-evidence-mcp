@@ -19,6 +19,9 @@ Each evidence item has these fields:
 - `truncated` shows that the server truncated the item.
 - `redactions_applied` gives the number of redacted text regions.
   Overlapping or adjacent rule matches form one region.
+- `untrusted` is `true` for evidence whose text and attributes come from an
+  upstream source. The marker is structural; it does not depend on keyword
+  detection. It does not guarantee that every MCP host ignores hostile text.
 - `freshness` is `live`, `recent`, `stale`, `cached`, `missing`, or `unknown`.
   For a `get_evidence` result, `freshness` is `cached` and `source_freshness`
   keeps the original source value.

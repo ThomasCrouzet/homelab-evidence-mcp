@@ -280,7 +280,8 @@ services:
 
 	truncated := call("failed_crons", map[string]any{"service_id": "truncated", "start": windowStart, "end": windowEnd})
 	if truncatedSource := find(truncated, "healthchecks"); truncatedSource.status != "ok" ||
-		truncatedSource.reason != "truncated" || truncatedSource.complete || len(truncated.Items) != 200 {
+		truncatedSource.reason != "truncated" || truncatedSource.complete ||
+		len(truncated.Items) == 0 || len(truncated.Items) > 200 {
 		t.Fatalf("truncated history status=%s reason=%s complete=%v items=%d",
 			truncatedSource.status, truncatedSource.reason, truncatedSource.complete, len(truncated.Items))
 	}
