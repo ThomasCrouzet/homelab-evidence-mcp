@@ -246,8 +246,9 @@ Set only one of `token_env` and `token_file` per source.
   `limits.max_cron_window` defaults to `168h`.
 - **Volume:** `limits.max_log_lines` defaults to `100`;
   `limits.max_evidence_items` defaults to `200`.
-  `limits.max_incident_response_bytes` defaults to 256 KiB for compact
-  `incident_context`; the minimum is 8 KiB and the maximum is 4 MiB.
+  `limits.max_incident_response_bytes` defaults to 256 KiB and is the response
+  byte budget for every evidence tool; the minimum is 8 KiB and the maximum is
+  4 MiB.
 - **Timeouts:** `limits.per_source_timeout` defaults to `3s`;
   `limits.total_timeout` defaults to `10s`.
 - **Source rate:** `limits.max_source_requests_per_minute` defaults to `100`
