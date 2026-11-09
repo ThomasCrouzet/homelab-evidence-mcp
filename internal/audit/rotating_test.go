@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -208,4 +209,90 @@ func TestOpenRotating_RejectsSymlink(t *testing.T) {
 	if st.Mode().Perm() != 0o644 {
 		t.Fatalf("symlink target was modified: mode=%o", st.Mode().Perm())
 	}
+}
+
+type failingWriter struct{ err error }
+
+func (f failingWriter) Write([]byte) (int, error) { return 0, f.err }
+
+func TestMultiWriter_ContinuesAfterOneFailure(t *testing.T) {
+	var buf bytes.Buffer
+	writer := MultiWriter(failingWriter{err: io.ErrClosedPipe}, &buf)
+	if _, err := writer.Write([]byte("event\n")); err == nil {
+		t.Fatal("a failed destination must be reported")
+	}
+	if buf.String() != "event\n" {
+		t.Fatalf("healthy destination got %q", buf.String())
+	}
+	allFail := MultiWriter(failingWriter{err: io.ErrClosedPipe}, failingWriter{err: io.ErrShortWrite})
+	if _, err := allFail.Write([]byte("event\n")); err == nil {
+		t.Fatal("all destinations failed without an error")
+	}
+}
+
+func TestLogger_PersistentFileSurvivesFailingStderr(t *testing.T) {
+	var file bytes.Buffer
+	logger := New(MultiWriter(failingWriter{err: io.ErrClosedPipe}, &file), failingWriter{err: io.ErrClosedPipe})
+	logger.Log(Event{Action: "tool", Tool: "service_status", Status: "ok"})
+	line := file.String()
+	if !strings.HasSuffix(line, "\n") || !strings.Contains(line, `"status":"ok"`) {
+		t.Fatalf("file did not receive a complete record: %q", line)
+	}
+	var event Event
+	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		t.Fatalf("torn JSONL record: %v", err)
+	}
+}
+
+func TestOpenRotating_RepairsTornTail(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "audit.jsonl")
+	complete := `{"action":"boot","status":"ok"}` + "\n"
+	if err := os.WriteFile(p, []byte(complete+`{"action":"tool","sta`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rf, err := OpenRotating(p, 1<<20, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rf.Write([]byte(`{"action":"tool","status":"error"}` + "\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := rf.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := bytes.Split(bytes.TrimSpace(raw), []byte("\n"))
+	if len(lines) != 2 {
+		t.Fatalf("repaired file has %d lines: %q", len(lines), raw)
+	}
+	for _, line := range lines {
+		var event Event
+		if err := json.Unmarshal(line, &event); err != nil {
+			t.Fatalf("invalid JSONL after repair: %v in %q", err, line)
+		}
+	}
+}
+
+func TestOpenRotating_RejectsSecondProcess(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "audit.jsonl")
+	first, err := OpenRotating(p, 1<<20, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenRotating(p, 1<<20, 3); !errors.Is(err, ErrStorageInUse) {
+		t.Fatalf("second owner err=%v, want ErrStorageInUse", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := OpenRotating(p, 1<<20, 3)
+	if err != nil {
+		t.Fatalf("lock was not released: %v", err)
+	}
+	_ = second.Close()
 }
