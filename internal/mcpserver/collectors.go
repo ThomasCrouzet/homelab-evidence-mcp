@@ -491,6 +491,9 @@ func (a *App) withSourceTimeout(ctx context.Context, sourceName string, kind evi
 	sctx, cancel := context.WithTimeout(requestCtx, a.Cfg.Limits.PerSourceTimeout)
 	defer cancel()
 	items, err := fn(sctx)
+	for index := range items {
+		items[index].Untrusted = true
+	}
 	evidence.MarkSourceFreshness(items)
 	cacheState, cacheAge := info.Snapshot()
 	if err == nil {

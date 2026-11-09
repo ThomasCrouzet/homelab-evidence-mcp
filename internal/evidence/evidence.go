@@ -75,6 +75,8 @@ type Item struct {
 	SourceFreshness Freshness `json:"source_freshness,omitempty"`
 	// IdentityUnverified marks a source record without a stable unique identity.
 	IdentityUnverified bool `json:"identity_unverified,omitempty"`
+	// Untrusted marks text and attributes controlled by the upstream source.
+	Untrusted bool `json:"untrusted"`
 	// CacheReadAt records the current cache read without changing the source
 	// collection time in RetrievedAt.
 	CacheReadAt *time.Time `json:"cache_read_at,omitempty"`
