@@ -583,3 +583,22 @@ func sanitizeNetErr(err error, destination string) error {
 	}
 	return fmt.Errorf("request to %s failed: network or TLS error", destination)
 }
+
+// CombinedStats sums cache counters across clients.
+func CombinedStats(clients ...*LockedClient) CacheStats {
+	var out CacheStats
+	for _, client := range clients {
+		if client == nil {
+			continue
+		}
+		stats := client.Stats()
+		out.Hits += stats.Hits
+		out.Misses += stats.Misses
+		out.Size += stats.Size
+		out.Bytes += stats.Bytes
+		if out.TTL == "" {
+			out.TTL = stats.TTL
+		}
+	}
+	return out
+}
