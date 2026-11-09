@@ -70,22 +70,9 @@ func (a *App) withBudget(ctx context.Context, tool string, fn func() (*mcp.CallT
 	if err := a.budget.acquire(); err != nil {
 		return a.toolError(tool, "", err)
 	}
-	var once sync.Once
-	release := func() { once.Do(a.budget.release) }
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			// A canceled caller must not wait for the handler to unwind before
-			// the next call can use the concurrent slot.
-			release()
-		case <-done:
-		}
-	}()
-	defer func() {
-		close(done)
-		release()
-	}()
+	// Keep the slot until the handler callback exits. Cancellation must propagate
+	// through the callback instead of admitting a second handler early.
+	defer a.budget.release()
 	return fn()
 }
 
