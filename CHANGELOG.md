@@ -4,6 +4,13 @@ This file records project changes. Its format uses
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Give every `gh release` command an explicit repository, so the publish job
+  can create and update a release without a repository checkout.
+
 ## [0.2.1] - 2026-11-09
 
 This is the first published release after 0.1.3. It contains the version 0.2.0
