@@ -244,6 +244,8 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - name: Download release binaries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
@@ -263,11 +265,35 @@ jobs:
           cd dist || exit 1
           sha256sum -c SHA256SUMS
 
-      - name: Publish release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3
+      - name: Attest release binaries
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a  # v3
         with:
-          files: |
-            dist/*
-          body_path: notes/release-notes.md
+          subject-path: dist/*
+
+      - name: Create draft release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME"             --draft             --title "$GITHUB_REF_NAME"             --notes-file notes/release-notes.md
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+
+      - name: Verify draft asset set
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          gh release view "$GITHUB_REF_NAME" --json assets \
+            --jq '.assets[].name' | sort > uploaded.txt
+          (cd dist && ls -1) | sort > expected.txt
+          diff -u expected.txt uploaded.txt
+          test -s dist/SHA256SUMS
+
+      - name: Publish immutable release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false

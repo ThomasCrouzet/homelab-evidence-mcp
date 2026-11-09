@@ -24,6 +24,9 @@ This file records project changes. Its format uses
 
 ### Changed
 
+- Publish releases through a verified draft, add build-provenance attestations,
+  and document immutable-release verification without claiming the current
+  mutable release is protected.
 - Keep one authoritative version in `internal/version/version.txt`, embed it for
   `go install`, and use the same Makefile build path in CI and release.
 - Pin external GitHub Actions by commit, split release validation from
