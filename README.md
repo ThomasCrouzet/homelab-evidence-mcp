@@ -175,7 +175,8 @@ Prebuilt binaries are available in
 [GitHub Releases](https://github.com/ThomasCrouzet/homelab-evidence-mcp/releases).
 They target Linux and macOS on amd64/arm64, and Windows on amd64.
 See the [platform validation matrix](docs/platforms.md) for the test level of
-each target.
+each target. See [release verification](docs/release-verification.md) for
+checksums, draft publication, and attestation steps.
 Go is unnecessary when you use a prebuilt binary.
 
 ### Configure your sources
