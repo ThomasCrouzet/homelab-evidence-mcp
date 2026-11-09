@@ -332,7 +332,8 @@ func TestFailedCrons_GlobalRegistryScope(t *testing.T) {
 		t.Fatalf("unregistered check disclosed: %s", s)
 	}
 	var parsed struct {
-		Items []struct {
+		TimeBasis string `json:"time_basis"`
+		Items     []struct {
 			ServiceID string `json:"service_id"`
 		} `json:"items"`
 		Sources []struct {
@@ -345,6 +346,9 @@ func TestFailedCrons_GlobalRegistryScope(t *testing.T) {
 	}
 	if len(parsed.Items) != 1 || parsed.Items[0].ServiceID != "media" {
 		t.Fatalf("global item attribution=%+v: %s", parsed.Items, s)
+	}
+	if parsed.TimeBasis != "current_snapshot" {
+		t.Fatalf("time_basis=%q: %s", parsed.TimeBasis, s)
 	}
 	foundBinding := false
 	for _, source := range parsed.Sources {
