@@ -301,6 +301,9 @@ func (a *App) toolServiceStatus(ctx context.Context, _ *mcp.CallToolRequest, in 
 		evidence.SortOutcomes(sources)
 		normalizeOutcomes(sources)
 		complete, anyOK, configured := outcomeCoverage(sources)
+		if configured == 0 {
+			complete = false
+		}
 		items, selectionTruncated := evidence.KeepNewest(items, a.Cfg.Limits.MaxEvidenceItems)
 		if items == nil {
 			items = []evidence.Item{}
@@ -317,6 +320,7 @@ func (a *App) toolServiceStatus(ctx context.Context, _ *mcp.CallToolRequest, in 
 			SourceComplete:   complete,
 			DeliveryComplete: !selectionTruncated,
 			Truncated:        selectionTruncated || anySourceTruncated(sources),
+			Reason:           coverageReason(configured),
 			RetrievedAt:      time.Now().UTC().Format(time.RFC3339),
 			Note:             "This response is a snapshot. The tool does not get data from Loki or ntfy. The response can contain zero checks in a failure state. This condition does not prove health for sources without configuration.",
 		}
@@ -452,6 +456,10 @@ func (a *App) toolIncidentContext(ctx context.Context, _ *mcp.CallToolRequest, i
 			buildMax = 0
 		}
 		bundle := correlation.BuildTimeline(svc.ID, winStart, winEnd, items, sources, buildMax)
+		if configured == 0 {
+			complete = false
+			bundle.Reason = "no_bound_sources"
+		}
 		bundle.Complete = complete
 		bundle.SourceComplete = complete
 		selectionTruncated := bundle.SelectionTruncated
@@ -627,7 +635,7 @@ func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in fa
 		evidence.SortOutcomes(sources)
 		normalizeOutcomes(sources)
 		complete, anyOK, configured := outcomeCoverage(sources)
-		if scopeExcluded {
+		if scopeExcluded || configured == 0 {
 			complete = false
 		}
 		items, selectionTruncated := evidence.KeepNewest(items, a.Cfg.Limits.MaxEvidenceItems)
@@ -646,6 +654,7 @@ func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in fa
 			SourceComplete:   complete,
 			DeliveryComplete: !selectionTruncated,
 			Truncated:        selectionTruncated || anySourceTruncated(sources),
+			Reason:           coverageReason(configured),
 			Note:             "The checks list API gives only the current down, grace, and paused states. It cannot prove past failures or recoveries. The response does not include ping URLs or API keys.",
 		}
 		out.ByteBudget = a.Cfg.Limits.MaxIncidentBytes
