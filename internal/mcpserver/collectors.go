@@ -682,6 +682,13 @@ func outcomeCoverage(sources []evidence.SourceOutcome) (complete, anyOK bool, co
 	return complete, anyOK, configured
 }
 
+func coverageReason(configured int) string {
+	if configured == 0 {
+		return "no_bound_sources"
+	}
+	return ""
+}
+
 func auditStatus(complete, anyOK bool, configured int) string {
 	switch {
 	case complete:
