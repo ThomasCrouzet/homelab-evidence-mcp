@@ -49,6 +49,7 @@ var ErrRequestBudget = errors.New("healthchecks request budget exceeded")
 const (
 	maxTransitionChecks = 32
 	maxFlipsPerCheck    = 200
+	maxHistoryWorkers   = 4
 )
 
 var transitionKeyRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,256}$`)
@@ -358,68 +359,112 @@ func (c *Client) TransitionsFrom(ctx context.Context, snapshot Snapshot, service
 	query := url.Values{}
 	query.Set("start", strconv.FormatInt(start.UTC().Unix()-1, 10))
 	query.Set("end", strconv.FormatInt(end.UTC().Unix()+1, 10))
-	for _, ch := range matched {
+	type historyJob struct {
+		index int
+		key   string
+		ch    check
+	}
+	type historyResult struct {
+		items        []evidence.Item
+		requests     int
+		failures     int
+		unauthorized int
+		discarded    int
+		budget       int
+		truncated    bool
+	}
+	history := make([]historyResult, len(matched))
+	jobs := make(chan historyJob)
+	var wg sync.WaitGroup
+	workers := len(matched)
+	if workers > maxHistoryWorkers {
+		workers = maxHistoryWorkers
+	}
+	for worker := 0; worker < workers; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				entry := &history[job.index]
+				path := "/api/v3/checks/" + url.PathEscape(job.key) + "/flips/?" + query.Encode()
+				if err := c.allowRequest(); err != nil {
+					entry.budget++
+					entry.requests++
+					entry.failures++
+					continue
+				}
+				// LockedClient.Get closes the body before it gives the response.
+				resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
+				entry.requests++
+				if err != nil {
+					entry.failures++
+					continue
+				}
+				if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+					entry.unauthorized++
+					continue
+				}
+				if resp.StatusCode != http.StatusOK {
+					entry.failures++
+					continue
+				}
+				flips, err := decodeFlips(body)
+				if err != nil {
+					entry.failures++
+					continue
+				}
+				var parsed []struct {
+					at time.Time
+					up int
+				}
+				for _, flip := range flips {
+					if flip.Up == nil || (*flip.Up != 0 && *flip.Up != 1) {
+						entry.discarded++
+						continue
+					}
+					at, ok := parseTS(flip.Timestamp)
+					if !ok {
+						entry.discarded++
+						continue
+					}
+					if at.Before(start) || at.After(end) {
+						continue
+					}
+					parsed = append(parsed, struct {
+						at time.Time
+						up int
+					}{at, *flip.Up})
+				}
+				sort.SliceStable(parsed, func(i, j int) bool { return parsed[i].at.Before(parsed[j].at) })
+				if len(parsed) > maxFlipsPerCheck {
+					entry.truncated = true
+					parsed = parsed[len(parsed)-maxFlipsPerCheck:]
+				}
+				for _, flip := range parsed {
+					entry.items = append(entry.items, c.transitionItem(serviceID, job.ch, flip.at, flip.up, requestedAt, start, end))
+				}
+			}
+		}()
+	}
+	for index, ch := range matched {
 		key := strings.TrimSpace(ch.UniqueKey)
 		if !transitionKeyRe.MatchString(key) {
 			result.MissingIdentity++
 			continue
 		}
-		path := "/api/v3/checks/" + url.PathEscape(key) + "/flips/?" + query.Encode()
-		if err := c.allowRequest(); err != nil {
-			result.Budget++
-			result.Requests++
-			result.Failures++
-			continue
-		}
-		// LockedClient.Get closes the body before it gives the response.
-		resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
-		result.Requests++
-		if err != nil {
-			result.Failures++
-			continue
-		}
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			result.Unauthorized++
-			continue
-		}
-		if resp.StatusCode != http.StatusOK {
-			result.Failures++
-			continue
-		}
-		flips, err := decodeFlips(body)
-		if err != nil {
-			result.Failures++
-			continue
-		}
-		var parsed []struct {
-			at time.Time
-			up int
-		}
-		for _, entry := range flips {
-			if entry.Up == nil || (*entry.Up != 0 && *entry.Up != 1) {
-				result.Discarded++
-				continue
-			}
-			at, ok := parseTS(entry.Timestamp)
-			if !ok {
-				result.Discarded++
-				continue
-			}
-			if at.Before(start) || at.After(end) {
-				continue
-			}
-			parsed = append(parsed, struct {
-				at time.Time
-				up int
-			}{at, *entry.Up})
-		}
-		sort.SliceStable(parsed, func(i, j int) bool { return parsed[i].at.Before(parsed[j].at) })
-		if len(parsed) > maxFlipsPerCheck {
-			result.Truncated = true
-			parsed = parsed[len(parsed)-maxFlipsPerCheck:]
-		}
-		for _, entry := range parsed {
-			item := c.transitionItem(serviceID, ch, entry.at, entry.up, requestedAt, start, end)
+		jobs <- historyJob{index: index, key: key, ch: ch}
+	}
+	close(jobs)
+	wg.Wait()
+	for index := range history {
+		entry := history[index]
+		result.Requests += entry.requests
+		result.Failures += entry.failures
+		result.Unauthorized += entry.unauthorized
+		result.Discarded += entry.discarded
+		result.Budget += entry.budget
+		result.Truncated = result.Truncated || entry.truncated
+		for _, item := range entry.items {
 			item.Order = len(result.Items)
 			result.Items = append(result.Items, item)
 		}
