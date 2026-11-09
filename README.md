@@ -155,7 +155,7 @@ The demo does not exercise the stdio executable.
 Install the latest published release with Go:
 
 ```bash
-go install github.com/ThomasCrouzet/homelab-evidence-mcp/cmd/homelab-evidence-mcp@v0.2.0
+go install github.com/ThomasCrouzet/homelab-evidence-mcp/cmd/homelab-evidence-mcp@v0.2.1
 ```
 
 `@latest` resolves to the newest published tag. It does not install `main`.
@@ -403,7 +403,7 @@ See [Contributing](CONTRIBUTING.md) for the development and test rules.
 <!-- readme:section status -->
 ## Status
 
-**v0.2.0, active development.** Released on 2026-11-09.
+**v0.2.1, active development.** Released on 2026-11-09.
 The implemented scope includes six source families and seven stdio MCP tools.
 API compatibility claims cover local fixture structures, not every deployed
 upstream version.

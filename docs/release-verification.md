@@ -2,7 +2,7 @@
 
 ## Current release
 
-The latest public release `v0.2.0` is mutable because repository immutability
+The latest public release `v0.2.1` is mutable because repository immutability
 is disabled. Its assets have build-provenance attestations from the release
 workflow. A `SHA256SUMS` file from the same mutable release does not
 independently authenticate the assets.
@@ -34,8 +34,8 @@ and `attestations` permissions scoped to the publish job.
 For a future immutable release:
 
 ```bash
-gh release verify v0.2.0
-gh release verify-asset v0.2.0 homelab-evidence-mcp_linux_amd64
+gh release verify v0.2.1
+gh release verify-asset v0.2.1 homelab-evidence-mcp_linux_amd64
 ```
 
 Immutability applies only to releases published after a maintainer enables
