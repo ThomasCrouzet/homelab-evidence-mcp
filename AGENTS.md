@@ -5,7 +5,7 @@
 Read-only evidence collection for a homelab. One Go binary speaks MCP over stdio
 and joins six read-only sources into a timestamped, redacted timeline per
 `service_id`. It serves operators during an incident with facts and limits, not
-a root cause. State: v0.2.0, released 2026-11-09, active development.
+a root cause. State: v0.2.1, released 2026-11-09, active development.
 
 ## Stack
 

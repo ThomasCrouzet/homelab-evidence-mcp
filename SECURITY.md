@@ -2,7 +2,7 @@
 
 ## Versions
 
-The project supplies security updates for version 0.1.x.
+The project supplies security updates for version 0.2.x.
 
 ## Vulnerability reports
 

@@ -5,13 +5,17 @@ commits.
 
 ## Latest public release
 
-The latest public release is `v0.2.0`, published 2026-11-09 from the `v0.2.0`
+The latest public release is `v0.2.1`, published 2026-11-09 from the `v0.2.1`
 tag. This release is mutable and its assets have build-provenance attestations.
+
+The earlier `v0.2.0` tag has no GitHub release. Its release gate stopped on a
+stale native-smoke exit-code check. Use `v0.2.1`, which corrects that check and
+publishes the same feature set.
 
 Use the release when you need a tagged, published version:
 
 ```bash
-go install github.com/ThomasCrouzet/homelab-evidence-mcp/cmd/homelab-evidence-mcp@v0.2.0
+go install github.com/ThomasCrouzet/homelab-evidence-mcp/cmd/homelab-evidence-mcp@v0.2.1
 ```
 
 `@latest` resolves to the newest published module tag. It does not install the
@@ -20,7 +24,7 @@ default branch.
 ## Default branch
 
 `main` contains the release and later documentation updates. The source version
-reports `0.2.0`.
+reports `0.2.1`.
 
 A development build of `main` is available from a clone:
 
@@ -36,7 +40,7 @@ checksums or provenance attestations.
 
 ## Feature availability
 
-| Capability | v0.1.3 | v0.2.0 |
+| Capability | v0.1.3 | v0.2.1 |
 | --- | --- | --- |
 | Seven MCP tools over stdio | Yes | Yes |
 | `--doctor` and `--doctor --json` | No | Yes |

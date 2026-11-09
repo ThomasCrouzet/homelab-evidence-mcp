@@ -108,8 +108,8 @@ services:
 		_ = os.Chmod(invalidConfig, 0o600)
 	}
 	_, _, code = runNativeCommand(t, binary, "--config", invalidConfig, "--validate")
-	if code != 1 {
-		t.Fatalf("invalid --validate code=%d, want=1", code)
+	if code != 2 {
+		t.Fatalf("invalid --validate code=%d, want=2", code)
 	}
 
 	if runtime.GOOS != "windows" {
@@ -117,7 +117,7 @@ services:
 			t.Fatal(err)
 		}
 		_, stderr, code = runNativeCommand(t, binary, "--config", configPath, "--validate")
-		if code != 1 || !strings.Contains(stderr, "group or world accessible") {
+		if code != 2 || !strings.Contains(stderr, "group or world accessible") {
 			t.Fatalf("insecure config code=%d stderr=%q", code, stderr)
 		}
 		if err := os.Chmod(configPath, 0o600); err != nil {

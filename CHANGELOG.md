@@ -4,6 +4,18 @@ This file records project changes. Its format uses
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-11-09
+
+This is the first published release after 0.1.3. It contains the version 0.2.0
+feature set, listed in the
+[0.2.0 section](https://github.com/ThomasCrouzet/homelab-evidence-mcp/blob/main/CHANGELOG.md#020---2026-11-09),
+with one release-gate correction below. The 0.2.0 tag has no GitHub release.
+
+### Fixed
+
+- Align the native release smoke check with the documented `--validate` exit
+  code `2`, so the release gate can execute the candidate binary.
+
 ## [0.2.0] - 2026-11-09
 
 ### Added
