@@ -953,3 +953,37 @@ services: []
 		}
 	}
 }
+
+func TestParse_RejectsRequestOverrideHeaders(t *testing.T) {
+	base := `
+version: 1
+sources:
+  gatus:
+    kind: gatus
+    base_url: https://gatus.example.internal
+%s
+services: []
+`
+	for _, header := range []string{
+		"X-HTTP-Method-Override", "X-HTTP-Method", "X-Method-Override",
+		"X-Original-URL", "X-Rewrite-URL", "X-Forwarded-Method",
+		"Accept-Encoding", "Range", "If-None-Match", "If-Modified-Since",
+	} {
+		t.Run(header, func(t *testing.T) {
+			raw := fmt.Sprintf(base, fmt.Sprintf("    headers:\n      %s: value", header))
+			if _, err := Parse([]byte(raw)); err == nil {
+				t.Fatalf("%s was accepted", header)
+			}
+		})
+	}
+	// A tenant header that does not change the method or target remains valid.
+	raw := fmt.Sprintf(base, "    headers:\n      X-Scope-OrgID: tenant-a")
+	if _, err := Parse([]byte(raw)); err != nil {
+		t.Fatalf("benign tenant header rejected: %v", err)
+	}
+	// token_header uses the same policy.
+	raw = fmt.Sprintf(base, "    token_env: TEST_TOKEN\n    token_header: X-HTTP-Method-Override")
+	if _, err := Parse([]byte(raw)); err == nil {
+		t.Fatal("token_header override was accepted")
+	}
+}

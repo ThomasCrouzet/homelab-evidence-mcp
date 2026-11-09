@@ -78,6 +78,10 @@ This file records project changes. Its format uses
   including token and CA file paths.
 - Return exit code `2` for doctor and validate configuration or prerequisite
   failures, and emit one sanitized JSON error under `--doctor --json`.
+- Reject method, URL, representation, and conditional override headers in
+  static headers and `token_header`, while keeping benign tenant headers.
+- Honor upstream `Cache-Control: no-store`, `no-cache`, `max-age`, and
+  `Pragma: no-cache` in the source response cache.
 - Rebuild the incident `factual_summary` and item warnings from the retained
   items after compact selection, while source coverage warnings stay visible.
 - Enforce the compact byte budget after the summary rebuild. A metadata-only
