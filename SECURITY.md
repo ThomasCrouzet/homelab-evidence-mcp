@@ -57,6 +57,9 @@ Read-only operation has these controls:
 
 ### SSRF and network resolution
 
+An optional per-source `allowed_cidrs` policy checks every resolved address at
+dial time. A host with no allowed address fails before a connection. This
+mitigates DNS rebinding; it is opt-in and does not replace fixed destinations.
 A request can use only a destination name from the startup configuration.
 The server uses only `http` and `https`. It does not accept redirects. MCP arguments
 cannot supply a URL.

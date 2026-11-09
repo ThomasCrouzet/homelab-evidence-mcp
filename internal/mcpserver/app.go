@@ -3,6 +3,7 @@ package mcpserver
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"os"
@@ -52,7 +53,7 @@ type App struct {
 	Cfg      *config.Config
 	Registry *registry.Registry
 	HTTP     *httpx.LockedClient
-	// SourceClients holds clients with per-source CA trust.
+	// SourceClients holds clients with per-source CA trust or address policy.
 	SourceClients []*httpx.LockedClient
 	Redact        *redaction.Engine
 	Cache         *evidence.Cache
@@ -134,17 +135,22 @@ func NewApp(cfg *config.Config, log *slog.Logger, aud *audit.Logger) (*App, erro
 	}
 	for name, src := range cfg.Sources {
 		client := hc
-		if src.CAFile != "" {
-			sourceRoots, err := config.LoadExtraCertPool(src.CAFile)
-			if err != nil {
-				return nil, fmt.Errorf("source %s ca_file: %w", name, err)
+		if src.CAFile != "" || len(src.AllowedCIDRs) > 0 {
+			var sourceRoots *x509.CertPool
+			if src.CAFile != "" {
+				var rootsErr error
+				sourceRoots, rootsErr = config.LoadExtraCertPool(src.CAFile)
+				if rootsErr != nil {
+					return nil, fmt.Errorf("source %s ca_file: %w", name, rootsErr)
+				}
 			}
 			client = httpx.NewLockedClient(httpx.Options{
-				Timeout:   cfg.Limits.TotalTimeout,
-				MaxBody:   cfg.Limits.MaxBodyBytes,
-				UserAgent: version.UserAgent(),
-				CacheTTL:  cfg.Limits.SourceCacheTTL,
-				RootCAs:   sourceRoots,
+				Timeout:      cfg.Limits.TotalTimeout,
+				MaxBody:      cfg.Limits.MaxBodyBytes,
+				UserAgent:    version.UserAgent(),
+				CacheTTL:     cfg.Limits.SourceCacheTTL,
+				RootCAs:      sourceRoots,
+				AllowedCIDRs: src.AllowedCIDRs,
 			})
 			app.SourceClients = append(app.SourceClients, client)
 		}
