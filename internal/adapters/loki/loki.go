@@ -456,17 +456,13 @@ func (c *Client) filterLabels(in map[string]string) (map[string]string, int, boo
 }
 
 func parseNano(s string) (time.Time, bool) {
-	n, err := strconv.ParseInt(s, 10, 64)
+	n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
 	if err != nil {
 		return time.Time{}, false
 	}
-	// Loki uses nanoseconds.
-	sec := n / 1e9
-	nsec := n % 1e9
-	if sec < 0 {
-		return time.Time{}, false
-	}
-	return time.Unix(sec, nsec).UTC(), true
+	// time.Unix normalizes negative nanoseconds and keeps valid pre-1970
+	// signed epochs consistent with -1 ns and -1 s.
+	return time.Unix(0, n).UTC(), true
 }
 
 func (c *Client) redact(s string) (string, int) {

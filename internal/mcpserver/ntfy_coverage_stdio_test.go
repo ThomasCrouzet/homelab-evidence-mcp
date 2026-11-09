@@ -41,6 +41,9 @@ func TestStdioNtfyRecordValidityAndCoverage(t *testing.T) {
 		fmt.Sprintf(`{"id":"notime","event":"message","topic":"valid-alerts","message":"no time"}` + "\n"),
 	})
 	empty := handler(nil)
+	malformed := handler([]string{
+		fmt.Sprintf(`[{"id":"complete","time":%d,"event":"message","topic":"malformed-alerts","message":"complete"}`, t0.Unix()),
+	})
 	oversized := handler([]string{
 		fmt.Sprintf(`{"id":"complete","time":%d,"event":"message","topic":"oversized-alerts","message":"complete"}`+"\n", t0.Unix()),
 		fmt.Sprintf(`{"id":"cut","time":%d,"event":"message","topic":"oversized-alerts","message":"%s"}`, t0.Unix(), strings.Repeat("x", 8192)),
@@ -59,6 +62,9 @@ sources:
   ntfy-empty:
     kind: ntfy
     base_url: %s
+  ntfy-malformed:
+    kind: ntfy
+    base_url: %s
   ntfy-oversized:
     kind: ntfy
     base_url: %s
@@ -69,10 +75,13 @@ services:
   - id: empty
     sources:
       ntfy: { source: ntfy-empty, topic: empty-alerts }
+  - id: malformed
+    sources:
+      ntfy: { source: ntfy-malformed, topic: malformed-alerts }
   - id: oversized
     sources:
       ntfy: { source: ntfy-oversized, topic: oversized-alerts }
-`, valid.URL, empty.URL, oversized.URL)
+`, valid.URL, empty.URL, malformed.URL, oversized.URL)
 	if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -145,6 +154,14 @@ services:
 	}
 	if got := ntfySource(emptyBody); got.Reason != "retention_limited" || got.Complete || !got.RetentionLimited {
 		t.Fatalf("empty replay claimed complete history: %+v", got)
+	}
+
+	malformedBody, malformedRaw := call("malformed")
+	if len(malformedBody.Items) != 1 {
+		t.Fatalf("malformed array lost complete evidence: %s", malformedRaw)
+	}
+	if got := ntfySource(malformedBody); !got.LocalTruncated || got.Complete || got.Discarded != 1 {
+		t.Fatalf("malformed array coverage=%+v", got)
 	}
 
 	oversizedBody, oversizedRaw := call("oversized")
