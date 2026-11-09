@@ -216,7 +216,8 @@ Do these steps:
 2. Use a read-only Healthchecks key.
 3. Store configuration and tokens in a directory that is not in the repository.
 4. On Unix, use mode `0600`.
-5. On Windows, use a user-only ACL. Token file ACLs are checked; audit file ACLs are not.
+5. On Windows, use a user-only ACL. Token file ACLs are checked; audit
+   file ACLs are not.
 6. Run the binary with a low-privilege account.
 7. If possible, use HTTPS with a correct internal PKI.
 8. Adapt `redact` rules to local secret formats.
