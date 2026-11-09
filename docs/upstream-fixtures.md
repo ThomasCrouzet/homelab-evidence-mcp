@@ -67,9 +67,19 @@ Normal CI runs the offline replay tests in `internal/adapters/upstream`. The
 tests are deterministic and use local `httptest` servers. No test contacts a
 live upstream service.
 
-A real-service integration lane is not implemented. That gap is explicit: the
-matrix must not claim live verification until such a lane runs and records the
-revision, versions, and result outside the repository.
+An opt-in live lane exists for operators with disposable read-only
+credentials:
+
+```bash
+HEM_LIVE_INTEGRATION=1 \
+HEM_LIVE_CONFIG=/path/to/private-config.yaml \
+make test-live
+```
+
+The lane runs `--validate` and `--doctor --json`, records the revision,
+environment, binary version, exit codes and result outside the repository, and
+never uploads them. Normal CI does not run it. The matrix must not claim live
+verification for a version until this lane has run against that version.
 
 ## Adding a fixture
 

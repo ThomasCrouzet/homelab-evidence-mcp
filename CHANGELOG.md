@@ -8,6 +8,11 @@ This file records project changes. Its format uses
 
 ### Added
 
+- Add deterministic fuzz targets and hostile JSON seeds for every adapter
+  decoder, plus repeatable evidence, compact-envelope, and ntfy decode
+  benchmarks (`make fuzz`, `make bench`).
+- Add an opt-in live upstream lane (`make test-live`) that records revision,
+  environment, and doctor result outside the repository.
 - Add a serialized-payload byte budget to the evidence cache, with counters in
   `evidence_capabilities`. The default is 8 MiB and the maximum is 64 MiB.
 - Add a versioned upstream fixture corpus with provenance, offline replay tests,
@@ -85,6 +90,10 @@ This file records project changes. Its format uses
   identities as incomplete coverage.
 - Emit explicit Beszel `cpu_percent` and `memory_percent` values, keep legacy
   values unit-unknown, and mark out-of-range samples invalid.
+- Reject method, URL, representation, and conditional override headers in
+  static headers and `token_header`, while keeping benign tenant headers.
+- Honor upstream `Cache-Control: no-store`, `no-cache`, `max-age`, and
+  `Pragma: no-cache` in the source response cache.
 - Rebuild the incident `factual_summary` and item warnings from the retained
   items after compact selection, while source coverage warnings stay visible.
 - Enforce the compact byte budget after the summary rebuild. A metadata-only

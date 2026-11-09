@@ -122,7 +122,7 @@
             "maxProperties": 64,
             "additionalProperties": { "type": "string", "maxLength": 4096 },
             "propertyNames": { "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$" },
-            "description": "Use static headers without secrets. Do not use authentication-related names or reserved headers."
+            "description": "Use static headers without secrets. Do not use authentication-related names, method or URL override headers, representation or conditional headers, or reserved headers."
           }
         },
         "allOf": [

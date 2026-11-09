@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -467,7 +468,9 @@ func (c *LockedClient) fetch(ctx context.Context, destName string, full *url.URL
 	resp.Header.Set(cacheTimeHeader, collectedAt.Format(time.RFC3339Nano))
 
 	if c.cacheTTL > 0 && resp.StatusCode == http.StatusOK {
-		c.cachePut(cacheKey, resp.StatusCode, body, collectedAt, headerFlag(resp.Header, UpstreamTruncatedHeader))
+		if lifetime, storable := sourceCacheLifetime(resp.Header, c.cacheTTL); storable && lifetime > 0 {
+			c.cachePutWithTTL(cacheKey, resp.StatusCode, body, collectedAt, lifetime, headerFlag(resp.Header, UpstreamTruncatedHeader))
+		}
 	}
 	return resp, body, nil
 }
@@ -479,6 +482,57 @@ func addressAllowed(ip net.IP, allowed []*net.IPNet) bool {
 		}
 	}
 	return false
+}
+
+// sourceCacheLifetime applies the origin cache directives. no-store and
+// no-cache bypass storage. A max-age value caps the operator TTL.
+func sourceCacheLifetime(header http.Header, ttl time.Duration) (time.Duration, bool) {
+	directives := parseCacheControl(header)
+	if _, ok := directives["no-store"]; ok {
+		return 0, false
+	}
+	if _, ok := directives["no-cache"]; ok {
+		return 0, false
+	}
+	// This is a private in-process cache, so a private response is safe here.
+	if value, ok := directives["max-age"]; ok {
+		seconds, err := strconv.Atoi(value)
+		if err != nil || seconds < 0 {
+			return 0, false
+		}
+		maxAge := time.Duration(seconds) * time.Second
+		if maxAge > ttl {
+			maxAge = ttl
+		}
+		if maxAge <= 0 {
+			return 0, false
+		}
+		return maxAge, true
+	}
+	if strings.Contains(strings.ToLower(strings.Join(header.Values("Pragma"), ",")), "no-cache") {
+		return 0, false
+	}
+	return ttl, true
+}
+
+func parseCacheControl(header http.Header) map[string]string {
+	out := map[string]string{}
+	for _, raw := range header.Values("Cache-Control") {
+		for _, part := range strings.Split(raw, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			key, value, found := strings.Cut(part, "=")
+			key = strings.ToLower(strings.TrimSpace(key))
+			if !found {
+				out[key] = ""
+				continue
+			}
+			out[key] = strings.Trim(strings.TrimSpace(value), `"`)
+		}
+	}
+	return out
 }
 
 func headerFlag(header http.Header, name string) bool {
@@ -532,6 +586,10 @@ func (c *LockedClient) cacheGet(key string) ([]byte, int, time.Time, bool, bool)
 }
 
 func (c *LockedClient) cachePut(key string, status int, body []byte, collectedAt time.Time, truncated bool) {
+	c.cachePutWithTTL(key, status, body, collectedAt, c.cacheTTL, truncated)
+}
+
+func (c *LockedClient) cachePutWithTTL(key string, status int, body []byte, collectedAt time.Time, ttl time.Duration, truncated bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	bodyBytes := int64(len(body))
@@ -555,7 +613,7 @@ func (c *LockedClient) cachePut(key string, status int, body []byte, collectedAt
 		status:      status,
 		body:        cp,
 		collectedAt: collectedAt.UTC(),
-		expiresAt:   time.Now().Add(c.cacheTTL),
+		expiresAt:   now.Add(ttl),
 		truncated:   truncated,
 	}
 	c.cacheOrder = append(c.cacheOrder, key)
