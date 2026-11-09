@@ -2,9 +2,18 @@
 
 ## Current release
 
-The latest public release `v0.1.3` is mutable. It has no immutable-release
-attestation. A `SHA256SUMS` file from the same mutable release does not
+The latest public release `v0.2.0` is mutable because repository immutability
+is disabled. Its assets have build-provenance attestations from the release
+workflow. A `SHA256SUMS` file from the same mutable release does not
 independently authenticate the assets.
+
+Verify an asset against its attestation:
+
+```bash
+sha256sum -c SHA256SUMS
+gh attestation verify homelab-evidence-mcp_linux_amd64 \
+  --repo ThomasCrouzet/homelab-evidence-mcp
+```
 
 ## Candidate release process
 
@@ -25,7 +34,6 @@ and `attestations` permissions scoped to the publish job.
 For a future immutable release:
 
 ```bash
-sha256sum -c SHA256SUMS
 gh release verify v0.2.0
 gh release verify-asset v0.2.0 homelab-evidence-mcp_linux_amd64
 ```
