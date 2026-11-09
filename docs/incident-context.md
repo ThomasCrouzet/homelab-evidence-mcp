@@ -8,8 +8,10 @@ contributing source and enforces a response byte budget.
 
 - The default is `compact: false`. Existing clients see the same global
   newest-item selection and `max_items` limit.
-- `max_incident_response_bytes` applies to compact mode. The default mode reports
-  its measured `byte_size` but does not trim to the budget.
+- `max_incident_response_bytes` is the response byte budget for compact and
+  default incident mode. Both trim evidence items to the budget and report
+  `byte_size`, `byte_budget`, `byte_budget_truncated`, and `omitted_items`.
+  The other evidence tools use the same budget.
 - A compact client must read the new omission fields before it claims complete
   coverage.
 
