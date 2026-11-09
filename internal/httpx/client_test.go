@@ -593,7 +593,7 @@ func TestGet_DecodesGzipResponse(t *testing.T) {
 	defer ts.Close()
 	client := NewLockedClient(Options{Timeout: time.Second, CacheTTL: time.Minute})
 	_ = client.RegisterDestination("src", ts.URL)
-	_, body, err := client.Get(context.Background(), "src", "/", nil)
+	_, body, err := client.Get(context.Background(), "src", "/", nil) //nolint:bodyclose
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -601,7 +601,7 @@ func TestGet_DecodesGzipResponse(t *testing.T) {
 		t.Fatalf("body=%q", body)
 	}
 	// The cached representation is the decoded body.
-	_, cached, err := client.Get(context.Background(), "src", "/", nil)
+	_, cached, err := client.Get(context.Background(), "src", "/", nil) //nolint:bodyclose
 	if err != nil || string(cached) != `{"ok":true}` || calls != 1 {
 		t.Fatalf("cache calls=%d body=%q err=%v", calls, cached, err)
 	}
@@ -619,7 +619,7 @@ func TestGet_BoundsDecompressedGzip(t *testing.T) {
 	defer ts.Close()
 	client := NewLockedClient(Options{Timeout: time.Second, MaxBody: 512})
 	_ = client.RegisterDestination("src", ts.URL)
-	if _, _, err := client.Get(context.Background(), "src", "/", nil); err == nil {
+	if _, _, err := client.Get(context.Background(), "src", "/", nil); err == nil { //nolint:bodyclose
 		t.Fatal("decompressed body above the cap was accepted")
 	}
 }
