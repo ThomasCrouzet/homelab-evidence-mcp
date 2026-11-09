@@ -238,9 +238,9 @@ func RunStdio(ctx context.Context, app *App) error {
 type toolBudget struct {
 	mu     sync.Mutex
 	perMin int
-	window time.Time
-	count  int
+	recent []time.Time
 	sem    chan struct{}
+	clock  func() time.Time
 }
 
 func newToolBudget(perMin, concurrent int) *toolBudget {
@@ -252,8 +252,8 @@ func newToolBudget(perMin, concurrent int) *toolBudget {
 	}
 	return &toolBudget{
 		perMin: perMin,
-		window: time.Now(),
 		sem:    make(chan struct{}, concurrent),
+		clock:  time.Now,
 	}
 }
 
@@ -268,16 +268,20 @@ func (b *toolBudget) acquire() error {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	now := time.Now()
-	if now.Sub(b.window) >= time.Minute {
-		b.window = now
-		b.count = 0
+	now := b.clock()
+	cutoff := now.Add(-time.Minute)
+	kept := b.recent[:0]
+	for _, at := range b.recent {
+		if at.After(cutoff) {
+			kept = append(kept, at)
+		}
 	}
-	if b.count >= b.perMin {
+	b.recent = kept
+	if len(b.recent) >= b.perMin {
 		<-b.sem
 		return fmt.Errorf("tool call rate limit exceeded (%d/min)", b.perMin)
 	}
-	b.count++
+	b.recent = append(b.recent, now)
 	return nil
 }
 
