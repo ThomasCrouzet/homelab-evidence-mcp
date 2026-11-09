@@ -43,6 +43,9 @@ sources:
   gatus:
     kind: gatus
     base_url: https://gatus.example.internal
+    # Optional per-source CA bundle. It replaces the global tls.ca_file for
+    # this source only. TLS hostname verification stays active.
+    # ca_file: /etc/homelab-evidence/gatus-ca.pem
     # The client keeps path prefixes.
     # For example, use https://proxy.example/gatus.
     # Use optional static headers without secrets.

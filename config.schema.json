@@ -98,6 +98,12 @@
             "pattern": "^v?[0-9]+\\.[0-9]+$",
             "description": "Use only for a docker source. Add an explicit Engine API prefix such as v1.56 to read routes. Do not also put a version in base_url."
           },
+          "ca_file": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Add extra CA trust for this source only. It replaces the global tls.ca_file for this source. TLS hostname verification stays active."
+          },
           "token_env": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
           "token_file": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Use a regular file with a maximum size of 4 KiB. On Unix, let only the owner access the file. Use mode 0600. The binary does not accept files that a group or other users can access. On Windows, use a user-only ACL. The binary does not examine Windows ACLs." },
           "token_header": {

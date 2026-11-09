@@ -15,6 +15,7 @@ import (
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/audit"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/correlation"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/evidence"
+	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/httpx"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/registry"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/version"
@@ -161,7 +162,7 @@ func (a *App) toolCapabilities(ctx context.Context, _ *mcp.CallToolRequest, _ em
 				"evidence_cache_max":             a.Cfg.Limits.EvidenceCacheMax,
 				"evidence_cache_max_bytes":       a.Cfg.Limits.EvidenceCacheMaxBytes,
 			},
-			SourceCache:   a.HTTP.Stats(),
+			SourceCache:   httpx.CombinedStats(append([]*httpx.LockedClient{a.HTTP}, a.SourceClients...)...),
 			EvidenceCache: a.Cache.Stats(),
 			Features: []string{
 				"canonical_service_registry",
