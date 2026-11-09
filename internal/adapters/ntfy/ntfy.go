@@ -206,6 +206,11 @@ func (c *Client) HistoryDetail(ctx context.Context, serviceID, topic string, sta
 		}
 		return candidates[i].pos < candidates[j].pos
 	})
+	localTruncated := len(candidates) > limit
+	if localTruncated {
+		candidates = candidates[len(candidates)-limit:]
+	}
+	// Build evidence only for the retained newest messages.
 	items := make([]evidence.Item, 0, len(candidates))
 	for _, entry := range candidates {
 		item := c.itemFrom(serviceID, topic, entry.m, entry.ts, retrievedAt, maxLineBytes)
@@ -214,8 +219,8 @@ func (c *Client) HistoryDetail(ctx context.Context, serviceID, topic string, sta
 		item.Order = entry.pos
 		items = append(items, item)
 	}
-	kept, localTruncated := evidence.KeepNewest(items, limit)
-	result.LocalTruncated = result.LocalTruncated || localTruncated
+	kept, trimmed := evidence.KeepNewest(items, limit)
+	result.LocalTruncated = result.LocalTruncated || localTruncated || trimmed
 	result.Items = kept
 	return result, nil
 }

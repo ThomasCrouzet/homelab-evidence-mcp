@@ -90,7 +90,8 @@ The Loki adapter has this behavior:
 - The adapter applies the documented half-open interval `[start, end)`.
 - A window outside the RFC3339 year range gives a source error before any GET.
 - The request asks for one more line than the requested limit.
-- The adapter sorts lines chronologically and keeps the newest requested lines.
+- The adapter sorts candidate lines chronologically and builds evidence only
+  for the newest requested lines.
 - Equal timestamps in one stream keep their response position. Across streams,
   the stream identity is the stable tie-break. Opaque evidence ids do not
   decide order or truncation.
