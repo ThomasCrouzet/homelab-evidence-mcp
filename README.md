@@ -245,6 +245,8 @@ Set only one of `token_env` and `token_file` per source.
   `incident_context`; the minimum is 8 KiB and the maximum is 4 MiB.
 - **Timeouts:** `limits.per_source_timeout` defaults to `3s`;
   `limits.total_timeout` defaults to `10s`.
+- **Source rate:** `limits.max_source_requests_per_minute` defaults to `100`
+  and bounds one source instance over a sliding minute.
 - **Caches:** `limits.source_cache_ttl` defaults to `15s`; `0` disables it.
   `limits.evidence_cache_ttl` defaults to `5m`.
   `limits.evidence_cache_max` defaults to `256`; `0` disables storage.

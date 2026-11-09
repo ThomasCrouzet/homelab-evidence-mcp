@@ -65,7 +65,9 @@ type Limits struct {
 	SourceCacheTTL        time.Duration
 	MaxToolCallsPerMinute int
 	MaxConcurrentTools    int
-	WarnEmptyBindings     bool
+	// MaxSourceRequestsPerMinute bounds one source instance in a sliding minute.
+	MaxSourceRequestsPerMinute int
+	WarnEmptyBindings          bool
 }
 
 // Audit contains settings for the optional audit log. The application always sends events to stderr.
@@ -170,23 +172,24 @@ type fileConfig struct {
 }
 
 type fileLimits struct {
-	DefaultWindow         string `yaml:"default_window"`
-	MaxIncidentWindow     string `yaml:"max_incident_window"`
-	MaxCronWindow         string `yaml:"max_cron_window"`
-	MaxLogLines           int    `yaml:"max_log_lines"`
-	MaxEvidenceItems      int    `yaml:"max_evidence_items"`
-	MaxIncidentBytes      *int   `yaml:"max_incident_response_bytes"`
-	PerSourceTimeout      string `yaml:"per_source_timeout"`
-	TotalTimeout          string `yaml:"total_timeout"`
-	MaxLogLineBytes       int    `yaml:"max_log_line_bytes"`
-	MaxBodyBytes          int    `yaml:"max_body_bytes"`
-	EvidenceCacheTTL      string `yaml:"evidence_cache_ttl"`
-	EvidenceCacheMax      *int   `yaml:"evidence_cache_max"`
-	EvidenceCacheMaxBytes *int64 `yaml:"evidence_cache_max_bytes"`
-	SourceCacheTTL        string `yaml:"source_cache_ttl"`
-	MaxToolCallsPerMinute int    `yaml:"max_tool_calls_per_minute"`
-	MaxConcurrentTools    int    `yaml:"max_concurrent_tools"`
-	WarnEmptyBindings     *bool  `yaml:"warn_empty_bindings"`
+	DefaultWindow              string `yaml:"default_window"`
+	MaxIncidentWindow          string `yaml:"max_incident_window"`
+	MaxCronWindow              string `yaml:"max_cron_window"`
+	MaxLogLines                int    `yaml:"max_log_lines"`
+	MaxEvidenceItems           int    `yaml:"max_evidence_items"`
+	MaxIncidentBytes           *int   `yaml:"max_incident_response_bytes"`
+	PerSourceTimeout           string `yaml:"per_source_timeout"`
+	TotalTimeout               string `yaml:"total_timeout"`
+	MaxLogLineBytes            int    `yaml:"max_log_line_bytes"`
+	MaxBodyBytes               int    `yaml:"max_body_bytes"`
+	EvidenceCacheTTL           string `yaml:"evidence_cache_ttl"`
+	EvidenceCacheMax           *int   `yaml:"evidence_cache_max"`
+	EvidenceCacheMaxBytes      *int64 `yaml:"evidence_cache_max_bytes"`
+	SourceCacheTTL             string `yaml:"source_cache_ttl"`
+	MaxToolCallsPerMinute      int    `yaml:"max_tool_calls_per_minute"`
+	MaxSourceRequestsPerMinute int    `yaml:"max_source_requests_per_minute"`
+	MaxConcurrentTools         int    `yaml:"max_concurrent_tools"`
+	WarnEmptyBindings          *bool  `yaml:"warn_empty_bindings"`
 }
 
 type fileAudit struct {
@@ -466,13 +469,14 @@ func Parse(raw []byte) (*Config, error) {
 func parseLimits(f fileLimits) (Limits, ValidationErrors) {
 	var errs ValidationErrors
 	l := Limits{
-		MaxLogLines:           f.MaxLogLines,
-		MaxEvidenceItems:      f.MaxEvidenceItems,
-		MaxLogLineBytes:       f.MaxLogLineBytes,
-		MaxBodyBytes:          int64(f.MaxBodyBytes),
-		MaxToolCallsPerMinute: f.MaxToolCallsPerMinute,
-		MaxConcurrentTools:    f.MaxConcurrentTools,
-		WarnEmptyBindings:     true,
+		MaxLogLines:                f.MaxLogLines,
+		MaxEvidenceItems:           f.MaxEvidenceItems,
+		MaxLogLineBytes:            f.MaxLogLineBytes,
+		MaxBodyBytes:               int64(f.MaxBodyBytes),
+		MaxToolCallsPerMinute:      f.MaxToolCallsPerMinute,
+		MaxConcurrentTools:         f.MaxConcurrentTools,
+		MaxSourceRequestsPerMinute: f.MaxSourceRequestsPerMinute,
+		WarnEmptyBindings:          true,
 	}
 	if f.WarnEmptyBindings != nil {
 		l.WarnEmptyBindings = *f.WarnEmptyBindings

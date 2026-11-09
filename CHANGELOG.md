@@ -31,6 +31,12 @@ This file records project changes. Its format uses
 
 ### Fixed
 
+- Distinguish a Healthchecks `status_filter` mismatch from an unmatched check
+  binding with `status_filter_no_match`.
+- Give tag-aggregated Healthchecks checks a bounded per-check provenance token,
+  and mark a check without a stable unique identity as unverified.
+- Reuse one Healthchecks inventory per source for global `failed_crons`, bound
+  the worker count, and add a per-source sliding request budget.
 - Add an optional `service_id` to a per-binding source outcome, and use the
   binding and service identity as stable sort tie-breakers before opaque ids.
 - Validate every returned Loki stream against the configured equality labels

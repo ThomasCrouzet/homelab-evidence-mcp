@@ -3,6 +3,10 @@ package healthchecks
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/config"
@@ -27,7 +32,18 @@ type Client struct {
 	Headers  map[string]string // holds authentication. Do not log the values.
 	Redact   *redaction.Engine
 	Now      func() time.Time
+
+	identityOnce sync.Once
+	identityKey  []byte
+
+	requestMu    sync.Mutex
+	requestTimes []time.Time
+	// RequestLimit bounds requests in a sliding minute. Zero uses 100.
+	RequestLimit int
 }
+
+// ErrRequestBudget reports that the per-source request budget is exhausted.
+var ErrRequestBudget = errors.New("healthchecks request budget exceeded")
 
 // check holds only the Healthchecks fields used.
 const (
@@ -57,6 +73,8 @@ type TransitionResult struct {
 	Failures        int
 	// Unauthorized counts per-check history requests that failed with 401 or 403.
 	Unauthorized int
+	// Budget counts requests skipped by the per-source request limit.
+	Budget int
 }
 
 type check struct {
@@ -93,6 +111,10 @@ var ErrNoMatch = errors.New("healthchecks binding matched no check")
 // than one check. The error does not include an identity value.
 var ErrAmbiguousBinding = errors.New("healthchecks binding matched more than one check")
 
+// ErrStatusFilterNoMatch reports a valid identity whose current state does not
+// match the configured status_filter.
+var ErrStatusFilterNoMatch = errors.New("healthchecks status_filter matched no current state")
+
 // FilterFromRef makes a filter from the configuration.
 func FilterFromRef(ref *config.HealthchecksRef) Filter {
 	if ref == nil {
@@ -111,21 +133,53 @@ func (f Filter) selects() bool {
 	return f.Name != "" || f.UUID != "" || f.UniqueKey != "" || len(f.Tags) > 0 || f.Status != ""
 }
 
-// Status gives the current state of the selected checks.
-func (c *Client) Status(ctx context.Context, serviceID string, f Filter) ([]evidence.Item, error) {
+// Snapshot gives one checks inventory and its collection times.
+type Snapshot struct {
+	checks      []check
+	observedAt  time.Time
+	retrievedAt time.Time
+}
+
+// Fetch reads the checks inventory once.
+func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 	requestedAt := c.now()
 	checks, observedAt, err := c.list(ctx, requestedAt)
 	if err != nil {
-		return nil, err
+		return Snapshot{}, err
 	}
-	retrievedAt := c.now()
-	matched, err := selectChecks(checks, f)
+	return Snapshot{checks: checks, observedAt: observedAt, retrievedAt: c.now()}, nil
+}
+
+// Status gives the current state of the selected checks.
+func (c *Client) Status(ctx context.Context, serviceID string, f Filter) ([]evidence.Item, error) {
+	snapshot, err := c.Fetch(ctx)
 	if err != nil {
 		return nil, err
 	}
+	return c.StatusFrom(snapshot, serviceID, f)
+}
+
+// StatusFrom gives the current state from one collected snapshot.
+func (c *Client) StatusFrom(snapshot Snapshot, serviceID string, f Filter) ([]evidence.Item, error) {
+	matched, err := selectChecks(snapshot.checks, f)
+	if err != nil {
+		return nil, err
+	}
+	if f.Status != "" {
+		filtered := matched[:0]
+		for _, ch := range matched {
+			if strings.EqualFold(strings.TrimSpace(ch.Status), f.Status) {
+				filtered = append(filtered, ch)
+			}
+		}
+		matched = filtered
+		if len(matched) == 0 {
+			return nil, ErrStatusFilterNoMatch
+		}
+	}
 	out := make([]evidence.Item, 0, len(matched))
 	for _, ch := range matched {
-		out = append(out, c.itemFrom(serviceID, ch, observedAt, retrievedAt))
+		out = append(out, c.itemFrom(serviceID, ch, snapshot.observedAt, snapshot.retrievedAt))
 	}
 	return out, nil
 }
@@ -133,24 +187,28 @@ func (c *Client) Status(ctx context.Context, serviceID string, f Filter) ([]evid
 // FailedInWindow gives checks with a current state of down, grace, or paused.
 // The list route cannot prove a past incident or recovery.
 func (c *Client) FailedInWindow(ctx context.Context, serviceID string, f Filter, start, end time.Time) ([]evidence.Item, error) {
-	requestedAt := c.now()
-	checks, observedAt, err := c.list(ctx, requestedAt)
+	snapshot, err := c.Fetch(ctx)
 	if err != nil {
 		return nil, err
 	}
-	retrievedAt := c.now()
+	return c.FailedInWindowFrom(snapshot, serviceID, f, start, end)
+}
+
+// FailedInWindowFrom uses one collected snapshot.
+func (c *Client) FailedInWindowFrom(snapshot Snapshot, serviceID string, f Filter, start, end time.Time) ([]evidence.Item, error) {
 	var matched []check
 	if serviceID != "" || f.selects() {
-		matched, err = selectChecks(checks, f)
+		var err error
+		matched, err = selectChecks(snapshot.checks, f)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		matched = checks
+		matched = snapshot.checks
 	}
 	// Allow collection time to be at most 30 seconds after the end time that the caller set before the request.
 	// Do not use the current state as proof of a historical state.
-	if observedAt.Before(start) || observedAt.After(end.Add(30*time.Second)) {
+	if snapshot.observedAt.Before(start) || snapshot.observedAt.After(end.Add(30*time.Second)) {
 		return []evidence.Item{}, nil
 	}
 	var out []evidence.Item
@@ -160,7 +218,7 @@ func (c *Client) FailedInWindow(ctx context.Context, serviceID string, f Filter,
 		if !interesting {
 			continue
 		}
-		item := c.itemFrom(serviceID, ch, observedAt, retrievedAt)
+		item := c.itemFrom(serviceID, ch, snapshot.observedAt, snapshot.retrievedAt)
 		item.WindowStart = timePtr(start)
 		item.WindowEnd = timePtr(end)
 		out = append(out, item)
@@ -171,6 +229,9 @@ func (c *Client) FailedInWindow(ctx context.Context, serviceID string, f Filter,
 func (c *Client) list(ctx context.Context, fallback time.Time) ([]check, time.Time, error) {
 	if len(c.Headers) == 0 {
 		return nil, time.Time{}, fmt.Errorf("healthchecks token not configured")
+	}
+	if err := c.allowRequest(); err != nil {
+		return nil, time.Time{}, err
 	}
 	// Management API v3 gives access to the list at GET /api/v3/checks/.
 	path := "/api/v3/checks/"
@@ -233,9 +294,6 @@ func filterChecks(checks []check, f Filter) []check {
 		if len(f.Tags) > 0 && !tagsMatch(ch.Tags, f.Tags) {
 			continue
 		}
-		if f.Status != "" && !strings.EqualFold(strings.TrimSpace(ch.Status), f.Status) {
-			continue
-		}
 		out = append(out, ch)
 	}
 	return out
@@ -258,14 +316,21 @@ func tagsMatch(tagStr string, want []string) bool {
 // Transitions reads dated up/down transitions for the selected checks.
 // It keeps the service_status path as a current snapshot.
 func (c *Client) Transitions(ctx context.Context, serviceID string, f Filter, start, end time.Time) (TransitionResult, error) {
-	result := TransitionResult{}
-	requestedAt := c.now()
-	checks, _, err := c.list(ctx, requestedAt)
+	snapshot, err := c.Fetch(ctx)
 	if err != nil {
-		return result, err
+		return TransitionResult{}, err
 	}
+	return c.TransitionsFrom(ctx, snapshot, serviceID, f, start, end)
+}
+
+// TransitionsFrom reads history from one collected checks inventory.
+func (c *Client) TransitionsFrom(ctx context.Context, snapshot Snapshot, serviceID string, f Filter, start, end time.Time) (TransitionResult, error) {
+	result := TransitionResult{}
+	requestedAt := snapshot.retrievedAt
+	checks := snapshot.checks
 	var matched []check
 	if serviceID != "" || f.selects() {
+		var err error
 		matched, err = selectChecks(checks, f)
 		if err != nil {
 			return result, err
@@ -300,6 +365,12 @@ func (c *Client) Transitions(ctx context.Context, serviceID string, f Filter, st
 			continue
 		}
 		path := "/api/v3/checks/" + url.PathEscape(key) + "/flips/?" + query.Encode()
+		if err := c.allowRequest(); err != nil {
+			result.Budget++
+			result.Requests++
+			result.Failures++
+			continue
+		}
 		// LockedClient.Get closes the body before it gives the response.
 		resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
 		result.Requests++
@@ -392,7 +463,8 @@ func (c *Client) transitionItem(serviceID string, ch check, at time.Time, up int
 	}
 	name, nameRedactions, nameCut := redaction.ApplyAndTruncate(c.Redact, ch.Name, 256)
 	slug, slugRedactions, slugCut := redaction.ApplyAndTruncate(c.Redact, ch.Slug, 256)
-	sourceID, sourceRedactions, sourceCut := redaction.ApplyAndTruncate(c.Redact, safeSourceID(ch), 256)
+	sourceRef, sourceVerified := c.checkSourceID(ch)
+	sourceID, sourceRedactions, sourceCut := redaction.ApplyAndTruncate(c.Redact, sourceRef, 256)
 	rawSummary := fmt.Sprintf("healthchecks %q transitioned %s", ch.Name, state)
 	sum, summaryRedactions, summaryCut := redaction.ApplyAndTruncate(c.Redact, rawSummary, 512)
 	return evidence.Item{
@@ -413,9 +485,10 @@ func (c *Client) transitionItem(serviceID string, ch check, at time.Time, up int
 			"transition": state,
 			"current":    false,
 		},
-		Truncated:         nameCut || slugCut || sourceCut || summaryCut,
-		RedactionsApplied: nameRedactions + slugRedactions + sourceRedactions + summaryRedactions,
-		Freshness:         evidence.ComputeFreshness(at, retrievedAt),
+		Truncated:          nameCut || slugCut || sourceCut || summaryCut,
+		RedactionsApplied:  nameRedactions + slugRedactions + sourceRedactions + summaryRedactions,
+		Freshness:          evidence.ComputeFreshness(at, retrievedAt),
+		IdentityUnverified: !sourceVerified,
 	}
 }
 
@@ -441,7 +514,8 @@ func (c *Client) itemFrom(serviceID string, ch check, observedAt, retrievedAt ti
 	name, nameRedactions, nameCut := redaction.ApplyAndTruncate(c.Redact, ch.Name, 256)
 	slug, slugRedactions, slugCut := redaction.ApplyAndTruncate(c.Redact, ch.Slug, 256)
 	status, statusRedactions, statusCut := redaction.ApplyAndTruncate(c.Redact, st, 64)
-	sourceID, sourceRedactions, sourceCut := redaction.ApplyAndTruncate(c.Redact, safeSourceID(ch), 256)
+	sourceRef, sourceVerified := c.checkSourceID(ch)
+	sourceID, sourceRedactions, sourceCut := redaction.ApplyAndTruncate(c.Redact, sourceRef, 256)
 	redactions := nameRedactions + slugRedactions + statusRedactions + sourceRedactions
 	truncated := nameCut || slugCut || statusCut || sourceCut
 	attrs := map[string]any{
@@ -449,6 +523,9 @@ func (c *Client) itemFrom(serviceID string, ch check, observedAt, retrievedAt ti
 		"slug":   slug,
 		"status": status,
 		"grace":  ch.Grace,
+	}
+	if !sourceVerified {
+		attrs["identity_unverified"] = true
 	}
 	if ch.Tags != "" {
 		rawTags := strings.Fields(ch.Tags)
@@ -479,20 +556,45 @@ func (c *Client) itemFrom(serviceID string, ch check, observedAt, retrievedAt ti
 	redactions += summaryRedactions
 	truncated = truncated || summaryCut
 	return evidence.Item{
-		ID:                evidence.NewOpaqueID("ev"),
-		ServiceID:         serviceID,
-		Source:            evidence.SourceHealthchecks,
-		SourceID:          sourceID,
-		Kind:              evidence.KindCronCheck,
-		ObservedAt:        observedAt,
-		RetrievedAt:       retrievedAt,
-		Summary:           sum,
-		Severity:          sev,
-		Attributes:        attrs,
-		Truncated:         truncated,
-		RedactionsApplied: redactions,
-		Freshness:         evidence.ComputeFreshness(observedAt, retrievedAt),
+		ID:                 evidence.NewOpaqueID("ev"),
+		ServiceID:          serviceID,
+		Source:             evidence.SourceHealthchecks,
+		SourceID:           sourceID,
+		Kind:               evidence.KindCronCheck,
+		ObservedAt:         observedAt,
+		RetrievedAt:        retrievedAt,
+		Summary:            sum,
+		Severity:           sev,
+		Attributes:         attrs,
+		Truncated:          truncated,
+		RedactionsApplied:  redactions,
+		Freshness:          evidence.ComputeFreshness(observedAt, retrievedAt),
+		IdentityUnverified: !sourceVerified,
 	}
+}
+
+// checkSourceID gives bounded process-local check provenance. A stable unique
+// identity is preferred. A check without one is marked unverified.
+func (c *Client) checkSourceID(ch check) (string, bool) {
+	identity := strings.TrimSpace(ch.UniqueKey)
+	verified := identity != ""
+	if !verified {
+		identity = strings.TrimSpace(ch.UUID)
+		verified = identity != ""
+	}
+	if !verified {
+		identity = strings.ToLower(strings.TrimSpace(ch.Slug)) + "|" + strings.ToLower(strings.TrimSpace(ch.Name))
+	}
+	c.identityOnce.Do(func() {
+		key := make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			key = []byte("homelab-evidence-healthchecks-check-identity")
+		}
+		c.identityKey = key
+	})
+	mac := hmac.New(sha256.New, c.identityKey)
+	_, _ = mac.Write([]byte(identity))
+	return "check_" + hex.EncodeToString(mac.Sum(nil)[:10]), verified
 }
 
 func safeSourceID(ch check) string {
@@ -503,6 +605,29 @@ func safeSourceID(ch check) string {
 		return ch.Name
 	}
 	return "check"
+}
+
+func (c *Client) allowRequest() error {
+	limit := c.RequestLimit
+	if limit <= 0 {
+		limit = 100
+	}
+	now := c.now()
+	c.requestMu.Lock()
+	defer c.requestMu.Unlock()
+	cutoff := now.Add(-time.Minute)
+	kept := c.requestTimes[:0]
+	for _, at := range c.requestTimes {
+		if at.After(cutoff) {
+			kept = append(kept, at)
+		}
+	}
+	c.requestTimes = kept
+	if len(c.requestTimes) >= limit {
+		return ErrRequestBudget
+	}
+	c.requestTimes = append(c.requestTimes, now)
+	return nil
 }
 
 func (c *Client) now() time.Time {

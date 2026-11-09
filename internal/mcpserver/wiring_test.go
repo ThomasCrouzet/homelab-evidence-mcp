@@ -402,3 +402,101 @@ func TestTools_ReadOnlyAnnotations(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceStatus_StatusFilterMismatchIsNotUnmatched(t *testing.T) {
+	app := fullFixtureApp(t)
+	_, out, err := app.toolServiceStatus(context.Background(), nil, serviceIDIn{ServiceID: "media"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(out)
+	var parsed struct {
+		Items   []map[string]any `json:"items"`
+		Sources []struct {
+			Kind     string `json:"kind"`
+			Status   string `json:"status"`
+			Reason   string `json:"reason"`
+			Complete bool   `json:"complete"`
+		} `json:"sources"`
+	}
+	if err := json.Unmarshal(b, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range parsed.Sources {
+		if source.Kind != "healthchecks" {
+			continue
+		}
+		if source.Status != "ok" || source.Reason != "status_filter_no_match" || !source.Complete {
+			t.Fatalf("status filter reason=%+v: %s", source, b)
+		}
+		for _, item := range parsed.Items {
+			if item["source"] == "healthchecks" {
+				t.Fatalf("filtered check became evidence: %s", b)
+			}
+		}
+		return
+	}
+	t.Fatalf("healthchecks source missing: %s", b)
+}
+
+func TestFailedCrons_GlobalReusesSourceInventory(t *testing.T) {
+	t.Setenv("HC_REUSE_TOKEN", "fixture-token")
+	var listCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v3/checks/" {
+			http.NotFound(w, r)
+			return
+		}
+		listCalls++
+		_ = json.NewEncoder(w).Encode(map[string]any{"checks": []map[string]any{
+			{"name": "one", "slug": "one", "status": "down", "unique_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			{"name": "two", "slug": "two", "status": "down", "unique_key": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+		}})
+	}))
+	defer server.Close()
+	raw := fmt.Sprintf(`version: 1
+limits:
+  max_cron_window: 24h
+  per_source_timeout: 2s
+  total_timeout: 5s
+sources:
+  hc:
+    kind: healthchecks
+    base_url: %s
+    token_env: HC_REUSE_TOKEN
+services:
+  - id: one
+    sources:
+      healthchecks: { source: hc, check_name: one }
+  - id: two
+    sources:
+      healthchecks: { source: hc, check_name: two }
+`, server.URL)
+	cfg, err := config.Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := NewApp(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), audit.New(io.Discard))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, out, err := app.toolFailedCrons(context.Background(), nil, failedCronsIn{Duration: "1h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(out)
+	if listCalls != 1 {
+		t.Fatalf("global failed_crons used %d inventories: %s", listCalls, b)
+	}
+	var parsed struct {
+		Items []struct {
+			ServiceID string `json:"service_id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(b, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.Items) != 2 {
+		t.Fatalf("per-service items=%+v", parsed.Items)
+	}
+}
