@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -604,5 +605,56 @@ func TestList_RequestBudget(t *testing.T) {
 	}
 	if _, err := cli.Fetch(context.Background()); !errors.Is(err, ErrRequestBudget) {
 		t.Fatalf("err=%v, want ErrRequestBudget", err)
+	}
+}
+
+func TestTransitions_BoundedParallelAndDeterministic(t *testing.T) {
+	checks := make([]map[string]any, 0, 8)
+	for index := 0; index < 8; index++ {
+		checks = append(checks, map[string]any{
+			"name": fmt.Sprintf("check-%02d", index), "slug": fmt.Sprintf("check-%02d", index),
+			"tags": "ops", "status": "up", "unique_key": fmt.Sprintf("%032d", index),
+		})
+	}
+	var active, peak atomic.Int32
+	cli := transitionsClient(t, checks, func(key string) (int, string) {
+		current := active.Add(1)
+		for {
+			old := peak.Load()
+			if current <= old || peak.CompareAndSwap(old, current) {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+		active.Add(-1)
+		return http.StatusOK, `{"flips":[{"timestamp":"2026-07-25T10:00:00Z","up":0}]}`
+	})
+	start := time.Date(2026, 7, 25, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 25, 11, 0, 0, 0, time.UTC)
+	var first []string
+	for attempt := 0; attempt < 5; attempt++ {
+		result, err := cli.Transitions(context.Background(), "svc", Filter{Tags: []string{"ops"}}, start, end)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Items) != 8 {
+			t.Fatalf("items=%d", len(result.Items))
+		}
+		order := make([]string, len(result.Items))
+		for index, item := range result.Items {
+			order[index] = item.SourceID
+		}
+		if attempt == 0 {
+			first = order
+		} else {
+			for index := range order {
+				if order[index] != first[index] {
+					t.Fatalf("attempt %d order changed at %d", attempt, index)
+				}
+			}
+		}
+	}
+	if peak.Load() < 2 || peak.Load() > maxHistoryWorkers {
+		t.Fatalf("peak concurrency=%d, want 2..%d", peak.Load(), maxHistoryWorkers)
 	}
 }
