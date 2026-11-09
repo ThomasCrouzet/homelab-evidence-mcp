@@ -1158,6 +1158,9 @@ func readSecretFile(path string) (string, error) {
 	if insecureUnixPermissions(st.Mode()) {
 		return "", errors.New("token file is group or world accessible")
 	}
+	if err := checkCredentialFileACL(path); err != nil {
+		return "", err
+	}
 	b, err := io.ReadAll(io.LimitReader(f, (4<<10)+1))
 	if err != nil {
 		return "", err

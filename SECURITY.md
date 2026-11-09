@@ -80,7 +80,9 @@ The server and the operator use these controls for secrets:
 - On Unix, the binary does not accept token files with access for a group or other
   users. Use mode `0600`.
 - The binary does not accept a symbolic link as `token_file`.
-- On Windows, use a user-only ACL. The binary does not examine Windows ACLs.
+- On Windows, use a user-only ACL. Token file ACLs are checked for the owner,
+  SYSTEM, and Administrators; other identities are rejected. The audit file
+  ACL is not examined.
 - `token_header` selects the authentication header. The server does not accept static
   headers with secret-related names.
 - The server rejects a static header that equals the effective authentication
@@ -110,8 +112,10 @@ The server and the operator use these controls for secrets:
   `X-Messages-Truncated` signal as a boolean for cache hits.
 - Make sure that only the owner can access the YAML configuration.
 - On Unix, the server creates the audit file in mode `0600`.
-- On Windows, use a user-only ACL for the audit file path. The binary does not
-  examine Windows ACLs.
+- On Windows, use a user-only ACL for the audit file path. Token files are
+  checked: an explicit allow entry for an identity other than the current
+  user, SYSTEM, or Administrators is rejected. The audit file ACL is not
+  examined.
 
 ### Hostile text
 
@@ -212,7 +216,7 @@ Do these steps:
 2. Use a read-only Healthchecks key.
 3. Store configuration and tokens in a directory that is not in the repository.
 4. On Unix, use mode `0600`.
-5. On Windows, use a user-only ACL. The binary does not examine Windows ACLs.
+5. On Windows, use a user-only ACL. Token file ACLs are checked; audit file ACLs are not.
 6. Run the binary with a low-privilege account.
 7. If possible, use HTTPS with a correct internal PKI.
 8. Adapt `redact` rules to local secret formats.
