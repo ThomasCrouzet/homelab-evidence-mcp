@@ -3,9 +3,9 @@
 This document gives possible directions. It does not give commitments or
 dates.
 
-## Version 0.1
+## Version 0.1 and 0.2
 
-The scope for version 0.1 is:
+The version 0.1 scope was:
 
 - Six read-only source families.
 - A canonical service registry.
@@ -14,6 +14,15 @@ The scope for version 0.1 is:
 - Validation that does not accept incorrect data.
 - Redaction, caches, and budgets.
 - Binary releases for multiple platforms.
+
+Version 0.2 adds:
+
+- `--doctor` source diagnostics with human and JSON output.
+- Typed output schemas for every tool.
+- Compact incident context with an explicit byte budget.
+- Source coverage, omission, and truncation fields.
+- An evidence cache byte budget.
+- Fuzz targets, repeatable benchmarks, and an opt-in live lane.
 
 ## Possible evolutions
 
