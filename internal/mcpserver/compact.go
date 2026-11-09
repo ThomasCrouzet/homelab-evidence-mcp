@@ -216,3 +216,16 @@ func incidentWireSize(bundle evidence.Bundle) int {
 	}
 	return len(text) + len(structured) + wireOverhead
 }
+
+// wireSize estimates the MCP text and structured payload size.
+func wireSize(v any) int {
+	text, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return 0
+	}
+	structured, err := json.Marshal(v)
+	if err != nil {
+		return len(text) + wireOverhead
+	}
+	return len(text) + len(structured) + wireOverhead
+}
