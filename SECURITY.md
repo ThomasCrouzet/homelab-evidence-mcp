@@ -50,6 +50,8 @@ Read-only operation has these controls:
   Healthchecks responses.
 - TLS verification stays active. No user option deactivates it.
 - An optional `tls.ca_file` adds CA certificates to the system trust store.
+- An optional per-source `ca_file` replaces the global pool for that source
+  only. It does not broaden trust for other destinations.
 - Budgets set maximum call counts, concurrency, and response volumes.
 - The Docker Unix socket is not compatible with the server.
 

@@ -152,11 +152,16 @@ The demo does not exercise the stdio executable.
 
 ### Installation
 
-Install the command with Go:
+Install the latest published release with Go:
 
 ```bash
-go install github.com/ThomasCrouzet/homelab-evidence-mcp/cmd/homelab-evidence-mcp@latest
+go install github.com/ThomasCrouzet/homelab-evidence-mcp/cmd/homelab-evidence-mcp@v0.1.3
 ```
+
+`@latest` resolves to the newest published tag. It does not install `main`.
+Some features in this README are unreleased. See
+[release status](docs/release-status.md) for the feature table and the
+development build path.
 
 Add the Go binary directory to `PATH`, or use the installed binary's absolute
 path. Alternatively, build from the cloned repository:
@@ -170,7 +175,8 @@ Prebuilt binaries are available in
 [GitHub Releases](https://github.com/ThomasCrouzet/homelab-evidence-mcp/releases).
 They target Linux and macOS on amd64/arm64, and Windows on amd64.
 See the [platform validation matrix](docs/platforms.md) for the test level of
-each target.
+each target. See [release verification](docs/release-verification.md) for
+checksums, draft publication, and attestation steps.
 Go is unnecessary when you use a prebuilt binary.
 
 ### Configure your sources
@@ -241,10 +247,13 @@ Set only one of `token_env` and `token_file` per source.
   `limits.max_cron_window` defaults to `168h`.
 - **Volume:** `limits.max_log_lines` defaults to `100`;
   `limits.max_evidence_items` defaults to `200`.
-  `limits.max_incident_response_bytes` defaults to 256 KiB for compact
-  `incident_context`; the minimum is 8 KiB and the maximum is 4 MiB.
+  `limits.max_incident_response_bytes` defaults to 256 KiB and is the response
+  byte budget for every evidence tool; the minimum is 8 KiB and the maximum is
+  4 MiB.
 - **Timeouts:** `limits.per_source_timeout` defaults to `3s`;
   `limits.total_timeout` defaults to `10s`.
+- **Source rate:** `limits.max_source_requests_per_minute` defaults to `100`
+  and bounds one source instance over a sliding minute.
 - **Caches:** `limits.source_cache_ttl` defaults to `15s`; `0` disables it.
   `limits.evidence_cache_ttl` defaults to `5m`.
   `limits.evidence_cache_max` defaults to `256`; `0` disables storage.

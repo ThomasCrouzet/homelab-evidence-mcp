@@ -40,6 +40,12 @@
           "description": "The source response cache keeps the same GET responses for a short time. The default is 15s. A value of 0 deactivates this cache. The source or collection time supplies the evidence timestamp."
         },
         "max_tool_calls_per_minute": { "type": "integer", "minimum": 0, "maximum": 1000, "description": "A value of 0 uses the default of 120." },
+        "max_source_requests_per_minute": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000,
+          "description": "Bound one source instance to this many requests in a sliding minute. A value of 0 uses 100. Healthchecks recommends at most 100."
+        },
         "max_concurrent_tools": { "type": "integer", "minimum": 0, "maximum": 64, "description": "A value of 0 uses the default of 8." },
         "warn_empty_bindings": { "type": "boolean" }
       }
@@ -91,6 +97,12 @@
             "type": "string",
             "pattern": "^v?[0-9]+\\.[0-9]+$",
             "description": "Use only for a docker source. Add an explicit Engine API prefix such as v1.56 to read routes. Do not also put a version in base_url."
+          },
+          "ca_file": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Add extra CA trust for this source only. It replaces the global tls.ca_file for this source. TLS hostname verification stays active."
           },
           "token_env": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
           "token_file": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Use a regular file with a maximum size of 4 KiB. On Unix, let only the owner access the file. Use mode 0600. The binary does not accept files that a group or other users can access. On Windows, use a user-only ACL. The binary does not examine Windows ACLs." },

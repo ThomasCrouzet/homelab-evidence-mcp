@@ -28,6 +28,7 @@ limits:
   # Only get_evidence sets freshness to cached. Use a low value for snapshots.
   source_cache_ttl: 15s
   max_tool_calls_per_minute: 120
+  max_source_requests_per_minute: 100
   max_concurrent_tools: 8
   warn_empty_bindings: true
 
@@ -42,6 +43,9 @@ sources:
   gatus:
     kind: gatus
     base_url: https://gatus.example.internal
+    # Optional per-source CA bundle. It replaces the global tls.ca_file for
+    # this source only. TLS hostname verification stays active.
+    # ca_file: /etc/homelab-evidence/gatus-ca.pem
     # The client keeps path prefixes.
     # For example, use https://proxy.example/gatus.
     # Use optional static headers without secrets.

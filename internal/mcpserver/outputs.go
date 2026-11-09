@@ -44,16 +44,20 @@ type ListServicesOut struct {
 
 // ServiceStatusOut is the output of service_status.
 type ServiceStatusOut struct {
-	ServiceID        string                   `json:"service_id"`
-	DisplayName      string                   `json:"display_name"`
-	Items            []evidence.Item          `json:"items"`
-	Sources          []evidence.SourceOutcome `json:"sources"`
-	Complete         bool                     `json:"complete"`
-	SourceComplete   bool                     `json:"source_complete"`
-	DeliveryComplete bool                     `json:"delivery_complete"`
-	Truncated        bool                     `json:"truncated"`
-	RetrievedAt      string                   `json:"retrieved_at"`
-	Note             string                   `json:"note"`
+	ServiceID           string                   `json:"service_id"`
+	DisplayName         string                   `json:"display_name"`
+	Items               []evidence.Item          `json:"items"`
+	Sources             []evidence.SourceOutcome `json:"sources"`
+	Complete            bool                     `json:"complete"`
+	SourceComplete      bool                     `json:"source_complete"`
+	DeliveryComplete    bool                     `json:"delivery_complete"`
+	Truncated           bool                     `json:"truncated"`
+	ByteBudget          int                      `json:"byte_budget"`
+	ByteSize            int                      `json:"byte_size"`
+	ByteBudgetTruncated bool                     `json:"byte_budget_truncated"`
+	OmittedItems        int                      `json:"omitted_items"`
+	RetrievedAt         string                   `json:"retrieved_at"`
+	Note                string                   `json:"note"`
 }
 
 // IncidentContextOut is the output of incident_context.
@@ -61,33 +65,44 @@ type IncidentContextOut evidence.Bundle
 
 // SearchLogsOut is the output of search_logs.
 type SearchLogsOut struct {
-	ServiceID        string                 `json:"service_id"`
-	EffectiveStart   string                 `json:"effective_start"`
-	EffectiveEnd     string                 `json:"effective_end"`
-	Items            []evidence.Item        `json:"items"`
-	Source           evidence.SourceOutcome `json:"source"`
-	Complete         bool                   `json:"complete"`
-	SourceComplete   bool                   `json:"source_complete"`
-	DeliveryComplete bool                   `json:"delivery_complete"`
-	Note             string                 `json:"note"`
+	ServiceID           string                 `json:"service_id"`
+	EffectiveStart      string                 `json:"effective_start"`
+	EffectiveEnd        string                 `json:"effective_end"`
+	Items               []evidence.Item        `json:"items"`
+	Source              evidence.SourceOutcome `json:"source"`
+	Complete            bool                   `json:"complete"`
+	SourceComplete      bool                   `json:"source_complete"`
+	DeliveryComplete    bool                   `json:"delivery_complete"`
+	ByteBudget          int                    `json:"byte_budget"`
+	ByteSize            int                    `json:"byte_size"`
+	ByteBudgetTruncated bool                   `json:"byte_budget_truncated"`
+	OmittedItems        int                    `json:"omitted_items"`
+	Note                string                 `json:"note"`
 }
 
 // FailedCronsOut is the output of failed_crons.
 type FailedCronsOut struct {
-	EffectiveStart   string                   `json:"effective_start"`
-	EffectiveEnd     string                   `json:"effective_end"`
-	Items            []evidence.Item          `json:"items"`
-	Sources          []evidence.SourceOutcome `json:"sources"`
-	Complete         bool                     `json:"complete"`
-	SourceComplete   bool                     `json:"source_complete"`
-	DeliveryComplete bool                     `json:"delivery_complete"`
-	Truncated        bool                     `json:"truncated"`
-	Note             string                   `json:"note"`
+	EffectiveStart      string                   `json:"effective_start"`
+	EffectiveEnd        string                   `json:"effective_end"`
+	Items               []evidence.Item          `json:"items"`
+	Sources             []evidence.SourceOutcome `json:"sources"`
+	Complete            bool                     `json:"complete"`
+	SourceComplete      bool                     `json:"source_complete"`
+	DeliveryComplete    bool                     `json:"delivery_complete"`
+	Truncated           bool                     `json:"truncated"`
+	TimeBasis           string                   `json:"time_basis"`
+	ByteBudget          int                      `json:"byte_budget"`
+	ByteSize            int                      `json:"byte_size"`
+	ByteBudgetTruncated bool                     `json:"byte_budget_truncated"`
+	OmittedItems        int                      `json:"omitted_items"`
+	Note                string                   `json:"note"`
 }
 
 // GetEvidenceOut is the output of get_evidence.
 type GetEvidenceOut struct {
-	Item evidence.Item `json:"item"`
+	Item       evidence.Item `json:"item"`
+	ByteBudget int           `json:"byte_budget"`
+	ByteSize   int           `json:"byte_size"`
 }
 
 var (
@@ -130,7 +145,8 @@ func applyStatusEnum(schema *jsonschema.Schema) {
 				"timeout", "canceled", "upstream_error", "authentication_failed",
 				"not_queried_by_tool", "unknown_history_coverage", "partial_fetch",
 				"missing_identity", "omitted_checks", "ambiguous_binding",
-				"outside_registry_scope", "retention_limited")
+				"outside_registry_scope", "retention_limited",
+				"status_filter_no_match", "identity_unverified", "request_budget_exceeded")
 		case "cache_state":
 			property.Enum = stringEnum("", "hit", "miss", "disabled")
 		}

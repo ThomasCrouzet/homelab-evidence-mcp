@@ -14,6 +14,12 @@ The adapter gives an error when a JSON collection is `null`. It also gives an
 error when an envelope does not contain the expected array. For the two cases,
 the adapter does not give an empty array without an error.
 
+The shared HTTP client decodes a gzip response body and applies the body limit
+to the decoded size. It rejects a configured
+`X-Loki-Response-Encoding-Flags` header because the adapter does not decode the
+categorized 3-tuple response. A snapshot-only adapter skips a wholly historical
+window before a GET and reports `unsupported_history`.
+
 ## Gatus
 
 The Gatus adapter has this behavior:
@@ -129,6 +135,17 @@ The Healthchecks adapter has this behavior:
   `check_tags`, and one identity field combine with AND semantics.
 - A binding that selects no check gives a source error. It does not look like a
   successful empty result.
+- A configured check that exists but does not match `status_filter` reports
+  `status_filter_no_match` with `complete: true` and no items. It is not
+  `unmatched_binding`.
+- `source_id` is a bounded process-local HMAC of the check unique identity when
+  one exists. Two checks that share a slug keep distinct provenance, and raw
+  unique keys or UUIDs never appear in output. A check without a unique
+  identity sets `identity_unverified` and makes coverage incomplete.
+- The adapter keeps one checks inventory per source instance for a global
+  `failed_crons` call. A sliding request budget of
+  `limits.max_source_requests_per_minute` (default 100) bounds each source.
+  An exhausted budget gives `request_budget_exceeded` with partial evidence.
 - A `check_name` that matches more than one check, by name or by slug, gives an
   `ambiguous_binding` source error. A name does not identify one check across
   collisions. Use `check_unique_key` or `check_uuid` for a single check, or
@@ -152,10 +169,16 @@ The Healthchecks adapter has this behavior:
   `missing_identity`.
 - Per-check history failures are reported as `partial_fetch`; successful
   transitions from other checks remain available.
-- Healthchecks does not document complete transition retention. Transition
-  results therefore report `unknown_history_coverage` and `complete: false`.
-- `service_status` remains a current snapshot. A historical window in snapshot
-  mode does not include the current state.
+- Hosted Healthchecks documents flip retention for the current month and the
+  two complete preceding months, subject to periodic cleanup. Self-hosted
+  deployments and older versions can differ. A transition window that starts
+  before that horizon is not fully provable. Transition results therefore
+  report `unknown_history_coverage`, set `retention_limited: true` when the
+  window reaches before the horizon, and keep `complete: false`. An empty
+  result never proves that no incident occurred.
+- `service_status` remains a current snapshot. A historical window in a
+  snapshot-only mode gives `unsupported_history` before any GET and does not
+  include the current state.
 
 ## Beszel
 

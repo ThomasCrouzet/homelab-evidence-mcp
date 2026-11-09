@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/jsonschema-go/jsonschema"
+	"gopkg.in/yaml.v3"
 )
 
 func TestParse_ValidMinimal(t *testing.T) {
@@ -824,5 +827,103 @@ func TestParse_HealthchecksHistoryMode(t *testing.T) {
 	}
 	if _, err := Parse(healthchecksConfig("        check_name: backup\n        history_mode: full\n")); err == nil {
 		t.Fatal("invalid history mode was accepted")
+	}
+}
+
+func TestParse_RejectsLokiCategorizedEncoding(t *testing.T) {
+	raw := `
+version: 1
+sources:
+  loki:
+    kind: loki
+    base_url: https://loki.example.internal
+    headers:
+      X-Loki-Response-Encoding-Flags: categorize-labels
+services: []
+`
+	if _, err := Parse([]byte(raw)); err == nil {
+		t.Fatal("unsupported Loki categorized encoding was accepted")
+	}
+}
+
+func TestParse_AllowsInertMarkersInCommentsAndStrings(t *testing.T) {
+	raw := []byte(`
+# include: an example source here in documentation
+version: 1
+sources:
+  gatus:
+    kind: gatus
+    base_url: https://gatus.example.internal
+services:
+  - id: api
+    display_name: "literal ${VAR} and {{ template }} and include: text"
+    sources:
+      gatus: { source: gatus, endpoint_key: api }
+`)
+	if _, err := Parse(raw); err != nil {
+		t.Fatalf("inert markers were rejected: %v", err)
+	}
+}
+
+func TestParse_RejectsUnsafeYAMLTags(t *testing.T) {
+	for _, raw := range []string{
+		"version: 1\nsources: !!python/object:os.system {}\n",
+		"version: 1\nsources: !include other.yaml\n",
+	} {
+		if _, err := Parse([]byte(raw)); err == nil {
+			t.Fatalf("unsafe tag was accepted: %q", raw)
+		}
+	}
+}
+
+func TestConfigExample_SchemaAndRuntimeParity(t *testing.T) {
+	schemaRaw, err := os.ReadFile("../../config.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(schemaRaw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := schema.Resolve(nil)
+	if err != nil {
+		t.Fatalf("schema does not resolve: %v", err)
+	}
+	example, err := os.ReadFile("../../config.example.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse(example); err != nil {
+		t.Fatalf("runtime rejected the shipped example: %v", err)
+	}
+	var doc any
+	if err := yaml.Unmarshal(example, &doc); err != nil {
+		t.Fatal(err)
+	}
+	asJSON, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value any
+	if err := json.Unmarshal(asJSON, &value); err != nil {
+		t.Fatal(err)
+	}
+	if err := resolved.Validate(value); err != nil {
+		t.Fatalf("schema rejected the shipped example: %v", err)
+	}
+
+	// An unknown root key fails both layers.
+	unknown := []byte("version: 1\nunknown_key: true\nsources: {}\n")
+	if _, err := Parse(unknown); err == nil {
+		t.Fatal("runtime accepted an unknown key")
+	}
+	doc = nil
+	if err := yaml.Unmarshal(unknown, &doc); err != nil {
+		t.Fatal(err)
+	}
+	asJSON, _ = json.Marshal(doc)
+	_ = json.Unmarshal(asJSON, &value)
+	if err := resolved.Validate(value); err == nil {
+		t.Fatal("schema accepted an unknown key")
 	}
 }

@@ -52,10 +52,12 @@ type App struct {
 	Cfg      *config.Config
 	Registry *registry.Registry
 	HTTP     *httpx.LockedClient
-	Redact   *redaction.Engine
-	Cache    *evidence.Cache
-	Audit    *audit.Logger
-	Log      *slog.Logger
+	// SourceClients holds clients with per-source CA trust.
+	SourceClients []*httpx.LockedClient
+	Redact        *redaction.Engine
+	Cache         *evidence.Cache
+	Audit         *audit.Logger
+	Log           *slog.Logger
 
 	gatus  map[string]*gatus.Client
 	dock   map[string]*docker.Client
@@ -131,23 +133,38 @@ func NewApp(cfg *config.Config, log *slog.Logger, aud *audit.Logger) (*App, erro
 		sourceSem: make(chan struct{}, maxConcurrentSourceRequests),
 	}
 	for name, src := range cfg.Sources {
-		if err := hc.RegisterDestination(name, src.BaseURL); err != nil {
+		client := hc
+		if src.CAFile != "" {
+			sourceRoots, err := config.LoadExtraCertPool(src.CAFile)
+			if err != nil {
+				return nil, fmt.Errorf("source %s ca_file: %w", name, err)
+			}
+			client = httpx.NewLockedClient(httpx.Options{
+				Timeout:   cfg.Limits.TotalTimeout,
+				MaxBody:   cfg.Limits.MaxBodyBytes,
+				UserAgent: version.UserAgent(),
+				CacheTTL:  cfg.Limits.SourceCacheTTL,
+				RootCAs:   sourceRoots,
+			})
+			app.SourceClients = append(app.SourceClients, client)
+		}
+		if err := client.RegisterDestination(name, src.BaseURL); err != nil {
 			return nil, fmt.Errorf("source %s: %w", name, err)
 		}
 		headers := config.AuthHeaders(src, tokens[name])
 		switch src.Kind {
 		case "gatus":
-			app.gatus[name] = &gatus.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng}
+			app.gatus[name] = &gatus.Client{HTTP: client, DestName: name, Headers: headers, Redact: eng}
 		case "docker":
-			app.dock[name] = &docker.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng, APIVersion: src.APIVersion}
+			app.dock[name] = &docker.Client{HTTP: client, DestName: name, Headers: headers, Redact: eng, APIVersion: src.APIVersion}
 		case "loki":
-			app.loki[name] = &loki.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng, MaxLineBytes: cfg.Limits.MaxLogLineBytes}
+			app.loki[name] = &loki.Client{HTTP: client, DestName: name, Headers: headers, Redact: eng, MaxLineBytes: cfg.Limits.MaxLogLineBytes}
 		case "healthchecks":
-			app.hc[name] = &healthchecks.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng}
+			app.hc[name] = &healthchecks.Client{HTTP: client, DestName: name, Headers: headers, Redact: eng, RequestLimit: cfg.Limits.MaxSourceRequestsPerMinute}
 		case "beszel":
-			app.beszel[name] = &beszel.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng}
+			app.beszel[name] = &beszel.Client{HTTP: client, DestName: name, Headers: headers, Redact: eng}
 		case "ntfy":
-			app.ntfy[name] = &ntfy.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng, MaxLineBytes: cfg.Limits.MaxLogLineBytes}
+			app.ntfy[name] = &ntfy.Client{HTTP: client, DestName: name, Headers: headers, Redact: eng, MaxLineBytes: cfg.Limits.MaxLogLineBytes}
 		}
 	}
 	if cfg.Limits.WarnEmptyBindings {

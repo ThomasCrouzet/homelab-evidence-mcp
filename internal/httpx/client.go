@@ -2,6 +2,8 @@
 package httpx
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -350,6 +352,23 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 	if int64(len(body)) > c.maxBody {
 		return resp, body[:c.maxBody], fmt.Errorf("%w: %d bytes", ErrBodyTooLarge, c.maxBody)
 	}
+	if strings.EqualFold(strings.TrimSpace(resp.Header.Get("Content-Encoding")), "gzip") {
+		reader, err := gzip.NewReader(bytes.NewReader(body))
+		if err != nil {
+			return resp, nil, errors.New("response decompression failed")
+		}
+		decoded, readErr := io.ReadAll(io.LimitReader(reader, c.maxBody+1))
+		_ = reader.Close()
+		if readErr != nil {
+			return resp, nil, errors.New("response decompression failed")
+		}
+		if int64(len(decoded)) > c.maxBody {
+			return resp, nil, fmt.Errorf("%w: %d decompressed bytes", ErrBodyTooLarge, c.maxBody)
+		}
+		body = decoded
+		resp.Header.Del("Content-Encoding")
+		resp.Header.Del("Content-Length")
+	}
 	// One collection time describes this snapshot for the direct response and
 	// every later cache hit. The header is internal and set after remote headers
 	// are removed. CollectionTime reads it in both paths.
@@ -503,4 +522,23 @@ func sanitizeNetErr(err error, destination string) error {
 		return fmt.Errorf("request to %s failed: timeout", destination)
 	}
 	return fmt.Errorf("request to %s failed: network or TLS error", destination)
+}
+
+// CombinedStats sums cache counters across clients.
+func CombinedStats(clients ...*LockedClient) CacheStats {
+	var out CacheStats
+	for _, client := range clients {
+		if client == nil {
+			continue
+		}
+		stats := client.Stats()
+		out.Hits += stats.Hits
+		out.Misses += stats.Misses
+		out.Size += stats.Size
+		out.Bytes += stats.Bytes
+		if out.TTL == "" {
+			out.TTL = stats.TTL
+		}
+	}
+	return out
 }

@@ -92,6 +92,10 @@ The command exits before an MCP session starts. It needs no daemon.
 
 ## Limits
 
+The doctor runs at most eight service bindings at once. It reports at most 100
+bindings per source and sets `omitted_bindings` with a warning above that
+limit. The source status still summarizes every checked binding.
+
 `--doctor` converts snapshots and logs like the MCP tools. It does not prove that
 a credential is read-only at the upstream service. It does not replace the
 versioned fixture matrix or a live integration lane. See

@@ -65,7 +65,9 @@ type Limits struct {
 	SourceCacheTTL        time.Duration
 	MaxToolCallsPerMinute int
 	MaxConcurrentTools    int
-	WarnEmptyBindings     bool
+	// MaxSourceRequestsPerMinute bounds one source instance in a sliding minute.
+	MaxSourceRequestsPerMinute int
+	WarnEmptyBindings          bool
 }
 
 // Audit contains settings for the optional audit log. The application always sends events to stderr.
@@ -82,9 +84,11 @@ type TLS struct {
 
 // Source contains the configuration for one named adapter.
 type Source struct {
-	Kind        string // gatus | docker | loki | healthchecks | beszel | ntfy
-	BaseURL     string
-	APIVersion  string // optional Docker Engine API prefix, for example v1.56
+	Kind       string // gatus | docker | loki | healthchecks | beszel | ntfy
+	BaseURL    string
+	APIVersion string // optional Docker Engine API prefix, for example v1.56
+	// CAFile adds trust only for this source. It replaces the global pool.
+	CAFile      string
 	TokenEnv    string
 	TokenFile   string
 	TokenHeader string // optional. Use X-Api-Key for Healthchecks and Authorization for other sources.
@@ -170,23 +174,24 @@ type fileConfig struct {
 }
 
 type fileLimits struct {
-	DefaultWindow         string `yaml:"default_window"`
-	MaxIncidentWindow     string `yaml:"max_incident_window"`
-	MaxCronWindow         string `yaml:"max_cron_window"`
-	MaxLogLines           int    `yaml:"max_log_lines"`
-	MaxEvidenceItems      int    `yaml:"max_evidence_items"`
-	MaxIncidentBytes      *int   `yaml:"max_incident_response_bytes"`
-	PerSourceTimeout      string `yaml:"per_source_timeout"`
-	TotalTimeout          string `yaml:"total_timeout"`
-	MaxLogLineBytes       int    `yaml:"max_log_line_bytes"`
-	MaxBodyBytes          int    `yaml:"max_body_bytes"`
-	EvidenceCacheTTL      string `yaml:"evidence_cache_ttl"`
-	EvidenceCacheMax      *int   `yaml:"evidence_cache_max"`
-	EvidenceCacheMaxBytes *int64 `yaml:"evidence_cache_max_bytes"`
-	SourceCacheTTL        string `yaml:"source_cache_ttl"`
-	MaxToolCallsPerMinute int    `yaml:"max_tool_calls_per_minute"`
-	MaxConcurrentTools    int    `yaml:"max_concurrent_tools"`
-	WarnEmptyBindings     *bool  `yaml:"warn_empty_bindings"`
+	DefaultWindow              string `yaml:"default_window"`
+	MaxIncidentWindow          string `yaml:"max_incident_window"`
+	MaxCronWindow              string `yaml:"max_cron_window"`
+	MaxLogLines                int    `yaml:"max_log_lines"`
+	MaxEvidenceItems           int    `yaml:"max_evidence_items"`
+	MaxIncidentBytes           *int   `yaml:"max_incident_response_bytes"`
+	PerSourceTimeout           string `yaml:"per_source_timeout"`
+	TotalTimeout               string `yaml:"total_timeout"`
+	MaxLogLineBytes            int    `yaml:"max_log_line_bytes"`
+	MaxBodyBytes               int    `yaml:"max_body_bytes"`
+	EvidenceCacheTTL           string `yaml:"evidence_cache_ttl"`
+	EvidenceCacheMax           *int   `yaml:"evidence_cache_max"`
+	EvidenceCacheMaxBytes      *int64 `yaml:"evidence_cache_max_bytes"`
+	SourceCacheTTL             string `yaml:"source_cache_ttl"`
+	MaxToolCallsPerMinute      int    `yaml:"max_tool_calls_per_minute"`
+	MaxSourceRequestsPerMinute int    `yaml:"max_source_requests_per_minute"`
+	MaxConcurrentTools         int    `yaml:"max_concurrent_tools"`
+	WarnEmptyBindings          *bool  `yaml:"warn_empty_bindings"`
 }
 
 type fileAudit struct {
@@ -203,6 +208,7 @@ type fileSource struct {
 	Kind        string            `yaml:"kind"`
 	BaseURL     string            `yaml:"base_url"`
 	APIVersion  string            `yaml:"api_version"`
+	CAFile      string            `yaml:"ca_file"`
 	TokenEnv    string            `yaml:"token_env"`
 	TokenFile   string            `yaml:"token_file"`
 	TokenHeader string            `yaml:"token_header"`
@@ -335,13 +341,9 @@ func Parse(raw []byte) (*Config, error) {
 	if len(raw) > maxConfigBytes {
 		return nil, ValidationErrors{{Path: ".", Message: fmt.Sprintf("configuration exceeds %d bytes", maxConfigBytes)}}
 	}
-	// Give an error for clearly executable or include syntax.
-	s := string(raw)
-	for _, bad := range []string{"{{", "}}", "!!python", "!!js", "${", "`$(", "include:", "!include"} {
-		if strings.Contains(s, bad) {
-			return nil, ValidationErrors{{Path: ".", Message: "disallowed template or include syntax: " + bad}}
-		}
-	}
+	// yaml.v3 does not evaluate tags, templates, environment substitutions, or
+	// includes. KnownFields rejects unknown keys, and unsupported tags fail
+	// during decode. Inert comments and quoted literals are not scanned.
 
 	var fc fileConfig
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
@@ -466,13 +468,14 @@ func Parse(raw []byte) (*Config, error) {
 func parseLimits(f fileLimits) (Limits, ValidationErrors) {
 	var errs ValidationErrors
 	l := Limits{
-		MaxLogLines:           f.MaxLogLines,
-		MaxEvidenceItems:      f.MaxEvidenceItems,
-		MaxLogLineBytes:       f.MaxLogLineBytes,
-		MaxBodyBytes:          int64(f.MaxBodyBytes),
-		MaxToolCallsPerMinute: f.MaxToolCallsPerMinute,
-		MaxConcurrentTools:    f.MaxConcurrentTools,
-		WarnEmptyBindings:     true,
+		MaxLogLines:                f.MaxLogLines,
+		MaxEvidenceItems:           f.MaxEvidenceItems,
+		MaxLogLineBytes:            f.MaxLogLineBytes,
+		MaxBodyBytes:               int64(f.MaxBodyBytes),
+		MaxToolCallsPerMinute:      f.MaxToolCallsPerMinute,
+		MaxConcurrentTools:         f.MaxConcurrentTools,
+		MaxSourceRequestsPerMinute: f.MaxSourceRequestsPerMinute,
+		WarnEmptyBindings:          true,
 	}
 	if f.WarnEmptyBindings != nil {
 		l.WarnEmptyBindings = *f.WarnEmptyBindings
@@ -689,6 +692,11 @@ func parseSource(name string, fs fileSource) (Source, ValidationErrors) {
 			errs = append(errs, ValidationError{"sources." + name + ".api_version", "base_url already contains an API version prefix"})
 		}
 	}
+	if fs.CAFile != "" {
+		if len([]rune(fs.CAFile)) > 4096 || hasControl(fs.CAFile) {
+			errs = append(errs, ValidationError{"sources." + name + ".ca_file", "must be a valid path of at most 4096 characters"})
+		}
+	}
 	if fs.TokenEnv != "" && fs.TokenFile != "" {
 		errs = append(errs, ValidationError{"sources." + name, "set only one of token_env or token_file"})
 	}
@@ -786,6 +794,7 @@ func parseSource(name string, fs fileSource) (Source, ValidationErrors) {
 		Kind:        kind,
 		BaseURL:     strings.TrimRight(base, "/"),
 		APIVersion:  apiVersion,
+		CAFile:      strings.TrimSpace(fs.CAFile),
 		TokenEnv:    fs.TokenEnv,
 		TokenFile:   tokenFile,
 		TokenHeader: th,
@@ -1030,7 +1039,7 @@ func isReservedHeaderName(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "host", "content-length", "user-agent", "accept", "connection",
 		"transfer-encoding", "trailer", "upgrade", "proxy-connection",
-		"keep-alive", "te":
+		"keep-alive", "te", "x-loki-response-encoding-flags":
 		return true
 	default:
 		return false

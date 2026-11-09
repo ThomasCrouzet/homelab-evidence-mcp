@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -101,6 +102,9 @@ func (a *App) collectDockerStatus(ctx context.Context, serviceID string, ref *co
 }
 
 func (a *App) collectDockerWindow(ctx context.Context, serviceID string, ref *config.DockerRef, start, end time.Time) (evidence.SourceOutcome, []evidence.Item) {
+	if windowIsHistorical(end) {
+		return unsupportedHistory(ref.Source, evidence.SourceDocker), nil
+	}
 	outcome, items := a.withSourceTimeout(ctx, ref.Source, evidence.SourceDocker, func(ctx context.Context) ([]evidence.Item, error) {
 		cli := a.dock[ref.Source]
 		if cli == nil {
@@ -142,15 +146,43 @@ func (a *App) collectLoki(ctx context.Context, serviceID string, ref *config.Lok
 }
 
 func (a *App) collectHCStatus(ctx context.Context, serviceID string, ref *config.HealthchecksRef) (evidence.SourceOutcome, []evidence.Item) {
+	filtered := false
 	outcome, items := a.withSourceTimeout(ctx, ref.Source, evidence.SourceHealthchecks, func(ctx context.Context) ([]evidence.Item, error) {
 		cli := a.hc[ref.Source]
 		if cli == nil {
 			return nil, fmt.Errorf("healthchecks client missing")
 		}
-		return cli.Status(ctx, serviceID, healthchecks.FilterFromRef(ref))
+		result, err := cli.Status(ctx, serviceID, healthchecks.FilterFromRef(ref))
+		if errors.Is(err, healthchecks.ErrStatusFilterNoMatch) {
+			filtered = true
+			return nil, nil
+		}
+		return result, err
 	})
+	if filtered {
+		outcome.Status = "ok"
+		outcome.Complete = true
+		outcome.Reason = "status_filter_no_match"
+		outcome.Error = ""
+		outcome.ItemCount = 0
+	}
+	markHealthchecksIdentity(&outcome, items)
 	markEmpty(&outcome)
 	return outcome, items
+}
+
+// markHealthchecksIdentity reports a selected check without a unique identity.
+func markHealthchecksIdentity(outcome *evidence.SourceOutcome, items []evidence.Item) {
+	if outcome.Status != "ok" {
+		return
+	}
+	for _, item := range items {
+		if item.IdentityUnverified {
+			outcome.Complete = false
+			outcome.Reason = "identity_unverified"
+			return
+		}
+	}
 }
 
 func (a *App) collectHCWindow(ctx context.Context, serviceID string, ref *config.HealthchecksRef, start, end time.Time) (evidence.SourceOutcome, []evidence.Item) {
@@ -168,35 +200,11 @@ func (a *App) collectHCWindow(ctx context.Context, serviceID string, ref *config
 			transition, err = cli.Transitions(ctx, serviceID, f, start, end)
 			return transition.Items, err
 		})
-		outcome.QueriedChecks = transition.Requests
-		outcome.FailedChecks = transition.Failures
-		outcome.UnauthorizedChecks = transition.Unauthorized
-		outcome.MissingIdentityChecks = transition.MissingIdentity
-		outcome.Omitted = transition.Omitted
-		outcome.Discarded = transition.Discarded
-		outcome.LocalTruncated = transition.Truncated
-		outcome.Truncated = transition.Truncated
-		// The upstream history endpoint does not document complete retention.
-		outcome.Complete = false
-		if outcome.Status == "ok" {
-			outcome.Reason = "unknown_history_coverage"
-			switch {
-			case transition.Unauthorized > 0:
-				outcome.Reason = "authentication_failed"
-				outcome.Error = fmt.Sprintf("%d healthcheck history request(s) returned 401 or 403", transition.Unauthorized)
-			case transition.Failures > 0:
-				outcome.Reason = "partial_fetch"
-				outcome.Error = fmt.Sprintf("%d healthcheck history request(s) failed", transition.Failures)
-			case transition.MissingIdentity > 0:
-				outcome.Reason = "missing_identity"
-				outcome.Error = fmt.Sprintf("%d selected check(s) expose no unique_key for history", transition.MissingIdentity)
-			case transition.Omitted > 0:
-				outcome.Reason = "omitted_checks"
-			case transition.Truncated:
-				outcome.Reason = "truncated"
-			}
-		}
+		a.applyHCTransition(&outcome, transition, items)
 		return outcome, items
+	}
+	if windowIsHistorical(end) {
+		return unsupportedHistory(ref.Source, evidence.SourceHealthchecks), nil
 	}
 	outcome, items := a.withSourceTimeout(ctx, ref.Source, evidence.SourceHealthchecks, func(ctx context.Context) ([]evidence.Item, error) {
 		cli := a.hc[ref.Source]
@@ -210,6 +218,75 @@ func (a *App) collectHCWindow(ctx context.Context, serviceID string, ref *config
 		return cli.FailedInWindow(ctx, serviceID, f, start, end)
 	})
 	markSnapshotHistory(&outcome, start, end)
+	markHealthchecksIdentity(&outcome, items)
+	markEmpty(&outcome)
+	return outcome, items
+}
+
+func (a *App) applyHCTransition(outcome *evidence.SourceOutcome, transition healthchecks.TransitionResult, items []evidence.Item) {
+	outcome.QueriedChecks = transition.Requests
+	outcome.FailedChecks = transition.Failures
+	outcome.UnauthorizedChecks = transition.Unauthorized
+	outcome.MissingIdentityChecks = transition.MissingIdentity
+	outcome.Omitted = transition.Omitted
+	outcome.Discarded = transition.Discarded
+	outcome.LocalTruncated = transition.Truncated
+	outcome.Truncated = transition.Truncated
+	// The upstream history endpoint does not document complete retention.
+	outcome.Complete = false
+	if outcome.Status == "ok" {
+		outcome.Reason = "unknown_history_coverage"
+		switch {
+		case transition.Budget > 0:
+			outcome.Reason = "request_budget_exceeded"
+			outcome.Error = fmt.Sprintf("%d healthcheck history request(s) skipped by the source request budget", transition.Budget)
+		case transition.Unauthorized > 0:
+			outcome.Reason = "authentication_failed"
+			outcome.Error = fmt.Sprintf("%d healthcheck history request(s) returned 401 or 403", transition.Unauthorized)
+		case transition.Failures > 0:
+			outcome.Reason = "partial_fetch"
+			outcome.Error = fmt.Sprintf("%d healthcheck history request(s) failed", transition.Failures)
+		case transition.MissingIdentity > 0:
+			outcome.Reason = "missing_identity"
+			outcome.Error = fmt.Sprintf("%d selected check(s) expose no unique_key for history", transition.MissingIdentity)
+		case transition.Omitted > 0:
+			outcome.Reason = "omitted_checks"
+		case transition.Truncated:
+			outcome.Reason = "truncated"
+		}
+	}
+	markHealthchecksIdentity(outcome, items)
+}
+
+// collectHCWindowFrom uses one shared checks inventory for one binding.
+func (a *App) collectHCWindowFrom(ctx context.Context, snapshot healthchecks.Snapshot, serviceID string, ref *config.HealthchecksRef, start, end time.Time) (evidence.SourceOutcome, []evidence.Item) {
+	if ref.HistoryMode == "transitions" {
+		transition := healthchecks.TransitionResult{}
+		outcome, items := a.withSourceTimeout(ctx, ref.Source, evidence.SourceHealthchecks, func(ctx context.Context) ([]evidence.Item, error) {
+			cli := a.hc[ref.Source]
+			if cli == nil {
+				return nil, fmt.Errorf("healthchecks client missing")
+			}
+			f := healthchecks.FilterFromRef(ref)
+			f.Status = ""
+			var err error
+			transition, err = cli.TransitionsFrom(ctx, snapshot, serviceID, f, start, end)
+			return transition.Items, err
+		})
+		a.applyHCTransition(&outcome, transition, items)
+		return outcome, items
+	}
+	outcome, items := a.withSourceTimeout(ctx, ref.Source, evidence.SourceHealthchecks, func(ctx context.Context) ([]evidence.Item, error) {
+		cli := a.hc[ref.Source]
+		if cli == nil {
+			return nil, fmt.Errorf("healthchecks client missing")
+		}
+		f := healthchecks.FilterFromRef(ref)
+		f.Status = ""
+		return cli.FailedInWindowFrom(snapshot, serviceID, f, start, end)
+	})
+	markSnapshotHistory(&outcome, start, end)
+	markHealthchecksIdentity(&outcome, items)
 	markEmpty(&outcome)
 	return outcome, items
 }
@@ -217,33 +294,103 @@ func (a *App) collectHCWindow(ctx context.Context, serviceID string, ref *config
 // collectRegisteredFailedCrons queries only the Healthchecks bindings declared
 // in the service registry. It does not enumerate unbound checks in a source.
 func (a *App) collectRegisteredFailedCrons(ctx context.Context, start, end time.Time) ([]evidence.SourceOutcome, []evidence.Item, bool) {
-	var (
-		mu       sync.Mutex
-		items    []evidence.Item
-		outcomes []evidence.SourceOutcome
-		wg       sync.WaitGroup
-		bound    = map[string]bool{}
-		excluded bool
-	)
+	type binding struct {
+		service config.Service
+		ref     *config.HealthchecksRef
+	}
+	bindings := make([]binding, 0)
+	bound := map[string]bool{}
 	for _, svc := range a.Registry.All() {
-		ref := svc.Sources.Healthchecks
-		if ref == nil {
+		if svc.Sources.Healthchecks == nil {
 			continue
 		}
-		bound[ref.Source] = true
-		svc, ref := svc, ref
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			o, its := a.collectHCWindow(ctx, svc.ID, ref, start, end)
-			o.ServiceID = svc.ID
-			mu.Lock()
-			defer mu.Unlock()
-			outcomes = append(outcomes, o)
-			items = append(items, its...)
-		}()
+		bindings = append(bindings, binding{service: svc, ref: svc.Sources.Healthchecks})
+		bound[svc.Sources.Healthchecks.Source] = true
 	}
-	wg.Wait()
+	// Collect one checks inventory per source instance. The number of active
+	// workers is bounded, independent of the service count.
+	snapshots := map[string]healthchecks.Snapshot{}
+	snapshotErr := map[string]error{}
+	sourceNames := make([]string, 0, len(bound))
+	for name := range bound {
+		sourceNames = append(sourceNames, name)
+	}
+	sort.Strings(sourceNames)
+	if len(sourceNames) > 0 {
+		jobs := make(chan string)
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		workers := len(sourceNames)
+		if workers > maxConcurrentSourceRequests {
+			workers = maxConcurrentSourceRequests
+		}
+		for worker := 0; worker < workers; worker++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for name := range jobs {
+					cli := a.hc[name]
+					if cli == nil {
+						mu.Lock()
+						snapshotErr[name] = fmt.Errorf("healthchecks client missing")
+						mu.Unlock()
+						continue
+					}
+					snapshot, err := cli.Fetch(ctx)
+					mu.Lock()
+					if err != nil {
+						snapshotErr[name] = err
+					} else {
+						snapshots[name] = snapshot
+					}
+					mu.Unlock()
+				}
+			}()
+		}
+		for _, name := range sourceNames {
+			jobs <- name
+		}
+		close(jobs)
+		wg.Wait()
+	}
+
+	outcomes := make([]evidence.SourceOutcome, 0, len(bindings)+len(a.hc))
+	items := make([]evidence.Item, 0)
+	if len(bindings) > 0 {
+		jobs := make(chan binding)
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		workers := len(bindings)
+		if workers > maxConcurrentSourceRequests {
+			workers = maxConcurrentSourceRequests
+		}
+		for worker := 0; worker < workers; worker++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for job := range jobs {
+					var outcome evidence.SourceOutcome
+					var its []evidence.Item
+					if err := snapshotErr[job.ref.Source]; err != nil {
+						outcome = a.sourceErrorOutcome(ctx, ctx, job.ref.Source, evidence.SourceHealthchecks, err, time.Now())
+					} else {
+						outcome, its = a.collectHCWindowFrom(ctx, snapshots[job.ref.Source], job.service.ID, job.ref, start, end)
+					}
+					outcome.ServiceID = job.service.ID
+					mu.Lock()
+					outcomes = append(outcomes, outcome)
+					items = append(items, its...)
+					mu.Unlock()
+				}
+			}()
+		}
+		for _, job := range bindings {
+			jobs <- job
+		}
+		close(jobs)
+		wg.Wait()
+	}
+	excluded := false
 	for name := range a.hc {
 		if bound[name] {
 			continue
@@ -277,6 +424,9 @@ func (a *App) collectBeszel(ctx context.Context, serviceID string, ref *config.B
 }
 
 func (a *App) collectBeszelWindow(ctx context.Context, serviceID string, ref *config.BeszelRef, start, end time.Time) (evidence.SourceOutcome, []evidence.Item) {
+	if windowIsHistorical(end) {
+		return unsupportedHistory(ref.Source, evidence.SourceBeszel), nil
+	}
 	outcome, items := a.withSourceTimeout(ctx, ref.Source, evidence.SourceBeszel, func(ctx context.Context) ([]evidence.Item, error) {
 		cli := a.beszel[ref.Source]
 		if cli == nil {
@@ -463,6 +613,20 @@ func markDiscarded(outcome *evidence.SourceOutcome, discarded int) {
 
 // markSnapshotHistory reports that a snapshot-only source cannot answer a
 // window that ends in the past.
+func windowIsHistorical(end time.Time) bool {
+	return end.Before(time.Now().UTC().Add(-30 * time.Second))
+}
+
+func unsupportedHistory(sourceName string, kind evidence.SourceKind) evidence.SourceOutcome {
+	return evidence.SourceOutcome{
+		SourceName: sourceName,
+		Kind:       kind,
+		Status:     "ok",
+		Reason:     "unsupported_history",
+		Complete:   false,
+	}
+}
+
 func markSnapshotHistory(outcome *evidence.SourceOutcome, _, end time.Time) {
 	if outcome.Status != "ok" {
 		return
