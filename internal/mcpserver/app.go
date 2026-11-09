@@ -3,6 +3,7 @@ package mcpserver
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"os"
@@ -52,10 +53,12 @@ type App struct {
 	Cfg      *config.Config
 	Registry *registry.Registry
 	HTTP     *httpx.LockedClient
-	Redact   *redaction.Engine
-	Cache    *evidence.Cache
-	Audit    *audit.Logger
-	Log      *slog.Logger
+	// SourceClients holds clients with per-source CA trust or address policy.
+	SourceClients []*httpx.LockedClient
+	Redact        *redaction.Engine
+	Cache         *evidence.Cache
+	Audit         *audit.Logger
+	Log           *slog.Logger
 
 	gatus  map[string]*gatus.Client
 	dock   map[string]*docker.Client
@@ -131,23 +134,43 @@ func NewApp(cfg *config.Config, log *slog.Logger, aud *audit.Logger) (*App, erro
 		sourceSem: make(chan struct{}, maxConcurrentSourceRequests),
 	}
 	for name, src := range cfg.Sources {
-		if err := hc.RegisterDestination(name, src.BaseURL); err != nil {
+		client := hc
+		if src.CAFile != "" || len(src.AllowedCIDRs) > 0 {
+			var sourceRoots *x509.CertPool
+			if src.CAFile != "" {
+				var rootsErr error
+				sourceRoots, rootsErr = config.LoadExtraCertPool(src.CAFile)
+				if rootsErr != nil {
+					return nil, fmt.Errorf("source %s ca_file: %w", name, rootsErr)
+				}
+			}
+			client = httpx.NewLockedClient(httpx.Options{
+				Timeout:      cfg.Limits.TotalTimeout,
+				MaxBody:      cfg.Limits.MaxBodyBytes,
+				UserAgent:    version.UserAgent(),
+				CacheTTL:     cfg.Limits.SourceCacheTTL,
+				RootCAs:      sourceRoots,
+				AllowedCIDRs: src.AllowedCIDRs,
+			})
+			app.SourceClients = append(app.SourceClients, client)
+		}
+		if err := client.RegisterDestination(name, src.BaseURL); err != nil {
 			return nil, fmt.Errorf("source %s: %w", name, err)
 		}
 		headers := config.AuthHeaders(src, tokens[name])
 		switch src.Kind {
 		case "gatus":
-			app.gatus[name] = &gatus.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng}
+			app.gatus[name] = &gatus.Client{HTTP: client, DestName: name, Headers: headers, Redact: eng}
 		case "docker":
-			app.dock[name] = &docker.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng, APIVersion: src.APIVersion}
+			app.dock[name] = &docker.Client{HTTP: client, DestName: name, Headers: headers, Redact: eng, APIVersion: src.APIVersion}
 		case "loki":
-			app.loki[name] = &loki.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng, MaxLineBytes: cfg.Limits.MaxLogLineBytes}
+			app.loki[name] = &loki.Client{HTTP: client, DestName: name, Headers: headers, Redact: eng, MaxLineBytes: cfg.Limits.MaxLogLineBytes}
 		case "healthchecks":
-			app.hc[name] = &healthchecks.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng, RequestLimit: cfg.Limits.MaxSourceRequestsPerMinute}
+			app.hc[name] = &healthchecks.Client{HTTP: client, DestName: name, Headers: headers, Redact: eng, RequestLimit: cfg.Limits.MaxSourceRequestsPerMinute}
 		case "beszel":
-			app.beszel[name] = &beszel.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng}
+			app.beszel[name] = &beszel.Client{HTTP: client, DestName: name, Headers: headers, Redact: eng}
 		case "ntfy":
-			app.ntfy[name] = &ntfy.Client{HTTP: hc, DestName: name, Headers: headers, Redact: eng, MaxLineBytes: cfg.Limits.MaxLogLineBytes}
+			app.ntfy[name] = &ntfy.Client{HTTP: client, DestName: name, Headers: headers, Redact: eng, MaxLineBytes: cfg.Limits.MaxLogLineBytes}
 		}
 	}
 	if cfg.Limits.WarnEmptyBindings {
@@ -221,9 +244,9 @@ func RunStdio(ctx context.Context, app *App) error {
 type toolBudget struct {
 	mu     sync.Mutex
 	perMin int
-	window time.Time
-	count  int
+	recent []time.Time
 	sem    chan struct{}
+	clock  func() time.Time
 }
 
 func newToolBudget(perMin, concurrent int) *toolBudget {
@@ -235,8 +258,8 @@ func newToolBudget(perMin, concurrent int) *toolBudget {
 	}
 	return &toolBudget{
 		perMin: perMin,
-		window: time.Now(),
 		sem:    make(chan struct{}, concurrent),
+		clock:  time.Now,
 	}
 }
 
@@ -251,16 +274,20 @@ func (b *toolBudget) acquire() error {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	now := time.Now()
-	if now.Sub(b.window) >= time.Minute {
-		b.window = now
-		b.count = 0
+	now := b.clock()
+	cutoff := now.Add(-time.Minute)
+	kept := b.recent[:0]
+	for _, at := range b.recent {
+		if at.After(cutoff) {
+			kept = append(kept, at)
+		}
 	}
-	if b.count >= b.perMin {
+	b.recent = kept
+	if len(b.recent) >= b.perMin {
 		<-b.sem
 		return fmt.Errorf("tool call rate limit exceeded (%d/min)", b.perMin)
 	}
-	b.count++
+	b.recent = append(b.recent, now)
 	return nil
 }
 

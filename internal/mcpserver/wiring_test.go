@@ -19,6 +19,7 @@ import (
 
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/audit"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/config"
+	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/evidence"
 )
 
 // fullFixtureApp makes an App that includes six adapters for the media service.
@@ -553,6 +554,39 @@ services:
 		}
 		if !bytes.Contains(raw, []byte("[REDACTED]")) {
 			t.Fatalf("%s did not mark the redaction: %s", name, raw)
+		}
+	}
+}
+
+func TestCollectedEvidenceIsMarkedUntrusted(t *testing.T) {
+	app := fullFixtureApp(t)
+	for _, call := range []func() ([]evidence.Item, error){
+		func() ([]evidence.Item, error) {
+			_, out, err := app.toolServiceStatus(context.Background(), nil, serviceIDIn{ServiceID: "media"})
+			if err != nil {
+				return nil, err
+			}
+			return out.(ServiceStatusOut).Items, nil
+		},
+		func() ([]evidence.Item, error) {
+			_, out, err := app.toolIncidentContext(context.Background(), nil, incidentIn{ServiceID: "media"})
+			if err != nil {
+				return nil, err
+			}
+			return out.(IncidentContextOut).Items, nil
+		},
+	} {
+		items, err := call()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(items) == 0 {
+			t.Fatal("no evidence in fixture")
+		}
+		for _, item := range items {
+			if !item.Untrusted {
+				t.Fatalf("upstream evidence is not marked untrusted: %+v", item)
+			}
 		}
 	}
 }

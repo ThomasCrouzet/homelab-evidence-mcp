@@ -77,6 +77,10 @@ The Docker adapter has this behavior:
   `exec` endpoints.
 - `observed_at` contains the collection time.
 - `attributes.snapshot` is `true`.
+- `attributes.health_readiness` separates runtime state from health: `ready`,
+  `starting`, `unhealthy`, or `unproven`. A running container with health
+  `starting` is a warning, not ready. A running container with no healthcheck
+  is `unproven`, not healthy.
 - A historical window does not include the current snapshot.
 
 ## Loki
@@ -89,8 +93,12 @@ The Loki adapter has this behavior:
   not wrap through the undefined `UnixNano` range.
 - The adapter applies the documented half-open interval `[start, end)`.
 - A window outside the RFC3339 year range gives a source error before any GET.
+- Response timestamps are signed Unix nanoseconds. The adapter accepts a valid
+  negative epoch before 1970 consistently with `time.Unix`. A malformed or
+  overflowing value is discarded.
 - The request asks for one more line than the requested limit.
-- The adapter sorts lines chronologically and keeps the newest requested lines.
+- The adapter sorts candidate lines chronologically and builds evidence only
+  for the newest requested lines.
 - Equal timestamps in one stream keep their response position. Across streams,
   the stream identity is the stable tie-break. Opaque evidence ids do not
   decide order or truncation.
@@ -191,13 +199,31 @@ The Beszel adapter has this behavior:
 - Incomplete, changing, or excessive pagination causes a source error.
 - It then tries `/api/systems`, `/api/beszel/systems`, and the variants with a
   trailing slash.
+- A paginated alternate response follows its page numbers with the same bounds
+  as PocketBase. If an alternate route cannot serve page 2, the adapter gives
+  an explicit pagination error. It does not treat page 1 as complete.
 - The adapter accepts arrays and `systems`, `items`, or `data` envelopes. It
   also accepts empty arrays and envelopes.
 - An empty PocketBase collection is a complete result.
-- The adapter gets the identity from `name`, `system`, `host`, or `info.h`.
-- The adapter reads current `info.cpu` and `info.mp` values.
-- It also reads the legacy top-level `cpu` and `mem` values.
-- CPU and memory values are optional. Their value can be zero.
+- Identity uses canonical `name` or `system` before the `host` or `info.h`
+  alias. The adapter scans the complete collection for each tier. An exact
+  canonical match wins regardless of row order. More than one match in the
+  winning tier gives `ambiguous_binding`. A unique alias remains compatible.
+- Paginated pages can come from different source-cache generations. The
+  adapter uses the oldest page collection time as `observed_at`, sets
+  `attributes.mixed_page_age`, and reports `mixed_page_age` with
+  `complete: false`.
+- Repeated record IDs across pages report `pagination_overlap`. A paginated
+  collection with missing record IDs reports `pagination_unverified`. Both
+  keep the evidence and make coverage incomplete.
+- `info.cpu` and `info.mp` are percentages. The adapter writes `cpu_percent`
+  and `memory_percent` with `cpu_source` or `memory_source`.
+- Legacy top-level `cpu` and `mem` values keep an unknown unit. The adapter
+  writes `cpu_legacy` or `memory_legacy` with `cpu_unit` or `memory_unit` set
+  to `unknown`. It does not label them as percentages.
+- A value outside 0 through 100, NaN, or infinity sets `cpu_invalid` or
+  `memory_invalid`. The adapter does not clamp it or present it as a metric.
+- Zero is a valid metric value. A missing metric stays missing.
 - The response contains only a snapshot.
 - A historical window does not include the current snapshot.
 
@@ -210,6 +236,9 @@ The ntfy adapter has this behavior:
   `attributes.message`. The summary contains a shorter view.
 - The adapter reads the topic only from the configuration.
 - The adapter accepts NDJSON and JSON arrays.
+- A JSON array must end with its closing bracket and no trailing JSON value or
+  bytes. A missing bracket, trailing data, or a trailing comma keeps validated
+  earlier messages, counts the malformed tail, and sets `local_truncated: true`.
 - The adapter reads `id`, `time`, `event`, `topic`, `message`, `title`,
   `priority`, and `tags`.
 - A message record requires `id`, `event`, and `topic`. The source `topic` must

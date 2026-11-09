@@ -50,11 +50,16 @@ Read-only operation has these controls:
   Healthchecks responses.
 - TLS verification stays active. No user option deactivates it.
 - An optional `tls.ca_file` adds CA certificates to the system trust store.
+- An optional per-source `ca_file` replaces the global pool for that source
+  only. It does not broaden trust for other destinations.
 - Budgets set maximum call counts, concurrency, and response volumes.
 - The Docker Unix socket is not compatible with the server.
 
 ### SSRF and network resolution
 
+An optional per-source `allowed_cidrs` policy checks every resolved address at
+dial time. A host with no allowed address fails before a connection. This
+mitigates DNS rebinding; it is opt-in and does not replace fixed destinations.
 A request can use only a destination name from the startup configuration.
 The server uses only `http` and `https`. It does not accept redirects. MCP arguments
 cannot supply a URL.
@@ -75,12 +80,19 @@ The server and the operator use these controls for secrets:
 - On Unix, the binary does not accept token files with access for a group or other
   users. Use mode `0600`.
 - The binary does not accept a symbolic link as `token_file`.
-- On Windows, use a user-only ACL. The binary does not examine Windows ACLs.
+- On Windows, use a user-only ACL. Token file ACLs are checked for the owner,
+  SYSTEM, and Administrators; other identities are rejected. The audit file
+  ACL is not examined.
 - `token_header` selects the authentication header. The server does not accept static
   headers with secret-related names.
 - The server rejects a static header that equals the effective authentication
   header in any letter case. This rule includes adapter default headers.
   Header names are canonical, so each logical header has one value.
+- The server rejects method and URL override headers, including
+  `X-HTTP-Method-Override`, `X-Method-Override`, `X-Original-URL`, and
+  `X-Rewrite-URL`. It also rejects representation and conditional headers such
+  as `Accept-Encoding`, `Range`, `If-None-Match`, and `If-Modified-Since`.
+  A tenant header that does not change the method or target remains valid.
 - The server does not accept query strings, fragments, and userinfo in `base_url`.
 - Errors and capabilities do not show tokens, URLs, or destination hostnames.
   They use the logical source name.
@@ -100,13 +112,21 @@ The server and the operator use these controls for secrets:
   The keys contain no clear-text secret or digest that an attacker can use
   again.
 - An HMAC fingerprint also replaces paths and query strings in cache keys.
+- Identical in-flight GETs with the same destination, path, and authentication
+  fingerprint share one upstream request. A canceled leader does not poison a
+  waiter. The shared response is independent of the longer-lived source TTL.
 - The source response cache does not keep response headers. This includes
   `Set-Cookie` and authentication challenges. It keeps only the ntfy
   `X-Messages-Truncated` signal as a boolean for cache hits.
+- The source response cache honors upstream `Cache-Control: no-store` and
+  `no-cache` by not storing the body. A `max-age` value caps the configured
+  source TTL. A `Pragma: no-cache` response also bypasses storage.
 - Make sure that only the owner can access the YAML configuration.
 - On Unix, the server creates the audit file in mode `0600`.
-- On Windows, use a user-only ACL for the audit file path. The binary does not
-  examine Windows ACLs.
+- On Windows, use a user-only ACL for the audit file path. Token files are
+  checked: an explicit allow entry for an identity other than the current
+  user, SYSTEM, or Administrators is rejected. The audit file ACL is not
+  examined.
 
 ### Hostile text
 
@@ -121,9 +141,14 @@ Overlapping or adjacent matches form one redacted region. Empty matches add no t
 
 Each audit write contains one complete JSONL record.
 The file writer refuses a record larger than `audit.max_bytes` before rotation.
-If an audit write fails, stderr receives the fixed diagnostic `audit write failed`.
-The server gives one diagnostic per continuous failure period.
-The diagnostic contains no writer error, path, or event data.
+A failed stderr write does not stop a configured audit file from receiving the
+record. A partial append is rolled back, and an incomplete final JSONL record is
+repaired when the file is opened again.
+On Unix, one process takes an exclusive sidecar lock for an audit path. A second
+process receives a clear `audit file is in use by another process` error.
+If every audit destination fails, stderr receives the fixed diagnostic
+`audit write failed`. The server gives one diagnostic per continuous failure
+period. The diagnostic contains no writer error, path, or event data.
 Tool calls continue, and the server attempts subsequent audit writes.
 A rotation or reopen failure is recoverable: the next write reopens the file
 with the regular-file, mode `0600`, and size checks. `Close` stops recovery.
@@ -207,7 +232,8 @@ Do these steps:
 2. Use a read-only Healthchecks key.
 3. Store configuration and tokens in a directory that is not in the repository.
 4. On Unix, use mode `0600`.
-5. On Windows, use a user-only ACL. The binary does not examine Windows ACLs.
+5. On Windows, use a user-only ACL. Token file ACLs are checked; audit
+   file ACLs are not.
 6. Run the binary with a low-privilege account.
 7. If possible, use HTTPS with a correct internal PKI.
 8. Adapt `redact` rules to local secret formats.

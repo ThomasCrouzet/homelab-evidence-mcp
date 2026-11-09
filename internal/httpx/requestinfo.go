@@ -15,6 +15,7 @@ type RequestInfo struct {
 	requests        int
 	hits            int
 	misses          int
+	coalesced       int
 	disabled        bool
 	oldestCollected time.Time
 }
@@ -53,6 +54,32 @@ func (i *RequestInfo) recordMiss() {
 	i.misses++
 }
 
+func (i *RequestInfo) recordCoalesced(collectedAt time.Time) {
+	if i == nil {
+		return
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.requests++
+	i.coalesced++
+	if i.oldestCollected.IsZero() || collectedAt.Before(i.oldestCollected) {
+		i.oldestCollected = collectedAt
+	}
+}
+
+// recordMissTime records the collection time of a fresh response. With a
+// mixed hit and miss collection, it gives the age of the oldest page.
+func (i *RequestInfo) recordMissTime(collectedAt time.Time) {
+	if i == nil {
+		return
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.oldestCollected.IsZero() || collectedAt.Before(i.oldestCollected) {
+		i.oldestCollected = collectedAt
+	}
+}
+
 func (i *RequestInfo) recordDisabled() {
 	if i == nil {
 		return
@@ -69,18 +96,23 @@ func (i *RequestInfo) Snapshot() (string, int64) {
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	age := time.Since(i.oldestCollected)
+	if age < 0 {
+		age = 0
+	}
+	ageS := int64(age / time.Second)
 	switch {
 	case i.requests == 0 && i.disabled:
 		return "disabled", 0
 	case i.requests == 0:
 		return "", 0
 	case i.hits == i.requests:
-		age := time.Since(i.oldestCollected)
-		if age < 0 {
-			age = 0
-		}
-		return "hit", int64(age / time.Second)
+		return "hit", ageS
+	case i.misses == i.requests:
+		return "miss", ageS
+	case i.coalesced == i.requests:
+		return "coalesced", ageS
 	default:
-		return "miss", 0
+		return "mixed", ageS
 	}
 }

@@ -125,8 +125,8 @@ services: []
 		command.Stderr = &validateStderr
 		err := command.Run()
 		var exitErr *exec.ExitError
-		if err == nil || !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
-			t.Fatalf("%s: err=%v, want exit code 1\n%s", spelling, err, validateStderr.String())
+		if err == nil || !errors.As(err, &exitErr) || exitErr.ExitCode() != 2 {
+			t.Fatalf("%s: err=%v, want exit code 2\n%s", spelling, err, validateStderr.String())
 		}
 		message := validateStderr.String()
 		if !bytes.Contains([]byte(message), []byte("conflicts")) ||

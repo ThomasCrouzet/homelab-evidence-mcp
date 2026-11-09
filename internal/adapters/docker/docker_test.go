@@ -310,3 +310,34 @@ func TestStatus_CachePreservesSnapshotTime(t *testing.T) {
 		t.Fatalf("freshness=%s, want=%s", item.Freshness, evidence.FreshnessStale)
 	}
 }
+
+func TestStatus_HealthReadiness(t *testing.T) {
+	cases := []struct {
+		name      string
+		status    string
+		severity  evidence.Severity
+		readiness string
+	}{
+		{name: "healthy", status: "Up 5 minutes (healthy)", severity: evidence.SeverityInfo, readiness: "ready"},
+		{name: "starting", status: "Up 5 seconds (health: starting)", severity: evidence.SeverityWarning, readiness: "starting"},
+		{name: "unhealthy", status: "Up 5 minutes (unhealthy)", severity: evidence.SeverityError, readiness: "unhealthy"},
+		{name: "no healthcheck", status: "Up 5 minutes", severity: evidence.SeverityInfo, readiness: "unproven"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cli := setup(t, []map[string]any{{
+				"Id": "abc", "Names": []string{"/api"}, "State": "running", "Status": tc.status,
+			}}, http.StatusOK)
+			item, err := cli.Status(context.Background(), "svc", "api")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if item.Severity != tc.severity || item.Attributes["health_readiness"] != tc.readiness {
+				t.Fatalf("severity=%s readiness=%v summary=%q", item.Severity, item.Attributes["health_readiness"], item.Summary)
+			}
+			if tc.readiness == "starting" && !strings.Contains(item.Summary, "health=starting") {
+				t.Fatalf("starting health is not in the summary: %q", item.Summary)
+			}
+		})
+	}
+}

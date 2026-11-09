@@ -419,6 +419,7 @@ func (a *App) collectBeszel(ctx context.Context, serviceID string, ref *config.B
 		outcome.Reason = "unmatched_binding"
 		outcome.Complete = false
 	}
+	markBeszelCollection(&outcome, items)
 	markEmpty(&outcome)
 	return outcome, items
 }
@@ -436,8 +437,37 @@ func (a *App) collectBeszelWindow(ctx context.Context, serviceID string, ref *co
 		return filterCurrentSnapshots(current, start, end), err
 	})
 	markSnapshotHistory(&outcome, start, end)
+	markBeszelCollection(&outcome, items)
 	markEmpty(&outcome)
 	return outcome, items
+}
+
+// markBeszelCollection reports page-age or pagination uncertainty.
+func markBeszelCollection(outcome *evidence.SourceOutcome, items []evidence.Item) {
+	if outcome.Status != "ok" {
+		return
+	}
+	for _, item := range items {
+		if overlap, _ := item.Attributes["pagination_overlap"].(bool); overlap {
+			outcome.Reason = "pagination_overlap"
+			outcome.Complete = false
+			return
+		}
+	}
+	for _, item := range items {
+		if unverified, _ := item.Attributes["pagination_unverified"].(bool); unverified {
+			outcome.Reason = "pagination_unverified"
+			outcome.Complete = false
+			return
+		}
+	}
+	for _, item := range items {
+		if mixed, _ := item.Attributes["mixed_page_age"].(bool); mixed {
+			outcome.Reason = "mixed_page_age"
+			outcome.Complete = false
+			return
+		}
+	}
 }
 
 func (a *App) collectNtfy(ctx context.Context, serviceID string, ref *config.NtfyRef, start, end time.Time, limit int) (evidence.SourceOutcome, []evidence.Item) {
@@ -491,6 +521,9 @@ func (a *App) withSourceTimeout(ctx context.Context, sourceName string, kind evi
 	sctx, cancel := context.WithTimeout(requestCtx, a.Cfg.Limits.PerSourceTimeout)
 	defer cancel()
 	items, err := fn(sctx)
+	for index := range items {
+		items[index].Untrusted = true
+	}
 	evidence.MarkSourceFreshness(items)
 	cacheState, cacheAge := info.Snapshot()
 	if err == nil {
@@ -680,6 +713,13 @@ func outcomeCoverage(sources []evidence.SourceOutcome) (complete, anyOK bool, co
 		}
 	}
 	return complete, anyOK, configured
+}
+
+func coverageReason(configured int) string {
+	if configured == 0 {
+		return "no_bound_sources"
+	}
+	return ""
 }
 
 func auditStatus(complete, anyOK bool, configured int) string {
