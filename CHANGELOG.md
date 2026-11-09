@@ -59,6 +59,12 @@ This file records project changes. Its format uses
   handler, so `max_concurrent_tools` bounds active callbacks.
 - Enforce `max_tool_calls_per_minute` over a sliding minute instead of a fixed
   window that allows a boundary burst.
+- Treat a Docker healthcheck `starting` state as a warning, add
+  `health_readiness`, and keep runtime state separate from readiness.
+- Keep valid negative Unix-nanosecond Loki timestamps and discard only
+  malformed or overflowing values.
+- Require a closing bracket and no trailing data for an ntfy JSON array, and
+  report a malformed tail as local truncation with discarded records.
 - Validate every returned Loki stream against the configured equality labels
   and discard a mismatched stream with an incomplete source outcome.
 - Derive a bounded process-local Loki stream identity from the complete label
