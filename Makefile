@@ -16,9 +16,10 @@ print-version:
 	@printf '%s\n' '$(VERSION)'
 
 # Build every release target from the same version and flags.
+# The recipe uses POSIX sh because GNU Make defaults to /bin/sh.
 build-matrix:
 	mkdir -p $(DIST)
-	set -euo pipefail; \
+	set -eu; \
 	for pair in $(TARGETS); do \
 		os="$${pair%/*}"; \
 		arch="$${pair#*/}"; \
@@ -69,6 +70,7 @@ lint-docs:
 	npx --yes markdownlint-cli2@0.23.2 '**/*.md'
 
 lint-private:
+	./scripts/check-private-addresses.sh --self-test
 	./scripts/check-private-addresses.sh
 
 fuzz:
