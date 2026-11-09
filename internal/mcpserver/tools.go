@@ -645,10 +645,12 @@ func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in fa
 		if sources == nil {
 			sources = []evidence.SourceOutcome{}
 		}
+		timeBasis := failedCronsTimeBasis(items)
 		out := FailedCronsOut{
 			EffectiveStart:   winStart.Format(time.RFC3339),
 			EffectiveEnd:     winEnd.Format(time.RFC3339),
 			Items:            items,
+			TimeBasis:        timeBasis,
 			Sources:          sources,
 			Complete:         complete,
 			SourceComplete:   complete,
@@ -676,6 +678,32 @@ func (a *App) toolFailedCrons(ctx context.Context, _ *mcp.CallToolRequest, in fa
 		a.Audit.Log(audit.Event{Action: "tool", Tool: "failed_crons", ServiceID: serviceID, Status: auditStatus(complete, anyOK, configured), Detail: fmt.Sprintf("items=%d", len(items))})
 		return textResult(out), out, nil
 	})
+}
+
+func failedCronsTimeBasis(items []evidence.Item) string {
+	current, historical := false, false
+	for _, item := range items {
+		if item.Source != evidence.SourceHealthchecks {
+			continue
+		}
+		if value, ok := item.Attributes["current"].(bool); ok {
+			if value {
+				current = true
+			} else {
+				historical = true
+			}
+		}
+	}
+	switch {
+	case current && historical:
+		return "mixed"
+	case historical:
+		return "historical_transitions"
+	case current:
+		return "current_snapshot"
+	default:
+		return "unknown"
+	}
 }
 
 func (a *App) toolGetEvidence(ctx context.Context, _ *mcp.CallToolRequest, in getEvidenceIn) (*mcp.CallToolResult, any, error) {

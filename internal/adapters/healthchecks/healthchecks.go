@@ -564,10 +564,11 @@ func (c *Client) itemFrom(serviceID string, ch check, observedAt, retrievedAt ti
 	redactions := nameRedactions + slugRedactions + statusRedactions + sourceRedactions
 	truncated := nameCut || slugCut || statusCut || sourceCut
 	attrs := map[string]any{
-		"name":   name,
-		"slug":   slug,
-		"status": status,
-		"grace":  ch.Grace,
+		"name":    name,
+		"slug":    slug,
+		"status":  status,
+		"grace":   ch.Grace,
+		"current": true,
 	}
 	if !sourceVerified {
 		attrs["identity_unverified"] = true
