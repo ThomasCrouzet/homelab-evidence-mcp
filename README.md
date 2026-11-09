@@ -155,12 +155,12 @@ The demo does not exercise the stdio executable.
 Install the latest published release with Go:
 
 ```bash
-go install github.com/ThomasCrouzet/homelab-evidence-mcp/cmd/homelab-evidence-mcp@v0.1.3
+go install github.com/ThomasCrouzet/homelab-evidence-mcp/cmd/homelab-evidence-mcp@v0.2.0
 ```
 
 `@latest` resolves to the newest published tag. It does not install `main`.
-Some features in this README are unreleased. See
-[release status](docs/release-status.md) for the feature table and the
+This README describes the latest release. See
+[release status](docs/release-status.md) for the release contents and the
 development build path.
 
 Add the Go binary directory to `PATH`, or use the installed binary's absolute
@@ -360,9 +360,12 @@ Run these commands from the repository root:
 make test          # Race tests, then executable stdio E2E tests
 make test-e2e      # Real binary against six local HTTP fixtures
 make test-quick    # Tests without race detection or executable E2E
+make test-live     # Opt-in live read-only check with an operator config
 make lint-docs     # Markdown checks
-make lint-private  # Private Tailscale address check
+make lint-private  # Private address scan
 make lint          # gofmt check, go vet, and golangci-lint
+make fuzz          # Short fuzz runs for parsers and every adapter decoder
+make bench         # Repeatable evidence, compact, and decoder benchmarks
 make coverage
 make build
 ```
@@ -378,6 +381,9 @@ It saves logs and revision, working-tree, fixture, environment, and result
 metadata outside the repository.
 Set `HEM_E2E_ARTIFACT_DIR` to select an external artifact directory.
 Set `HEM_E2E_BINARY` to an absolute binary path to test a release build.
+`make test-live` requires `HEM_LIVE_INTEGRATION=1`, a private
+`HEM_LIVE_CONFIG`, and read-only upstream credentials. It is never part of CI
+and writes its report outside the repository.
 See [Contributing](CONTRIBUTING.md) for the development and test rules.
 
 <!-- readme:section documentation -->
@@ -397,7 +403,7 @@ See [Contributing](CONTRIBUTING.md) for the development and test rules.
 <!-- readme:section status -->
 ## Status
 
-**v0.1.3, active development.** Released on 2026-10-23.
+**v0.2.0, active development.** Released on 2026-11-09.
 The implemented scope includes six source families and seven stdio MCP tools.
 API compatibility claims cover local fixture structures, not every deployed
 upstream version.

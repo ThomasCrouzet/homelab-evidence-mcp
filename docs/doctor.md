@@ -32,7 +32,7 @@ The JSON output has this shape:
 
 ```json
 {
-  "version": "0.1.3",
+  "version": "0.2.0",
   "transport": "stdio",
   "readonly": true,
   "services_count": 2,

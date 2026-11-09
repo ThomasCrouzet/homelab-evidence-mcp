@@ -11,8 +11,8 @@ byte budget. See `internal/evidence/cache.go`.
 
 Status: implemented for documented replays. The versioned corpus, provenance,
 offline replay tests, and matrix are under `internal/adapters/upstream` and
-[docs/upstream-fixtures.md](docs/upstream-fixtures.md). Live verification is not
-implemented.
+[docs/upstream-fixtures.md](docs/upstream-fixtures.md). An opt-in live lane
+exists, but no live-verified combination is recorded yet.
 
 ## P2: Define source-cache cancellation semantics
 
