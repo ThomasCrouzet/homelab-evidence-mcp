@@ -8,6 +8,11 @@ This file records project changes. Its format uses
 
 ### Added
 
+- Add deterministic fuzz targets and hostile JSON seeds for every adapter
+  decoder, plus repeatable evidence, compact-envelope, and ntfy decode
+  benchmarks (`make fuzz`, `make bench`).
+- Add an opt-in live upstream lane (`make test-live`) that records revision,
+  environment, and doctor result outside the repository.
 - Add a serialized-payload byte budget to the evidence cache, with counters in
   `evidence_capabilities`. The default is 8 MiB and the maximum is 64 MiB.
 - Add a versioned upstream fixture corpus with provenance, offline replay tests,
