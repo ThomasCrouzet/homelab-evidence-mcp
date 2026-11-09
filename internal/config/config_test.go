@@ -826,3 +826,19 @@ func TestParse_HealthchecksHistoryMode(t *testing.T) {
 		t.Fatal("invalid history mode was accepted")
 	}
 }
+
+func TestParse_RejectsLokiCategorizedEncoding(t *testing.T) {
+	raw := `
+version: 1
+sources:
+  loki:
+    kind: loki
+    base_url: https://loki.example.internal
+    headers:
+      X-Loki-Response-Encoding-Flags: categorize-labels
+services: []
+`
+	if _, err := Parse([]byte(raw)); err == nil {
+		t.Fatal("unsupported Loki categorized encoding was accepted")
+	}
+}

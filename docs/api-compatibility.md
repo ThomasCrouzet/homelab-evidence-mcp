@@ -14,6 +14,12 @@ The adapter gives an error when a JSON collection is `null`. It also gives an
 error when an envelope does not contain the expected array. For the two cases,
 the adapter does not give an empty array without an error.
 
+The shared HTTP client decodes a gzip response body and applies the body limit
+to the decoded size. It rejects a configured
+`X-Loki-Response-Encoding-Flags` header because the adapter does not decode the
+categorized 3-tuple response. A snapshot-only adapter skips a wholly historical
+window before a GET and reports `unsupported_history`.
+
 ## Gatus
 
 The Gatus adapter has this behavior:
@@ -165,8 +171,9 @@ The Healthchecks adapter has this behavior:
   transitions from other checks remain available.
 - Healthchecks does not document complete transition retention. Transition
   results therefore report `unknown_history_coverage` and `complete: false`.
-- `service_status` remains a current snapshot. A historical window in snapshot
-  mode does not include the current state.
+- `service_status` remains a current snapshot. A historical window in a
+  snapshot-only mode gives `unsupported_history` before any GET and does not
+  include the current state.
 
 ## Beszel
 
