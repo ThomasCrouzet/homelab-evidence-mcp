@@ -6,10 +6,13 @@ import (
 	"context"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -621,5 +624,73 @@ func TestGet_BoundsDecompressedGzip(t *testing.T) {
 	_ = client.RegisterDestination("src", ts.URL)
 	if _, _, err := client.Get(context.Background(), "src", "/", nil); err == nil { //nolint:bodyclose
 		t.Fatal("decompressed body above the cap was accepted")
+	}
+}
+
+func TestGet_CoalescesInFlightRequests(t *testing.T) {
+	var calls atomic.Int32
+	release := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		<-release
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer ts.Close()
+	client := NewLockedClient(Options{Timeout: 5 * time.Second, CacheTTL: 0})
+	_ = client.RegisterDestination("src", ts.URL)
+	const waiters = 10
+	var wg sync.WaitGroup
+	errs := make(chan error, waiters)
+	for i := 0; i < waiters; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, body, err := client.Get(context.Background(), "src", "/", map[string]string{"X-Tenant": "one"}) //nolint:bodyclose
+			if err == nil && string(body) != `{"ok":true}` {
+				err = fmt.Errorf("body=%q", body)
+			}
+			errs <- err
+		}()
+	}
+	// Give the first caller time to become the leader.
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("upstream calls=%d, want 1", calls.Load())
+	}
+	if client.Stats().Coalesced == 0 {
+		t.Fatal("coalesced counter was not recorded")
+	}
+}
+
+func TestGet_DoesNotCoalesceDifferentAuth(t *testing.T) {
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		time.Sleep(20 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer ts.Close()
+	client := NewLockedClient(Options{Timeout: 5 * time.Second, CacheTTL: 0})
+	_ = client.RegisterDestination("src", ts.URL)
+	var wg sync.WaitGroup
+	for _, token := range []string{"one", "two"} {
+		token := token
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, _ = client.Get(context.Background(), "src", "/", map[string]string{"Authorization": token}) //nolint:bodyclose
+		}()
+	}
+	wg.Wait()
+	if calls.Load() != 2 {
+		t.Fatalf("different auth shared a response: calls=%d", calls.Load())
 	}
 }

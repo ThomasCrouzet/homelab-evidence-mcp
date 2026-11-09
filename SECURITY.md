@@ -107,6 +107,9 @@ The server and the operator use these controls for secrets:
   The keys contain no clear-text secret or digest that an attacker can use
   again.
 - An HMAC fingerprint also replaces paths and query strings in cache keys.
+- Identical in-flight GETs with the same destination, path, and authentication
+  fingerprint share one upstream request. A canceled leader does not poison a
+  waiter. The shared response is independent of the longer-lived source TTL.
 - The source response cache does not keep response headers. This includes
   `Set-Cookie` and authentication challenges. It keeps only the ntfy
   `X-Messages-Truncated` signal as a boolean for cache hits.

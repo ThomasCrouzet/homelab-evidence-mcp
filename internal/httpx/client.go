@@ -47,11 +47,22 @@ type destination struct {
 
 // CacheStats gives data about local GET response cache usage.
 type CacheStats struct {
-	Hits   uint64 `json:"hits"`
-	Misses uint64 `json:"misses"`
-	Size   int    `json:"size"`
-	Bytes  int64  `json:"bytes"`
-	TTL    string `json:"ttl"`
+	Hits      uint64 `json:"hits"`
+	Misses    uint64 `json:"misses"`
+	Coalesced uint64 `json:"coalesced"`
+	Size      int    `json:"size"`
+	Bytes     int64  `json:"bytes"`
+	TTL       string `json:"ttl"`
+}
+
+type flight struct {
+	done        chan struct{}
+	status      int
+	header      http.Header
+	body        []byte
+	collectedAt time.Time
+	truncated   bool
+	err         error
 }
 
 type cacheEntry struct {
@@ -74,8 +85,11 @@ type LockedClient struct {
 	cacheOrder   []string
 	cacheBytes   int64
 	cacheKey     [32]byte
+	flightMu     sync.Mutex
+	flights      map[string]*flight
 	hits         atomic.Uint64
 	misses       atomic.Uint64
+	coalesced    atomic.Uint64
 	now          func() time.Time
 }
 
@@ -165,6 +179,7 @@ func NewLockedClient(opts Options) *LockedClient {
 		cacheTTL:     opts.CacheTTL,
 		now:          opts.Now,
 		cache:        make(map[string]cacheEntry),
+		flights:      make(map[string]*flight),
 	}
 	if _, err := rand.Read(lc.cacheKey[:]); err != nil {
 		// If there is no random key, deactivate the cache. This prevents a weak authentication fingerprint.
@@ -267,11 +282,12 @@ func (c *LockedClient) Stats() CacheStats {
 	ttl := c.cacheTTL
 	c.mu.Unlock()
 	return CacheStats{
-		Hits:   c.hits.Load(),
-		Misses: c.misses.Load(),
-		Size:   size,
-		Bytes:  bytes,
-		TTL:    ttl.String(),
+		Hits:      c.hits.Load(),
+		Misses:    c.misses.Load(),
+		Coalesced: c.coalesced.Load(),
+		Size:      size,
+		Bytes:     bytes,
+		TTL:       ttl.String(),
 	}
 }
 
@@ -348,6 +364,50 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 		info.recordDisabled()
 	}
 
+	for {
+		c.flightMu.Lock()
+		if existing, ok := c.flights[cacheKey]; ok {
+			c.flightMu.Unlock()
+			select {
+			case <-existing.done:
+				if existing.err != nil {
+					// A canceled or failed leader must not poison other callers.
+					if err := ctx.Err(); err != nil {
+						return nil, nil, err
+					}
+					continue
+				}
+				c.coalesced.Add(1)
+				info.recordCoalesced(existing.collectedAt)
+				header := existing.header.Clone()
+				return &http.Response{StatusCode: existing.status, Header: header, Body: http.NoBody}, existing.body, nil
+			case <-ctx.Done():
+				return nil, nil, ctx.Err()
+			}
+		}
+		current := &flight{done: make(chan struct{})}
+		c.flights[cacheKey] = current
+		c.flightMu.Unlock()
+
+		resp, body, fetchErr := c.fetch(ctx, destName, full, headers, cacheKey, info)
+		if fetchErr != nil {
+			current.err = fetchErr
+		} else {
+			current.status = resp.StatusCode
+			current.header = resp.Header.Clone()
+			current.body = body
+			current.collectedAt = CollectionTime(resp, c.clock())
+			current.truncated = headerFlag(resp.Header, UpstreamTruncatedHeader)
+		}
+		c.flightMu.Lock()
+		delete(c.flights, cacheKey)
+		c.flightMu.Unlock()
+		close(current.done)
+		return resp, body, fetchErr
+	}
+}
+
+func (c *LockedClient) fetch(ctx context.Context, destName string, full *url.URL, headers map[string]string, cacheKey string, info *RequestInfo) (*http.Response, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, full.String(), nil)
 	if err != nil {
 		return nil, nil, errors.New("request construction failed")

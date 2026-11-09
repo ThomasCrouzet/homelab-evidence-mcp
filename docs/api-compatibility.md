@@ -97,7 +97,8 @@ The Loki adapter has this behavior:
   negative epoch before 1970 consistently with `time.Unix`. A malformed or
   overflowing value is discarded.
 - The request asks for one more line than the requested limit.
-- The adapter sorts lines chronologically and keeps the newest requested lines.
+- The adapter sorts candidate lines chronologically and builds evidence only
+  for the newest requested lines.
 - Equal timestamps in one stream keep their response position. Across streams,
   the stream identity is the stable tie-break. Opaque evidence ids do not
   decide order or truncation.
