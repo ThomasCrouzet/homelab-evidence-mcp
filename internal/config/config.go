@@ -84,9 +84,11 @@ type TLS struct {
 
 // Source contains the configuration for one named adapter.
 type Source struct {
-	Kind        string // gatus | docker | loki | healthchecks | beszel | ntfy
-	BaseURL     string
-	APIVersion  string // optional Docker Engine API prefix, for example v1.56
+	Kind       string // gatus | docker | loki | healthchecks | beszel | ntfy
+	BaseURL    string
+	APIVersion string // optional Docker Engine API prefix, for example v1.56
+	// CAFile adds trust only for this source. It replaces the global pool.
+	CAFile      string
 	TokenEnv    string
 	TokenFile   string
 	TokenHeader string // optional. Use X-Api-Key for Healthchecks and Authorization for other sources.
@@ -206,6 +208,7 @@ type fileSource struct {
 	Kind        string            `yaml:"kind"`
 	BaseURL     string            `yaml:"base_url"`
 	APIVersion  string            `yaml:"api_version"`
+	CAFile      string            `yaml:"ca_file"`
 	TokenEnv    string            `yaml:"token_env"`
 	TokenFile   string            `yaml:"token_file"`
 	TokenHeader string            `yaml:"token_header"`
@@ -693,6 +696,11 @@ func parseSource(name string, fs fileSource) (Source, ValidationErrors) {
 			errs = append(errs, ValidationError{"sources." + name + ".api_version", "base_url already contains an API version prefix"})
 		}
 	}
+	if fs.CAFile != "" {
+		if len([]rune(fs.CAFile)) > 4096 || hasControl(fs.CAFile) {
+			errs = append(errs, ValidationError{"sources." + name + ".ca_file", "must be a valid path of at most 4096 characters"})
+		}
+	}
 	if fs.TokenEnv != "" && fs.TokenFile != "" {
 		errs = append(errs, ValidationError{"sources." + name, "set only one of token_env or token_file"})
 	}
@@ -790,6 +798,7 @@ func parseSource(name string, fs fileSource) (Source, ValidationErrors) {
 		Kind:        kind,
 		BaseURL:     strings.TrimRight(base, "/"),
 		APIVersion:  apiVersion,
+		CAFile:      strings.TrimSpace(fs.CAFile),
 		TokenEnv:    fs.TokenEnv,
 		TokenFile:   tokenFile,
 		TokenHeader: th,
