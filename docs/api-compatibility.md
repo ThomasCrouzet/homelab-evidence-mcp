@@ -77,6 +77,10 @@ The Docker adapter has this behavior:
   `exec` endpoints.
 - `observed_at` contains the collection time.
 - `attributes.snapshot` is `true`.
+- `attributes.health_readiness` separates runtime state from health: `ready`,
+  `starting`, `unhealthy`, or `unproven`. A running container with health
+  `starting` is a warning, not ready. A running container with no healthcheck
+  is `unproven`, not healthy.
 - A historical window does not include the current snapshot.
 
 ## Loki
@@ -89,6 +93,9 @@ The Loki adapter has this behavior:
   not wrap through the undefined `UnixNano` range.
 - The adapter applies the documented half-open interval `[start, end)`.
 - A window outside the RFC3339 year range gives a source error before any GET.
+- Response timestamps are signed Unix nanoseconds. The adapter accepts a valid
+  negative epoch before 1970 consistently with `time.Unix`. A malformed or
+  overflowing value is discarded.
 - The request asks for one more line than the requested limit.
 - The adapter sorts lines chronologically and keeps the newest requested lines.
 - Equal timestamps in one stream keep their response position. Across streams,
@@ -210,6 +217,9 @@ The ntfy adapter has this behavior:
   `attributes.message`. The summary contains a shorter view.
 - The adapter reads the topic only from the configuration.
 - The adapter accepts NDJSON and JSON arrays.
+- A JSON array must end with its closing bracket and no trailing JSON value or
+  bytes. A missing bracket, trailing data, or a trailing comma keeps validated
+  earlier messages, counts the malformed tail, and sets `local_truncated: true`.
 - The adapter reads `id`, `time`, `event`, `topic`, `message`, `title`,
   `priority`, and `tags`.
 - A message record requires `id`, `event`, and `topic`. The source `topic` must
