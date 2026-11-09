@@ -720,11 +720,11 @@ func TestGet_HonorsUpstreamCacheDirectives(t *testing.T) {
 			defer ts.Close()
 			client := NewLockedClient(Options{Timeout: time.Second, CacheTTL: time.Minute})
 			_ = client.RegisterDestination("src", ts.URL)
-			_, first, err := client.Get(context.Background(), "src", "/", nil)
+			_, first, err := client.Get(context.Background(), "src", "/", nil) //nolint:bodyclose
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, second, err := client.Get(context.Background(), "src", "/", nil)
+			_, second, err := client.Get(context.Background(), "src", "/", nil) //nolint:bodyclose
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -745,8 +745,8 @@ func TestGet_PragmaNoCache(t *testing.T) {
 	defer ts.Close()
 	client := NewLockedClient(Options{Timeout: time.Second, CacheTTL: time.Minute})
 	_ = client.RegisterDestination("src", ts.URL)
-	_, _, _ = client.Get(context.Background(), "src", "/", nil)
-	_, second, _ := client.Get(context.Background(), "src", "/", nil)
+	_, _, _ = client.Get(context.Background(), "src", "/", nil)       //nolint:bodyclose
+	_, second, _ := client.Get(context.Background(), "src", "/", nil) //nolint:bodyclose
 	if string(second) != "2" {
 		t.Fatalf("Pragma no-cache reused the body: %q", second)
 	}

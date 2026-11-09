@@ -493,9 +493,7 @@ func sourceCacheLifetime(header http.Header, ttl time.Duration) (time.Duration, 
 	if _, ok := directives["no-cache"]; ok {
 		return 0, false
 	}
-	if _, ok := directives["private"]; ok {
-		// This is a private in-process cache. Private responses are safe here.
-	}
+	// This is a private in-process cache, so a private response is safe here.
 	if value, ok := directives["max-age"]; ok {
 		seconds, err := strconv.Atoi(value)
 		if err != nil || seconds < 0 {
