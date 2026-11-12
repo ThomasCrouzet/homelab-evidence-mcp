@@ -92,6 +92,10 @@ type LockedClient struct {
 	misses       atomic.Uint64
 	coalesced    atomic.Uint64
 	now          func() time.Time
+	// lookupIPAddr and dialContext are seams for deterministic address-policy
+	// tests. The constructor sets the production resolver and dialer.
+	lookupIPAddr func(ctx context.Context, host string) ([]net.IPAddr, error)
+	dialContext  func(ctx context.Context, network, address string) (net.Conn, error)
 }
 
 func (c *LockedClient) clock() time.Time {
@@ -133,10 +137,11 @@ func NewLockedClient(opts Options) *LockedClient {
 		Timeout:   5 * time.Second,
 		KeepAlive: 30 * time.Second,
 	}
-	dialContext := dialer.DialContext
+	var lc *LockedClient
+	transportDial := dialer.DialContext
 	if len(opts.AllowedCIDRs) > 0 {
 		allowed := opts.AllowedCIDRs
-		dialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		transportDial = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(addr)
 			if err != nil {
 				return nil, errors.New("network address rejected")
@@ -145,23 +150,37 @@ func NewLockedClient(opts Options) *LockedClient {
 			if parsed := net.ParseIP(host); parsed != nil {
 				addresses = []net.IPAddr{{IP: parsed}}
 			} else {
-				addresses, err = net.DefaultResolver.LookupIPAddr(ctx, host)
+				addresses, err = lc.lookupIPAddr(ctx, host)
 				if err != nil {
 					return nil, errors.New("destination resolution failed")
 				}
 			}
+			attempted := false
 			for _, candidate := range addresses {
-				if !addressAllowed(candidate.IP, allowed) {
+				if candidate.IP == nil || !addressAllowed(candidate.IP, allowed) {
 					continue
 				}
-				return dialer.DialContext(ctx, network, net.JoinHostPort(candidate.IP.String(), port))
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				attempted = true
+				conn, dialErr := lc.dialContext(ctx, network, net.JoinHostPort(candidate.IP.String(), port))
+				if dialErr == nil {
+					return conn, nil
+				}
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+			}
+			if attempted {
+				return nil, errors.New("all permitted destination addresses failed")
 			}
 			return nil, errors.New("destination resolved outside the allowed address policy")
 		}
 	}
 	transport := &http.Transport{
 		Proxy:               nil, // Do not use HTTP_PROXY for adapter traffic.
-		DialContext:         dialContext,
+		DialContext:         transportDial,
 		TLSHandshakeTimeout: 5 * time.Second,
 		MaxIdleConns:        16,
 		IdleConnTimeout:     60 * time.Second,
@@ -173,7 +192,7 @@ func NewLockedClient(opts Options) *LockedClient {
 			MinVersion: tls.VersionTLS12,
 		}
 	}
-	lc := &LockedClient{
+	lc = &LockedClient{
 		destinations: make(map[string]*destination),
 		maxBody:      opts.MaxBody,
 		userAgent:    opts.UserAgent,
@@ -181,6 +200,8 @@ func NewLockedClient(opts Options) *LockedClient {
 		now:          opts.Now,
 		cache:        make(map[string]cacheEntry),
 		flights:      make(map[string]*flight),
+		lookupIPAddr: net.DefaultResolver.LookupIPAddr,
+		dialContext:  dialer.DialContext,
 	}
 	if _, err := rand.Read(lc.cacheKey[:]); err != nil {
 		// If there is no random key, deactivate the cache. This prevents a weak authentication fingerprint.
