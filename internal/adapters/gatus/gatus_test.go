@@ -356,6 +356,122 @@ func TestStatus_MixedTimestampsSelectLatestValid(t *testing.T) {
 	}
 }
 
+func TestStatusSelectionDiagnostics(t *testing.T) {
+	cases := []struct {
+		name            string
+		body            string
+		key             string
+		matched         bool
+		records         int
+		discarded       int
+		httpStatus      int
+		successKnown    bool
+		sourceTimeKnown bool
+	}{
+		{
+			name: "valid success plus undated failure",
+			body: `[{"name":"api","key":"api","results":[
+				{"success":true,"status":200,"timestamp":"2026-07-25T11:00:00Z"},
+				{"success":false,"status":503,"timestamp":"malformed"}
+			]}]`,
+			key: "api", matched: true, records: 2, discarded: 1,
+			httpStatus: 200, successKnown: true, sourceTimeKnown: true,
+		},
+		{
+			name: "reversed rows keep the selection and the count",
+			body: `[{"name":"api","key":"api","results":[
+				{"success":false,"status":503,"timestamp":"malformed"},
+				{"success":true,"status":200,"timestamp":"2026-07-25T11:00:00Z"}
+			]}]`,
+			key: "api", matched: true, records: 2, discarded: 1,
+			httpStatus: 200, successKnown: true, sourceTimeKnown: true,
+		},
+		{
+			name: "missing success sibling is discarded",
+			body: `[{"name":"api","key":"api","results":[
+				{"success":true,"status":200,"timestamp":"2026-07-25T11:00:00Z"},
+				{"status":503,"timestamp":"2026-07-25T10:00:00Z"}
+			]}]`,
+			key: "api", matched: true, records: 2, discarded: 1,
+			httpStatus: 200, successKnown: true, sourceTimeKnown: true,
+		},
+		{
+			name: "fully valid snapshot stays complete",
+			body: `[{"name":"api","key":"api","results":[
+				{"success":true,"status":200,"timestamp":"2026-07-25T10:00:00Z"},
+				{"success":false,"status":503,"timestamp":"2026-07-25T11:00:00Z"},
+				{"success":true,"status":200,"timestamp":"2026-07-25T09:00:00Z"}
+			]}]`,
+			key: "api", matched: true, records: 3, discarded: 0,
+			httpStatus: 503, successKnown: true, sourceTimeKnown: true,
+		},
+		{
+			name: "wholly undated snapshot counts every row",
+			body: `[{"name":"api","key":"api","results":[
+				{"success":true,"status":200,"timestamp":"malformed"},
+				{"success":false,"status":503}
+			]}]`,
+			key: "api", matched: true, records: 2, discarded: 2,
+			httpStatus: 200, successKnown: true, sourceTimeKnown: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tc.body))
+			})
+			status, err := cli.Status(context.Background(), "x", tc.key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status.Matched != tc.matched || status.Records != tc.records || status.Discarded != tc.discarded {
+				t.Fatalf("matched=%v records=%d discarded=%d", status.Matched, status.Records, status.Discarded)
+			}
+			item := status.Item
+			if item.Attributes["http_status"] != tc.httpStatus ||
+				item.Attributes["success_known"] != tc.successKnown ||
+				item.Attributes["source_time_known"] != tc.sourceTimeKnown {
+				t.Fatalf("selected item=%+v", item.Attributes)
+			}
+			if !tc.sourceTimeKnown && item.Freshness != evidence.FreshnessUnknown {
+				t.Fatalf("undated selection freshness=%s, want unknown", item.Freshness)
+			}
+		})
+	}
+
+	t.Run("empty results keep an unknown state", func(t *testing.T) {
+		cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`[{"name":"api","key":"api","results":[]}]`))
+		})
+		status, err := cli.Status(context.Background(), "x", "api")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !status.Matched || status.Records != 0 || status.Discarded != 0 {
+			t.Fatalf("matched=%v records=%d discarded=%d", status.Matched, status.Records, status.Discarded)
+		}
+		if status.Severity != evidence.SeverityUnknown ||
+			status.Attributes["results"] != 0 ||
+			status.Freshness != evidence.FreshnessUnknown {
+			t.Fatalf("empty endpoint gained a state: %+v", status.Item)
+		}
+	})
+
+	t.Run("missing endpoint is not a matched empty snapshot", func(t *testing.T) {
+		cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`[{"name":"other","key":"other","results":[{"success":true,"status":200,"timestamp":"2026-07-25T11:00:00Z"}]}]`))
+		})
+		status, err := cli.Status(context.Background(), "x", "api")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.Matched || status.Records != 0 || status.Discarded != 0 ||
+			status.Freshness != evidence.FreshnessMissing {
+			t.Fatalf("missing endpoint status=%+v", status)
+		}
+	})
+}
+
 func TestEvidenceInWindow_DoesNotInventUndatedHistory(t *testing.T) {
 	cli := setup(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`[{"name":"api","key":"api","results":[{"success":true,"status":200,"timestamp":"invalid"}]}]`))

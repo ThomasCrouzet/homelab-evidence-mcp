@@ -55,6 +55,20 @@ type WindowResult struct {
 	Discarded int
 }
 
+// StatusResult gives the selected status item and the selection facts around
+// it. The embedded item is the latest valid record. Matched is false when the
+// configured endpoint is absent from the status list. Records counts every
+// result on the selected endpoint. Discarded counts the records that the
+// adapter cannot interpret because the timestamp is unusable or the success
+// field is absent. A discarded record can still be the selected item when it
+// holds the maximum parseable timestamp.
+type StatusResult struct {
+	evidence.Item
+	Matched   bool
+	Records   int
+	Discarded int
+}
+
 // flexDuration accepts Gatus nanosecond numbers and duration strings.
 type flexDuration string
 
@@ -84,20 +98,20 @@ func (d *flexDuration) UnmarshalJSON(raw []byte) error {
 }
 
 // Status gets the observation with the maximum timestamp for endpointKey.
-func (c *Client) Status(ctx context.Context, serviceID, endpointKey string) (evidence.Item, error) {
+func (c *Client) Status(ctx context.Context, serviceID, endpointKey string) (StatusResult, error) {
 	list, snapshotAt, err := c.fetchAll(ctx, c.now())
 	if err != nil {
-		return evidence.Item{}, err
+		return StatusResult{}, err
 	}
 	retrievedAt := c.now()
 	ep, ok, err := findEndpoint(list, endpointKey)
 	if err != nil {
-		return evidence.Item{}, err
+		return StatusResult{}, err
 	}
 	if !ok {
-		return c.missingItem(serviceID, endpointKey, snapshotAt, retrievedAt), nil
+		return StatusResult{Item: c.missingItem(serviceID, endpointKey, snapshotAt, retrievedAt)}, nil
 	}
-	return c.itemFromEndpoint(serviceID, ep, snapshotAt, retrievedAt), nil
+	return c.statusFromEndpoint(serviceID, ep, snapshotAt, retrievedAt), nil
 }
 
 func (c *Client) missingItem(serviceID, endpointKey string, observedAt, retrievedAt time.Time) evidence.Item {
@@ -262,7 +276,10 @@ func findEndpoint(list []endpointStatus, key string) (endpointStatus, bool, erro
 	}
 }
 
-func (c *Client) itemFromEndpoint(serviceID string, ep endpointStatus, snapshotAt, retrievedAt time.Time) evidence.Item {
+// statusFromEndpoint selects the latest parseable result and counts the
+// records that it cannot interpret. Selection stays independent of row order.
+func (c *Client) statusFromEndpoint(serviceID string, ep endpointStatus, snapshotAt, retrievedAt time.Time) StatusResult {
+	result := StatusResult{Matched: true, Records: len(ep.Results)}
 	if len(ep.Results) == 0 {
 		key, keyRedactions, keyCut := redaction.ApplyAndTruncate(c.Redact, ep.Key, 256)
 		name, nameRedactions, nameCut := redaction.ApplyAndTruncate(c.Redact, ep.Name, 256)
@@ -272,7 +289,7 @@ func (c *Client) itemFromEndpoint(serviceID string, ep endpointStatus, snapshotA
 			fmt.Sprintf("gatus endpoint %s has empty results", safeName(ep)),
 			512,
 		)
-		return evidence.Item{
+		result.Item = evidence.Item{
 			ID:          evidence.NewOpaqueID("ev"),
 			ServiceID:   serviceID,
 			Source:      evidence.SourceGatus,
@@ -293,6 +310,7 @@ func (c *Client) itemFromEndpoint(serviceID string, ep endpointStatus, snapshotA
 			RedactionsApplied: keyRedactions + nameRedactions + groupRedactions + summaryRedactions,
 			Freshness:         evidence.FreshnessUnknown,
 		}
+		return result
 	}
 	// Select the maximum correct timestamp. Do not use the array order.
 	// Without a correct date, keep the first result and mark the source time as
@@ -302,6 +320,9 @@ func (c *Client) itemFromEndpoint(serviceID string, ep endpointStatus, snapshotA
 	foundValid := false
 	for _, r := range ep.Results {
 		ts, ok := parseTS(r.Timestamp)
+		if !ok || r.Success == nil {
+			result.Discarded++
+		}
 		if !ok {
 			continue
 		}
@@ -315,7 +336,8 @@ func (c *Client) itemFromEndpoint(serviceID string, ep endpointStatus, snapshotA
 	if foundValid {
 		observedAt = bestTS
 	}
-	return c.itemFromResult(serviceID, ep, best, observedAt, retrievedAt, foundValid)
+	result.Item = c.itemFromResult(serviceID, ep, best, observedAt, retrievedAt, foundValid)
+	return result
 }
 
 func (c *Client) itemFromResult(serviceID string, ep endpointStatus, r endpointResult, ts, now time.Time, sourceTimeKnown bool) evidence.Item {

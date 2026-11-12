@@ -55,6 +55,10 @@ The sources set `observed_at` as follows:
   `attributes.collection_time_derived` is `true`, and `freshness` is `unknown`.
   A collection time does not prove that an undated event is recent. Historical
   windows do not include undated results.
+  A result without a usable timestamp or a `success` field counts in
+  `discarded`, and the snapshot reports `partial_invalid_records` with
+  `complete: false`; the latest valid result stays in the response. See
+  [Gatus snapshot coverage](gatus-snapshot-coverage.md).
 - **Loki**: `observed_at` contains the nanosecond line timestamp.
 - **Healthchecks**: `observed_at` contains the current-state collection time in
   snapshot mode. In transition mode it contains the source transition time.
@@ -144,7 +148,10 @@ Execution status and evidence coverage are separate:
 - `complete` is true only when the source answered the requested coverage.
 - `truncated` combines `upstream_truncated` and `local_truncated`.
 - `discarded` counts unusable source records, such as a Loki line with an
-  invalid timestamp.
+  invalid timestamp. For a Gatus status snapshot, `discarded` counts every
+  result on the selected endpoint with an unusable timestamp or an absent
+  `success` field. An empty selected endpoint reports `empty_result` with an
+  unknown state.
 - `cache_state` is `hit`, `miss`, `mixed`, or `disabled`.
   `cache_age_seconds` gives the age of the oldest cached snapshot used. These
   fields do not change `observed_at`.

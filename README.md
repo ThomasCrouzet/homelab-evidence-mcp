@@ -57,7 +57,9 @@ All routes below use `GET`.
 | Beszel | `/api/collections/systems/records` | Host snapshot |
 | ntfy | `/{topic}/json?poll=1&since=<unix>` | Notifications |
 
-Gatus selects the latest status by the greatest valid timestamp.
+Gatus selects the latest status by the greatest valid timestamp. An undated
+record or a record without a success field makes the snapshot coverage
+incomplete.
 Docker requires a read-limited HTTP socket proxy; the Unix socket is unsupported.
 Set `api_version` on a docker source to use an explicit versioned route. Do not
 also put the version in `base_url`.
