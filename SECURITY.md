@@ -203,7 +203,11 @@ The server uses these controls:
 - Global per-minute and concurrency limits.
 - A maximum of eight concurrent source requests. This maximum includes fan-out
   requests.
-- A source response cache limit of 128 entries, 32 MiB, and a TTL.
+- One shared source response body budget across every source client in one
+  server process. The default is 32 MiB and explicit values range from 64 KiB
+  through 256 MiB. The budget counts cached body bytes, not map overhead,
+  active requests, or exact process memory. Each source client keeps its own
+  128-entry limit and TTL.
 - An evidence cache limit of 1,000 entries, a TTL, and a serialized-payload
   byte budget. The byte budget defaults to 8 MiB and cannot exceed 64 MiB.
 - The value `evidence_cache_max: 0` deactivates the evidence cache.
@@ -217,6 +221,12 @@ The server uses these controls:
 Use `limits.source_cache_ttl: 0` to deactivate the source response cache. A short
 TTL reduces the risk of a stale snapshot. On a cache hit, `observed_at` keeps
 the initial collection time. Freshness continues to show the age of the data.
+
+Use `limits.source_cache_max_bytes` to set the shared cached-body budget. A
+missing value and `0` use 32 MiB. Explicit values range from 64 KiB through
+256 MiB. The budget counts cached response body bytes. It does not count map
+overhead, active requests, or exact process memory. One server process creates
+one App, so the budget is process-wide there. Separate Apps do not share it.
 
 ### Misleading results
 

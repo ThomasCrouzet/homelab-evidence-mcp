@@ -20,6 +20,7 @@ import (
 	"unicode"
 
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/evidence"
+	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/httpx"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/redaction"
 	"gopkg.in/yaml.v3"
 )
@@ -65,6 +66,9 @@ type Limits struct {
 	EvidenceCacheMax      int
 	EvidenceCacheMaxBytes int64
 	SourceCacheTTL        time.Duration
+	// SourceCacheMaxBytes bounds cached source response body bytes for the
+	// whole server process. Every source client shares it.
+	SourceCacheMaxBytes   int64
 	MaxToolCallsPerMinute int
 	MaxConcurrentTools    int
 	// MaxSourceRequestsPerMinute bounds one source instance in a sliding minute.
@@ -192,6 +196,7 @@ type fileLimits struct {
 	EvidenceCacheMax           *int   `yaml:"evidence_cache_max"`
 	EvidenceCacheMaxBytes      *int64 `yaml:"evidence_cache_max_bytes"`
 	SourceCacheTTL             string `yaml:"source_cache_ttl"`
+	SourceCacheMaxBytes        *int64 `yaml:"source_cache_max_bytes"`
 	MaxToolCallsPerMinute      int    `yaml:"max_tool_calls_per_minute"`
 	MaxSourceRequestsPerMinute int    `yaml:"max_source_requests_per_minute"`
 	MaxConcurrentTools         int    `yaml:"max_concurrent_tools"`
@@ -506,6 +511,22 @@ func parseLimits(f fileLimits) (Limits, ValidationErrors) {
 	setDur("total_timeout", f.TotalTimeout, &l.TotalTimeout, 10*time.Second, time.Second, 60*time.Second)
 	setDur("evidence_cache_ttl", f.EvidenceCacheTTL, &l.EvidenceCacheTTL, 5*time.Minute, 30*time.Second, time.Hour)
 	setDur("source_cache_ttl", f.SourceCacheTTL, &l.SourceCacheTTL, 15*time.Second, 0, 5*time.Minute)
+	switch {
+	case f.SourceCacheMaxBytes == nil || *f.SourceCacheMaxBytes == 0:
+		l.SourceCacheMaxBytes = httpx.DefaultSourceCacheMaxBytes
+	case *f.SourceCacheMaxBytes < httpx.MinSourceCacheMaxBytes:
+		errs = append(errs, ValidationError{
+			"limits.source_cache_max_bytes",
+			fmt.Sprintf("must be 0 or >= %d", httpx.MinSourceCacheMaxBytes),
+		})
+	case *f.SourceCacheMaxBytes > httpx.MaxSourceCacheMaxBytes:
+		errs = append(errs, ValidationError{
+			"limits.source_cache_max_bytes",
+			fmt.Sprintf("must be <= %d", httpx.MaxSourceCacheMaxBytes),
+		})
+	default:
+		l.SourceCacheMaxBytes = *f.SourceCacheMaxBytes
+	}
 
 	if l.MaxLogLines <= 0 {
 		if l.MaxLogLines < 0 {

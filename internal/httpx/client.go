@@ -27,8 +27,10 @@ import (
 )
 
 const (
-	defaultMaxBody  = 2 << 20 // 2 MiB
-	maxCacheBytes   = 32 << 20
+	defaultMaxBody = 2 << 20 // 2 MiB
+	// maxCacheBytes is the private default for clients without a shared
+	// budget. A CacheBudget owns enforcement.
+	maxCacheBytes   = DefaultSourceCacheMaxBytes
 	maxCacheEntries = 128
 	cacheTimeHeader = "X-Homelab-Evidence-Cache-Time"
 	// UpstreamTruncatedHeader is the ntfy replay-limit signal. It is the only
@@ -53,6 +55,7 @@ type CacheStats struct {
 	Coalesced uint64 `json:"coalesced"`
 	Size      int    `json:"size"`
 	Bytes     int64  `json:"bytes"`
+	MaxBytes  int64  `json:"max_bytes"`
 	TTL       string `json:"ttl"`
 }
 
@@ -87,6 +90,7 @@ type LockedClient struct {
 	cacheOrder   []string
 	cacheBytes   int64
 	cacheKey     [32]byte
+	budget       *CacheBudget
 	flightMu     sync.Mutex
 	flights      map[string]*flight
 	hits         atomic.Uint64
@@ -113,6 +117,9 @@ type Options struct {
 	UserAgent string
 	// CacheTTL sets the cache duration for the same GET requests. Zero deactivates caching.
 	CacheTTL time.Duration
+	// CacheBudget bounds aggregate cached body bytes with other clients that
+	// share it. Nil gives this client a private default budget.
+	CacheBudget *CacheBudget
 	// RootCAs contains the trust pool with additional certificates. TLS certificate verification is always active.
 	// The client does not give a skip-verify option.
 	RootCAs *x509.CertPool
@@ -208,6 +215,11 @@ func NewLockedClient(opts Options) *LockedClient {
 		// If there is no random key, deactivate the cache. This prevents a weak authentication fingerprint.
 		lc.cacheTTL = 0
 	}
+	lc.budget = opts.CacheBudget
+	if lc.budget == nil {
+		lc.budget = NewCacheBudget(DefaultSourceCacheMaxBytes)
+	}
+	lc.budget.register(lc)
 	lc.client = &http.Client{
 		Transport: transport,
 		Timeout:   opts.Timeout,
@@ -297,6 +309,13 @@ func invalidPath(path string) bool {
 
 // Stats gives cache counters.
 func (c *LockedClient) Stats() CacheStats {
+	budget := c.budget
+	limit := int64(maxCacheBytes)
+	if budget != nil {
+		budget.mu.Lock()
+		defer budget.mu.Unlock()
+		limit = budget.limit
+	}
 	c.mu.Lock()
 	now := c.clock()
 	c.expireCacheLocked(now)
@@ -310,6 +329,7 @@ func (c *LockedClient) Stats() CacheStats {
 		Coalesced: c.coalesced.Load(),
 		Size:      size,
 		Bytes:     bytes,
+		MaxBytes:  limit,
 		TTL:       ttl.String(),
 	}
 }
@@ -318,6 +338,12 @@ func (c *LockedClient) Stats() CacheStats {
 // calls Admit after a cache miss and only for the single coalesced leader,
 // immediately before the network request. A cache hit and a coalesced wait do
 // not call Admit, so they must not consume a quota slot.
+//
+// The policy belongs to the destination and its credentials. Every caller that
+// can join one flight key (destination, path, and header fingerprint) must
+// supply the same policy, because the client asks only the leader and applies
+// that decision to every waiter. A caller must not use a different policy for a
+// key that another caller is already fetching.
 type Admitter interface {
 	// Admit returns nil to permit one upstream request. A non-nil error rejects
 	// the request, and the client sends nothing. The error is shared with the
@@ -326,7 +352,11 @@ type Admitter interface {
 }
 
 // GetAdmitted is Get with an admission decision for each real upstream request.
-// A nil admitter makes it equal to Get.
+// It asks the admitter once per network attempt, after the cache lookup and only
+// for the single coalesced leader. Callers of the same destination, path, and
+// headers share one flight and must therefore share one admission policy; the
+// leader's decision applies to every waiter. A nil admitter makes it equal to
+// Get.
 func (c *LockedClient) GetAdmitted(ctx context.Context, destName, path string, headers map[string]string, admitter Admitter) (*http.Response, []byte, error) {
 	return c.get(ctx, destName, path, headers, admitter)
 }
@@ -669,6 +699,10 @@ func keyedFingerprint(label, value string, key []byte) string {
 }
 
 func (c *LockedClient) cacheGet(key string) ([]byte, int, time.Time, bool, bool) {
+	if c.budget != nil {
+		c.budget.mu.Lock()
+		defer c.budget.mu.Unlock()
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.cache[key]
@@ -689,25 +723,65 @@ func (c *LockedClient) cachePut(key string, status int, body []byte, collectedAt
 }
 
 func (c *LockedClient) cachePutWithTTL(key string, status int, body []byte, collectedAt time.Time, ttl time.Duration, truncated bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	budget := c.budget
+	if budget != nil {
+		budget.mu.Lock()
+		defer budget.mu.Unlock()
+	}
 	bodyBytes := int64(len(body))
-	if bodyBytes > maxCacheBytes {
-		return
+	limit := int64(maxCacheBytes)
+	if budget != nil {
+		limit = budget.limit
 	}
 	now := c.clock()
-	c.expireCacheLocked(now)
+	if budget != nil {
+		// Expire first across every client, so stale remote entries do not hold
+		// bytes that another client could use.
+		budget.expireAllLocked()
+	} else {
+		c.mu.Lock()
+		c.expireCacheLocked(now)
+		c.mu.Unlock()
+	}
+	if bodyBytes > limit {
+		return
+	}
+	c.mu.Lock()
 	if _, ok := c.cache[key]; ok {
 		c.removeCacheLocked(key)
 	}
-	for len(c.cache) >= maxCacheEntries || c.cacheBytes+bodyBytes > maxCacheBytes {
+	for len(c.cache) >= maxCacheEntries {
 		if len(c.cacheOrder) == 0 {
 			break
 		}
 		c.removeCacheLocked(c.cacheOrder[0])
 	}
+	c.mu.Unlock()
+	if budget != nil {
+		for budget.used+bodyBytes > budget.limit {
+			if len(budget.order) == 0 {
+				return
+			}
+			victim := budget.order[0]
+			victim.client.mu.Lock()
+			victim.client.removeCacheLocked(victim.key)
+			victim.client.mu.Unlock()
+			budget.evictions++
+		}
+	} else {
+		for c.cacheBytes+bodyBytes > limit {
+			c.mu.Lock()
+			if len(c.cacheOrder) == 0 {
+				c.mu.Unlock()
+				return
+			}
+			c.removeCacheLocked(c.cacheOrder[0])
+			c.mu.Unlock()
+		}
+	}
 	cp := make([]byte, len(body))
 	copy(cp, body)
+	c.mu.Lock()
 	c.cache[key] = cacheEntry{
 		status:      status,
 		body:        cp,
@@ -717,6 +791,11 @@ func (c *LockedClient) cachePutWithTTL(key string, status int, body []byte, coll
 	}
 	c.cacheOrder = append(c.cacheOrder, key)
 	c.cacheBytes += bodyBytes
+	c.mu.Unlock()
+	if budget != nil {
+		budget.used += bodyBytes
+		budget.order = append(budget.order, budgetEntry{client: c, key: key})
+	}
 }
 
 func (c *LockedClient) expireCacheLocked(now time.Time) {
@@ -732,7 +811,8 @@ func (c *LockedClient) removeCacheLocked(key string) {
 	if !ok {
 		return
 	}
-	c.cacheBytes -= int64(len(e.body))
+	size := int64(len(e.body))
+	c.cacheBytes -= size
 	delete(c.cache, key)
 	n := 0
 	for _, k := range c.cacheOrder {
@@ -742,6 +822,10 @@ func (c *LockedClient) removeCacheLocked(key string) {
 		}
 	}
 	c.cacheOrder = c.cacheOrder[:n]
+	if budget := c.budget; budget != nil {
+		budget.used -= size
+		budget.removeOrderLocked(c, key)
+	}
 }
 
 // CollectionTime gives the collection time of a snapshot response.
@@ -781,22 +865,53 @@ func sanitizeNetErr(err error, destination string) error {
 	return fmt.Errorf("request to %s failed: network or TLS error", destination)
 }
 
-// CombinedStats sums cache counters across clients.
+// CombinedStats sums cache counters across clients. It snapshots each shared
+// budget once under that budget's outer lock, so the reported aggregate usage
+// cannot mix different instants or count a shared cap more than once.
 func CombinedStats(clients ...*LockedClient) CacheStats {
 	var out CacheStats
+	groups := make(map[*CacheBudget][]*LockedClient)
+	order := make([]*CacheBudget, 0, len(clients))
+	seen := make(map[*LockedClient]bool, len(clients))
 	for _, client := range clients {
-		if client == nil {
+		if client == nil || seen[client] {
 			continue
 		}
-		stats := client.Stats()
-		out.Hits += stats.Hits
-		out.Misses += stats.Misses
-		out.Coalesced += stats.Coalesced
-		out.Size += stats.Size
-		out.Bytes += stats.Bytes
-		if out.TTL == "" {
-			out.TTL = stats.TTL
+		seen[client] = true
+		out.Hits += client.hits.Load()
+		out.Misses += client.misses.Load()
+		out.Coalesced += client.coalesced.Load()
+		budget := client.budget
+		if budget == nil {
+			client.mu.Lock()
+			client.expireCacheLocked(client.clock())
+			out.Size += len(client.cache)
+			out.Bytes += client.cacheBytes
+			if out.TTL == "" {
+				out.TTL = client.cacheTTL.String()
+			}
+			client.mu.Unlock()
+			continue
 		}
+		if _, ok := groups[budget]; !ok {
+			order = append(order, budget)
+		}
+		groups[budget] = append(groups[budget], client)
+	}
+	for _, budget := range order {
+		budget.mu.Lock()
+		for _, client := range groups[budget] {
+			client.mu.Lock()
+			client.expireCacheLocked(client.clock())
+			out.Size += len(client.cache)
+			out.Bytes += client.cacheBytes
+			if out.TTL == "" {
+				out.TTL = client.cacheTTL.String()
+			}
+			client.mu.Unlock()
+		}
+		budget.mu.Unlock()
+		out.MaxBytes += budget.limit
 	}
 	return out
 }

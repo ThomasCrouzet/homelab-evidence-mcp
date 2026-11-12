@@ -34,6 +34,9 @@ carries the same facts in pretty-printed JSON.
   `selection_truncated`, `byte_budget_truncated`, `omitted_items`, and
   `omitted_sources`. See [compact incident context](incident-context.md).
 - Fields without `omitempty` are required. Optional fields can be absent.
+- `evidence_capabilities` reports `source_cache.bytes` as the aggregate cached
+  source response body bytes and `source_cache.max_bytes` as the effective
+  shared cap. `limits.source_cache_max_bytes` repeats that cap.
 
 `attributes` stays an open object. Each adapter documents its allowlisted keys.
 Numeric fields keep their JSON number type. Text fields are size-limited and

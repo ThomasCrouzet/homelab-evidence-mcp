@@ -148,6 +148,7 @@ func (a *App) toolCapabilities(ctx context.Context, _ *mcp.CallToolRequest, _ em
 				"per_source_timeout":             a.Cfg.Limits.PerSourceTimeout.String(),
 				"total_timeout":                  a.Cfg.Limits.TotalTimeout.String(),
 				"source_cache_ttl":               a.Cfg.Limits.SourceCacheTTL.String(),
+				"source_cache_max_bytes":         a.SourceCacheBudget.Limit(),
 				"max_tool_calls_per_minute":      a.Cfg.Limits.MaxToolCallsPerMinute,
 				"max_concurrent_tools":           a.Cfg.Limits.MaxConcurrentTools,
 				"max_concurrent_sources":         maxConcurrentSourceRequests,

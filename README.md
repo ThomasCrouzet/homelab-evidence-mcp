@@ -287,8 +287,14 @@ Set only one of `token_env` and `token_file` per source.
   sliding minute today. `evidence_capabilities` reports the effective value.
   It counts real upstream GET requests. A warm source cache hit and a
   coalesced wait send no request and consume no slot.
-- **Caches:** `limits.source_cache_ttl` defaults to `15s`; `0` disables it.
-  `limits.evidence_cache_ttl` defaults to `5m`.
+- **Caches:** `limits.source_cache_ttl` defaults to `15s`; `0` disables the
+  source response cache. `limits.source_cache_max_bytes` defaults to 32 MiB.
+  Every source response cache in one server process shares this budget. A
+  missing value and `0` use the default. Explicit values range from 64 KiB to
+  256 MiB. The value counts cached response body bytes. It does not count map
+  overhead, active requests, or exact process memory. A server process creates
+  one App, so the budget is process-wide in production. Separate Apps do not
+  share it. `limits.evidence_cache_ttl` defaults to `5m`.
   `limits.evidence_cache_max` defaults to `256`; `0` disables storage.
   `limits.evidence_cache_max_bytes` defaults to 8 MiB with a 64 MiB maximum.
   It limits the JSON payload of stored evidence, not exact process memory.
