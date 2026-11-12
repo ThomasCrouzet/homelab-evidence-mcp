@@ -484,14 +484,18 @@ func addressAllowed(ip net.IP, allowed []*net.IPNet) bool {
 	return false
 }
 
-// sourceCacheLifetime applies the origin cache directives. no-store and
-// no-cache bypass storage. A max-age value caps the operator TTL.
+// sourceCacheLifetime applies the origin cache directives. no-store, no-cache,
+// and Pragma no-cache bypass storage before a max-age value can apply. A
+// max-age value caps the operator TTL.
 func sourceCacheLifetime(header http.Header, ttl time.Duration) (time.Duration, bool) {
 	directives := parseCacheControl(header)
 	if _, ok := directives["no-store"]; ok {
 		return 0, false
 	}
 	if _, ok := directives["no-cache"]; ok {
+		return 0, false
+	}
+	if strings.Contains(strings.ToLower(strings.Join(header.Values("Pragma"), ",")), "no-cache") {
 		return 0, false
 	}
 	// This is a private in-process cache, so a private response is safe here.
@@ -508,9 +512,6 @@ func sourceCacheLifetime(header http.Header, ttl time.Duration) (time.Duration, 
 			return 0, false
 		}
 		return maxAge, true
-	}
-	if strings.Contains(strings.ToLower(strings.Join(header.Values("Pragma"), ",")), "no-cache") {
-		return 0, false
 	}
 	return ttl, true
 }
