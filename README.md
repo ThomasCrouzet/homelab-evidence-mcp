@@ -101,9 +101,36 @@ Do not set `start` and `duration` together. A window that starts in the future
 is invalid. Negative limits and offsets are invalid. Server limits bound
 windows, evidence counts, body sizes, and concurrency. Invalid arguments and
 exhausted budgets produce tool errors with stable reason codes.
+
+An error result keeps `isError: true`, a readable `error` message, and no
+successful `structuredContent`. Its `reason` comes from this closed set:
+
+- `invalid_arguments`: a parameter is missing or malformed. Fix the arguments.
+- `unknown_service`: no configured service has that id. Call `list_services`.
+- `binding_missing`: the service lacks the source that the tool needs. Use
+  another tool or correct the configuration.
+- `evidence_not_found`: the evidence id expired or was evicted. Collect the
+  evidence again.
+- `response_budget_exceeded`: the response cannot fit the byte budget. Narrow
+  the window or lower `max_items`.
+- `concurrent_tool_limit`: the concurrent tool budget is full. Retry after
+  another call completes.
+- `tool_rate_limit`: the per-minute tool budget is exhausted. Retry after the
+  minute window.
+- `tool_budget_exhausted`: a tool budget refused the call for another reason.
+  Treat it as a capacity error and retry later.
+- `canceled`: the caller canceled the request. Send a new request.
+
+A failed single-source `search_logs` request reports the source coverage code
+from the evidence model instead. Examples are `upstream_error`,
+`authentication_failed`, and `request_budget_exceeded`.
+
 `service_status` marks Loki and ntfy as `skipped`.
 It collects Gatus, Docker, Healthchecks, and Beszel snapshots.
 `search_logs` accepts optional `text`, `regex`, and `limit` arguments.
+Every evidence result keeps `complete` equal to `source_complete`.
+`delivery_complete` and the omission fields describe local output loss only.
+A byte-budget trim does not change source coverage.
 `failed_crons` selects current `down`, `grace`, and `paused` states.
 Without `service_id`, it reads only Healthchecks bindings declared in the
 service registry. It does not enumerate unbound checks in a source. When a

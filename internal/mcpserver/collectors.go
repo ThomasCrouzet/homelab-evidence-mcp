@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/adapters/beszel"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/adapters/docker"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/adapters/gatus"
 	"github.com/ThomasCrouzet/homelab-evidence-mcp/internal/adapters/healthchecks"
@@ -621,6 +622,12 @@ func reasonForError(err error) string {
 	}
 	if errors.Is(err, docker.ErrAmbiguousContainer) {
 		return "ambiguous_binding"
+	}
+	if errors.Is(err, beszel.ErrSystemAmbiguous) {
+		return "ambiguous_binding"
+	}
+	if errors.Is(err, healthchecks.ErrRequestBudget) {
+		return "request_budget_exceeded"
 	}
 	if err == nil {
 		return "upstream_error"
