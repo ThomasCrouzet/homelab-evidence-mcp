@@ -505,6 +505,29 @@ func (a *App) collectNtfy(ctx context.Context, serviceID string, ref *config.Ntf
 	return outcome, items
 }
 
+// collectNtfyDiagnostic checks one ntfy binding for the doctor. A diagnostic
+// needs reachability, authorization, decoding, and a matching topic. The
+// replay buffer cannot prove an unbounded history, so a bounded replay alone
+// does not make the binding incomplete. The evidence paths keep that limit.
+func (a *App) collectNtfyDiagnostic(ctx context.Context, serviceID string, ref *config.NtfyRef, start, end time.Time, limit int) (evidence.SourceOutcome, []evidence.Item) {
+	outcome, items := a.collectNtfy(ctx, serviceID, ref, start, end, limit)
+	if outcome.Status != "ok" {
+		return outcome, items
+	}
+	switch outcome.Reason {
+	case "", "empty_result", "retention_limited", "truncated":
+		// Only the diagnostic view drops the replay-coverage limit.
+		outcome.Reason = ""
+		outcome.Complete = true
+		outcome.RetentionLimited = false
+		outcome.Truncated = false
+		outcome.UpstreamTruncated = false
+		outcome.LocalTruncated = false
+	}
+	markEmpty(&outcome)
+	return outcome, items
+}
+
 func (a *App) withSourceTimeout(ctx context.Context, sourceName string, kind evidence.SourceKind, fn func(context.Context) ([]evidence.Item, error)) (evidence.SourceOutcome, []evidence.Item) {
 	t0 := time.Now()
 	requestCtx, info := httpx.WithRequestInfo(ctx)

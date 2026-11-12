@@ -21,6 +21,7 @@ type DoctorBinding struct {
 	ServiceID string `json:"service_id"`
 	Status    string `json:"status"`
 	Reason    string `json:"reason,omitempty"`
+	Error     string `json:"error,omitempty"`
 	Complete  bool   `json:"complete"`
 	ItemCount int    `json:"item_count"`
 }
@@ -116,7 +117,7 @@ func (a *App) Doctor(ctx context.Context) DoctorReport {
 				}
 				if sources.Ntfy != nil {
 					a.doctorBinding(ctx, &mu, byName, sources.Ntfy.Source, service.ID, func(ctx context.Context) (evidence.SourceOutcome, []evidence.Item) {
-						return a.collectNtfy(ctx, service.ID, sources.Ntfy, windowStart, now, 1)
+						return a.collectNtfyDiagnostic(ctx, service.ID, sources.Ntfy, windowStart, now, 1)
 					})
 				}
 			}
@@ -175,23 +176,46 @@ func (a *App) doctorBinding(ctx context.Context, mu *sync.Mutex, byName map[stri
 		ServiceID: serviceID,
 		Status:    outcome.Status,
 		Reason:    outcome.Reason,
+		Error:     outcome.Error,
 		Complete:  outcome.Complete,
 		ItemCount: outcome.ItemCount,
 	}
 	source.Bindings = append(source.Bindings, binding)
-	if outcome.Status != "ok" || !outcome.Complete {
-		source.Error = outcome.Error
-		if source.Reason == "" {
-			source.Reason = outcome.Reason
-		}
-	}
-	source.Status = worseDoctorStatus(source.Status, doctorStatusForOutcome(outcome))
+	aggregateDoctorSource(source)
 }
 
-func doctorStatusForOutcome(outcome evidence.SourceOutcome) string {
-	switch outcome.Status {
+// aggregateDoctorSource derives the source row from every collected binding.
+// The worst diagnostic status wins. Equal statuses use the reason code and
+// then the service ID, so worker completion order cannot change the row.
+func aggregateDoctorSource(source *DoctorSource) {
+	source.Status = "unbound"
+	source.Reason = ""
+	source.Error = ""
+	if len(source.Bindings) == 0 {
+		return
+	}
+	ordered := append([]DoctorBinding(nil), source.Bindings...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		left := doctorStatusRanks[doctorStatusForBinding(ordered[i].Status, ordered[i].Complete)]
+		right := doctorStatusRanks[doctorStatusForBinding(ordered[j].Status, ordered[j].Complete)]
+		if left != right {
+			return left > right
+		}
+		if ordered[i].Reason != ordered[j].Reason {
+			return ordered[i].Reason < ordered[j].Reason
+		}
+		return ordered[i].ServiceID < ordered[j].ServiceID
+	})
+	worst := ordered[0]
+	source.Status = doctorStatusForBinding(worst.Status, worst.Complete)
+	source.Reason = worst.Reason
+	source.Error = worst.Error
+}
+
+func doctorStatusForBinding(status string, complete bool) string {
+	switch status {
 	case "ok":
-		if outcome.Complete {
+		if complete {
 			return "ok"
 		}
 		return "partial"
@@ -204,19 +228,13 @@ func doctorStatusForOutcome(outcome evidence.SourceOutcome) string {
 	}
 }
 
-func worseDoctorStatus(current, next string) string {
-	rank := map[string]int{
-		"unbound":  0,
-		"ok":       1,
-		"partial":  2,
-		"canceled": 3,
-		"timeout":  4,
-		"error":    5,
-	}
-	if rank[next] > rank[current] {
-		return next
-	}
-	return current
+var doctorStatusRanks = map[string]int{
+	"unbound":  0,
+	"ok":       1,
+	"partial":  2,
+	"canceled": 3,
+	"timeout":  4,
+	"error":    5,
 }
 
 func adapterCapabilities(kind string) []string {
