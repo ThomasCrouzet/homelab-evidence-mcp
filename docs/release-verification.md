@@ -19,12 +19,22 @@ gh attestation verify homelab-evidence-mcp_linux_amd64 \
 
 The release workflow:
 
-1. Validates the tag, version, changelog, source version, tests, and native
-   smoke checks.
+1. Validates the tag, version, changelog, source version, static checks, race
+   tests, executable E2E suite, and independent Python MCP client
+   interoperability.
 2. Builds the five targets and stage artifact.
-3. Creates a draft release.
-4. Uploads every asset and verifies that the draft asset list equals `dist/`.
-5. Publishes only after the full set exists.
+3. Runs the native smoke suite on each target.
+4. Creates a draft release.
+5. Uploads every asset and verifies that the draft asset list equals `dist/`.
+6. Publishes only after the full set exists.
+
+The `verify` job runs the interoperability check before it uploads the release
+artifact. A failure stops `verify`, so `native-smoke` and `publish` do not run.
+Only `publish` has write and attestation permissions. It downloads the staged
+artifacts and runs no repository code.
+
+A version tag starts only the release workflow. The `CI` workflow runs on pull
+requests and branch pushes, not on tags.
 
 Attestations use the pinned GitHub build-provenance action, with `id-token`
 and `attestations` permissions scoped to the publish job.

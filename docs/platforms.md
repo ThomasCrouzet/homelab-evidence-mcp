@@ -39,11 +39,11 @@ homelab and no model provider.
 
 ## Release gate
 
-The verification job builds and tests the release candidates. The native smoke
-jobs then execute each candidate. The publication job needs both jobs and
-verifies the transferred checksums before it creates the release. A failing
-native smoke job blocks publication for every target, including targets that
-passed.
+The verification job builds and tests the release candidates, and runs the
+independent Python MCP client check. The native smoke jobs then execute each
+candidate. The publication job needs both jobs and verifies the transferred
+checksums before it creates the release. A failing native smoke job blocks
+publication for every target, including targets that passed.
 
 ## Compile-only policy
 

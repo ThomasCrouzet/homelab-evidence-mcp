@@ -69,5 +69,13 @@ features of the running binary.
 ## Release gate
 
 A release requires a matching tag, `Makefile` version, source version, and
-changelog section. The release workflow checks them before publication. Do not
-describe an unreleased capability as part of the latest tag.
+changelog section. It also requires a passing independent Python MCP client
+interoperability check. The release workflow runs these checks in its
+verification job before it builds the release artifacts. A failed check stops
+the verification job, so the native smoke jobs and the publication job do not
+run.
+
+A version tag starts only the release workflow. It does not start the CI
+workflow. Pull requests and pushes to `main` still run the full CI workflow,
+including the interoperability check. Do not describe an unreleased capability
+as part of the latest tag.
