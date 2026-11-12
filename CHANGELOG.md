@@ -11,6 +11,11 @@ This file records project changes. Its format uses
 - Give every `gh release` command an explicit repository, so the publish job
   can create and update a release without a repository checkout.
 
+### Security
+
+- Require Go 1.26.11 or later so the standard library includes the
+  GO-2026-6859 fix.
+
 ## [0.2.1] - 2026-11-09
 
 This is the first published release after 0.1.3. It contains the version 0.2.0

@@ -9,7 +9,7 @@ a root cause. State: v0.2.1, released 2026-11-09, active development.
 
 ## Stack
 
-- Go 1.26.10 is the minimum version. The value agrees with `go.mod`, CI, and the
+- Go 1.26.11 is the minimum version. The value agrees with `go.mod`, CI, and the
   release workflow. The repository has one module and one binary from
   `cmd/homelab-evidence-mcp`.
 - The project uses MCP Go SDK 1.8.0 and `gopkg.in/yaml.v3`. The build matrix uses
@@ -133,7 +133,7 @@ make build
   repository.` The runner refuses in-tree paths. Point the variable at a
   directory such as `/var/tmp/hem-e2e`.
 - `make lint` stops with `Install golangci-lint 2.15.0`. The binary is absent
-  from `PATH`. Install that version. The target pins `GOTOOLCHAIN=go1.26.10`.
+  from `PATH`. Install that version. The target pins `GOTOOLCHAIN=go1.26.11`.
   Override `LINT_GOTOOLCHAIN` only if a compatible toolchain is necessary.
 - `--validate` rejects unknown YAML keys and a `base_url` with a query or
   fragment. The parser is strict. Correct the config. Do not relax the check.
