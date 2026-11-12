@@ -352,10 +352,11 @@ services:
 	block.Store(false)
 	secondCtx, cancelSecond := context.WithTimeout(testCtx, 5*time.Second)
 	defer cancelSecond()
-	result, err := session.CallTool(secondCtx, &mcp.CallToolParams{
-		Name:      "service_status",
-		Arguments: map[string]any{"service_id": "cancel-service"},
-	})
+	// The concurrency slot is released when the canceled handler returns. The
+	// client sees its own cancellation and the upstream sees the canceled
+	// request before that release, so one immediate call can meet the held
+	// slot. Retry only that refusal, within the same 5s deadline.
+	result, err := callAfterCancellation(secondCtx, session, "cancel-service")
 	if err != nil || result.IsError {
 		encoded, _ := json.Marshal(result)
 		t.Fatalf("call after cancellation failed: %v\n%s", err, encoded)
@@ -368,6 +369,40 @@ services:
 		!bytes.Contains(encoded, []byte(`"status":"ok"`)) {
 		t.Fatalf("call after cancellation returned incomplete evidence: %s", encoded)
 	}
+}
+
+// callAfterCancellation reports the first admitted service_status result, or the
+// last refusal when the context deadline expires. Only a concurrency-budget
+// refusal is transient: the canceled handler still owns its slot until it
+// returns. Any other error or refusal returns at once.
+func callAfterCancellation(ctx context.Context, session *mcp.ClientSession, serviceID string) (*mcp.CallToolResult, error) {
+	for {
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{
+			Name:      "service_status",
+			Arguments: map[string]any{"service_id": serviceID},
+		})
+		if err != nil || !isConcurrentToolBudgetRefusal(result) {
+			return result, err
+		}
+		select {
+		case <-ctx.Done():
+			return result, ctx.Err()
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+// isConcurrentToolBudgetRefusal reports the documented transient refusal from
+// the concurrent tool budget.
+func isConcurrentToolBudgetRefusal(result *mcp.CallToolResult) bool {
+	if result == nil || !result.IsError || len(result.Content) == 0 {
+		return false
+	}
+	content, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		return false
+	}
+	return strings.Contains(content.Text, "too many concurrent tool calls (budget)")
 }
 
 // stdioTestBinary uses a supplied release binary or builds the current source.
