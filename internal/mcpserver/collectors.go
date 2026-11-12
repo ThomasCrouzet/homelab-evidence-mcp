@@ -307,10 +307,11 @@ func (a *App) collectRegisteredFailedCrons(ctx context.Context, start, end time.
 		bindings = append(bindings, binding{service: svc, ref: svc.Sources.Healthchecks})
 		bound[svc.Sources.Healthchecks.Source] = true
 	}
-	// Collect one checks inventory per source instance. The number of active
+	// Collect one checks inventory per source instance. Each fetch keeps the
+	// per-source deadline and one global source slot. The number of active
 	// workers is bounded, independent of the service count.
 	snapshots := map[string]healthchecks.Snapshot{}
-	snapshotErr := map[string]error{}
+	inventoryFailure := map[string]evidence.SourceOutcome{}
 	sourceNames := make([]string, 0, len(bound))
 	for name := range bound {
 		sourceNames = append(sourceNames, name)
@@ -329,19 +330,21 @@ func (a *App) collectRegisteredFailedCrons(ctx context.Context, start, end time.
 			go func() {
 				defer wg.Done()
 				for name := range jobs {
-					cli := a.hc[name]
-					if cli == nil {
-						mu.Lock()
-						snapshotErr[name] = fmt.Errorf("healthchecks client missing")
-						mu.Unlock()
-						continue
-					}
-					snapshot, err := cli.Fetch(ctx)
+					var snapshot healthchecks.Snapshot
+					outcome, _ := a.withSourceTimeout(ctx, name, evidence.SourceHealthchecks, func(ctx context.Context) ([]evidence.Item, error) {
+						cli := a.hc[name]
+						if cli == nil {
+							return nil, fmt.Errorf("healthchecks client missing")
+						}
+						var err error
+						snapshot, err = cli.Fetch(ctx)
+						return nil, err
+					})
 					mu.Lock()
-					if err != nil {
-						snapshotErr[name] = err
-					} else {
+					if outcome.Status == "ok" {
 						snapshots[name] = snapshot
+					} else {
+						inventoryFailure[name] = outcome
 					}
 					mu.Unlock()
 				}
@@ -371,8 +374,10 @@ func (a *App) collectRegisteredFailedCrons(ctx context.Context, start, end time.
 				for job := range jobs {
 					var outcome evidence.SourceOutcome
 					var its []evidence.Item
-					if err := snapshotErr[job.ref.Source]; err != nil {
-						outcome = a.sourceErrorOutcome(ctx, ctx, job.ref.Source, evidence.SourceHealthchecks, err, time.Now())
+					if failure, failed := inventoryFailure[job.ref.Source]; failed {
+						// Every binding backed by the failed inventory keeps
+						// the same explicit failure outcome.
+						outcome = failure
 					} else {
 						outcome, its = a.collectHCWindowFrom(ctx, snapshots[job.ref.Source], job.service.ID, job.ref, start, end)
 					}
