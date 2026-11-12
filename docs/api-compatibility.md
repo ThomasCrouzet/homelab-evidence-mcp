@@ -207,11 +207,21 @@ The Beszel adapter has this behavior:
 - Incomplete, changing, or excessive pagination causes a source error.
 - It then tries `/api/systems`, `/api/beszel/systems`, and the variants with a
   trailing slash.
-- A paginated alternate response follows its page numbers with the same bounds
-  as PocketBase. If an alternate route cannot serve page 2, the adapter gives
-  an explicit pagination error. It does not treat page 1 as complete.
 - The adapter accepts arrays and `systems`, `items`, or `data` envelopes. It
   also accepts empty arrays and envelopes.
+- The adapter applies pagination to every supported envelope. A `systems` or
+  `data` response with `page`, `perPage`, `totalItems`, or `totalPages` follows
+  the same page and record bounds as `items`. The adapter never treats page 1
+  as the whole inventory when the metadata shows more pages.
+- The first response must report page 1. A first response that reports page 2
+  or higher is a source error, because the missing initial page stays unread.
+- Malformed or inconsistent counters are a source error. Examples are a page
+  below 1, a page after the last page, a negative total, or an empty page count
+  with records.
+- PocketBase documents the `items` envelope and its pagination fields. Upstream
+  documentation does not guarantee paginated `systems` or `data` envelopes. The
+  adapter handles those two as a compatibility contract for alternate routes.
+  This contract is not a claim of a supported live API.
 - An empty PocketBase collection is a complete result.
 - Identity uses canonical `name` or `system` before the `host` or `info.h`
   alias. The adapter scans the complete collection for each tier. An exact

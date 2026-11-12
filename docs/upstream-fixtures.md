@@ -33,9 +33,11 @@ one documented replay. The fixture files and provenance are under
   key. Gap: the fixture decodes `unique_key`, but it does not prove the key is
   read-only at the server.
 - **Beszel**: fixture anchor v0.21.1 PocketBase systems collection.
-  Verification: documented replay. Access path:
-  `GET /api/collections/systems/records` or a compatible systems route. Gap: no
-  live PocketBase access-rule check.
+  Verification: documented replay for the `items` envelope, plus synthetic
+  coverage for paginated `systems` and `data` compatibility envelopes. Access
+  path: `GET /api/collections/systems/records` or a compatible systems route.
+  Gap: no live PocketBase access-rule check. Upstream documentation does not
+  publish the `systems` or `data` pagination wrappers.
 - **ntfy**: fixture anchor v2.37.2 replay poll API. Verification: documented
   replay. Access path:
   `GET /{topic}/json?poll=1&since=<unix>`. Gap: no live topic ACL or
