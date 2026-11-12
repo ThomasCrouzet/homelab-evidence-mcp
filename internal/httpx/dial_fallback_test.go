@@ -78,7 +78,7 @@ func TestAllowedCIDRs_FallsBackToNextPermittedAddress(t *testing.T) {
 		}
 		return (&net.Dialer{}).DialContext(ctx, network, realAddress)
 	}
-	if err := client.RegisterDestination("src", campaignSourceURL(t, upstream.URL, "source.internal")); err != nil {
+	if err := client.RegisterDestination("src", campaignSourceURL(t, upstream.URL, "source.example.test")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -117,7 +117,7 @@ func TestAllowedCIDRs_NeverDialsOutsideThePolicy(t *testing.T) {
 		dialed.add(address)
 		return nil, errors.New("connection refused")
 	}
-	if err := client.RegisterDestination("src", "http://source.internal:8080"); err != nil {
+	if err := client.RegisterDestination("src", "http://source.example.test:8080"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -129,7 +129,7 @@ func TestAllowedCIDRs_NeverDialsOutsideThePolicy(t *testing.T) {
 		t.Fatalf("all failed: resp=%v body=%v err=%v", resp, body, err)
 	}
 	if strings.Contains(err.Error(), "192.0.2") || strings.Contains(err.Error(), "198.51.100") ||
-		strings.Contains(err.Error(), "source.internal") {
+		strings.Contains(err.Error(), "source.example.test") {
 		t.Fatalf("error leaked a destination address: %v", err)
 	}
 	got := dialed.snapshot()
@@ -158,7 +158,7 @@ func TestAllowedCIDRs_DeadlineStopsFallback(t *testing.T) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
-	if err := client.RegisterDestination("src", "http://source.internal:8080"); err != nil {
+	if err := client.RegisterDestination("src", "http://source.example.test:8080"); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
