@@ -1,6 +1,6 @@
 module github.com/ThomasCrouzet/homelab-evidence-mcp
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/google/jsonschema-go v0.4.3

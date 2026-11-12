@@ -123,7 +123,7 @@ partial results.
 
 ### Local demo
 
-**Requirements:** Git and Go 1.26.10 or later for the source demo and builds.
+**Requirements:** Git and Go 1.26.11 or later for the source demo and builds.
 The demo needs no credentials or live homelab.
 
 ```bash
@@ -372,7 +372,7 @@ make build
 
 `make lint-docs` needs Node.js 22 or later and `npx`.
 It downloads markdownlint-cli2 on first use.
-`make lint` needs golangci-lint 2.15.0 and defaults to Go toolchain 1.26.10.
+`make lint` needs golangci-lint 2.15.0 and defaults to Go toolchain 1.26.11.
 Tests use local fixtures without live homelab credentials.
 The executable E2E suite covers all seven tools and six adapters.
 Versioned upstream fixtures and their verification levels are in

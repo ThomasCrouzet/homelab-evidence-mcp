@@ -5,7 +5,7 @@ VERSION ?= $(shell tr -d '[:space:]' < internal/version/version.txt)
 BINARY ?= bin/homelab-evidence-mcp
 DIST ?= dist
 TARGETS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
-LINT_GOTOOLCHAIN ?= go1.26.10
+LINT_GOTOOLCHAIN ?= go1.26.11
 LDFLAGS := -s -w -X github.com/ThomasCrouzet/homelab-evidence-mcp/internal/version.Version=$(VERSION)
 
 build:
