@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -56,12 +57,12 @@ func TestSourceCacheLifetime_NoAgeKeepsCurrentBehavior(t *testing.T) {
 
 func TestGet_AgedResponseExpiresWithInjectedClock(t *testing.T) {
 	now := time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC)
-	var calls int
+	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls++
+		n := calls.Add(1)
 		w.Header().Set("Cache-Control", "max-age=60")
 		w.Header().Set("Age", "59")
-		_, _ = w.Write([]byte(strconv.Itoa(calls)))
+		_, _ = w.Write([]byte(strconv.Itoa(int(n))))
 	}))
 	defer ts.Close()
 
@@ -81,8 +82,8 @@ func TestGet_AgedResponseExpiresWithInjectedClock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls != 2 {
-		t.Fatalf("upstream calls=%d, want 2 after the upstream age expired", calls)
+	if calls.Load() != 2 {
+		t.Fatalf("upstream calls=%d, want 2 after the upstream age expired", calls.Load())
 	}
 	if string(second) != "2" {
 		t.Fatalf("aged response stayed cached: %q", second)
@@ -90,12 +91,12 @@ func TestGet_AgedResponseExpiresWithInjectedClock(t *testing.T) {
 }
 
 func TestGet_ExhaustedAgeIsNotStored(t *testing.T) {
-	var calls int
+	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls++
+		n := calls.Add(1)
 		w.Header().Set("Cache-Control", "max-age=60")
 		w.Header().Set("Age", "60")
-		_, _ = w.Write([]byte(strconv.Itoa(calls)))
+		_, _ = w.Write([]byte(strconv.Itoa(int(n))))
 	}))
 	defer ts.Close()
 
@@ -110,8 +111,8 @@ func TestGet_ExhaustedAgeIsNotStored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls != 2 {
-		t.Fatalf("upstream calls=%d, want 2 for a fully aged response", calls)
+	if calls.Load() != 2 {
+		t.Fatalf("upstream calls=%d, want 2 for a fully aged response", calls.Load())
 	}
 	if string(second) != "2" {
 		t.Fatalf("fully aged response was stored: %q", second)

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -27,12 +28,12 @@ func TestSourceCacheLifetime_MaxAgeWithoutBypassKeepsTTLCap(t *testing.T) {
 }
 
 func TestGet_PragmaNoCacheWithMaxAgeIsNotStored(t *testing.T) {
-	var calls int
+	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls++
+		n := calls.Add(1)
 		w.Header().Set("Cache-Control", "max-age=60")
 		w.Header().Set("Pragma", "no-cache")
-		_, _ = w.Write([]byte(strconv.Itoa(calls)))
+		_, _ = w.Write([]byte(strconv.Itoa(int(n))))
 	}))
 	defer ts.Close()
 
@@ -47,8 +48,8 @@ func TestGet_PragmaNoCacheWithMaxAgeIsNotStored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls != 2 {
-		t.Fatalf("upstream calls=%d, want 2", calls)
+	if calls.Load() != 2 {
+		t.Fatalf("upstream calls=%d, want 2", calls.Load())
 	}
 	if string(second) != "2" {
 		t.Fatalf("cache reused a Pragma no-cache body: %q", second)

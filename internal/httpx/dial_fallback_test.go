@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -145,9 +146,9 @@ func TestAllowedCIDRs_DeadlineStopsFallback(t *testing.T) {
 			{IP: net.ParseIP("192.0.2.11")},
 		}, nil
 	}
-	var calls int
+	var calls atomic.Int32
 	client.dialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
-		calls++
+		calls.Add(1)
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
@@ -165,8 +166,8 @@ func TestAllowedCIDRs_DeadlineStopsFallback(t *testing.T) {
 	if elapsed > 2*time.Second {
 		t.Fatalf("fallback ignored the deadline: %s", elapsed)
 	}
-	if calls != 1 {
-		t.Fatalf("dial calls=%d, want 1 before the deadline", calls)
+	if calls.Load() != 1 {
+		t.Fatalf("dial calls=%d, want 1 before the deadline", calls.Load())
 	}
 }
 
