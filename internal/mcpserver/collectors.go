@@ -21,24 +21,32 @@ import (
 )
 
 func (a *App) collectGatusStatus(ctx context.Context, serviceID string, ref *config.GatusRef) (evidence.SourceOutcome, []evidence.Item) {
+	var status gatus.StatusResult
 	outcome, items := a.withSourceTimeout(ctx, ref.Source, evidence.SourceGatus, func(ctx context.Context) ([]evidence.Item, error) {
 		cli := a.gatus[ref.Source]
 		if cli == nil {
 			return nil, fmt.Errorf("gatus client missing")
 		}
-		it, err := cli.Status(ctx, serviceID, ref.EndpointKey)
+		var err error
+		status, err = cli.Status(ctx, serviceID, ref.EndpointKey)
 		if err != nil {
 			return nil, err
 		}
-		return []evidence.Item{it}, nil
+		return []evidence.Item{status.Item}, nil
 	})
-	if len(items) == 1 && isMissingItem(items[0]) {
-		outcome.Reason = "unmatched_binding"
-		outcome.Complete = false
-	}
-	if len(items) == 1 && !isMissingItem(items[0]) {
-		if known, ok := items[0].Attributes["success_known"].(bool); ok && !known {
-			outcome.Discarded = 1
+	if outcome.Status == "ok" && len(items) == 1 {
+		switch {
+		case !status.Matched:
+			outcome.Reason = "unmatched_binding"
+			outcome.Complete = false
+		case status.Records == 0:
+			// The endpoint has no result records. Coverage is complete, but the
+			// endpoint state is unknown and must not look healthy.
+			outcome.Reason = "empty_result"
+		case status.Discarded > 0:
+			// The selected item stays valid evidence. Other records in the same
+			// snapshot cannot be interpreted, so the source coverage is partial.
+			outcome.Discarded = status.Discarded
 			outcome.Complete = false
 			outcome.Reason = "partial_invalid_records"
 		}
