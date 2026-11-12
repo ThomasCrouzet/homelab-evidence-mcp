@@ -154,6 +154,14 @@ The Healthchecks adapter has this behavior:
   `failed_crons` call. A sliding request budget of
   `limits.max_source_requests_per_minute` (default 100) bounds each source.
   An exhausted budget gives `request_budget_exceeded` with partial evidence.
+  A budget rejection before the checks-list request reports
+  `request_budget_exceeded` with `status: error` and makes no upstream request.
+  Wait for the sliding minute to pass before you retry. For `ambiguous_binding`,
+  bind one object with an exact identity instead of retrying.
+  The budget counts real upstream GET requests, not logical collection
+  attempts. A warm source cache hit and a coalesced wait send no request and
+  consume no slot. A cold, changed, or expired request still needs a slot
+  before any GET.
 - A `check_name` that matches more than one check, by name or by slug, gives an
   `ambiguous_binding` source error. A name does not identify one check across
   collisions. Use `check_unique_key` or `check_uuid` for a single check, or

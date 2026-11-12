@@ -38,12 +38,17 @@ type Client struct {
 
 	requestMu    sync.Mutex
 	requestTimes []time.Time
-	// RequestLimit bounds requests in a sliding minute. Zero uses 100.
+	// RequestLimit bounds real upstream requests in a sliding minute. Zero uses
+	// 100. A warm cache hit and a coalesced wait consume no slot.
 	RequestLimit int
 }
 
 // ErrRequestBudget reports that the per-source request budget is exhausted.
 var ErrRequestBudget = errors.New("healthchecks request budget exceeded")
+
+// The HTTP client decides when a real request is admitted. The adapter supplies
+// the sliding-window budget through that seam.
+var _ httpx.Admitter = (*Client)(nil)
 
 // check holds only the Healthchecks fields used.
 const (
@@ -231,13 +236,11 @@ func (c *Client) list(ctx context.Context, fallback time.Time) ([]check, time.Ti
 	if len(c.Headers) == 0 {
 		return nil, time.Time{}, fmt.Errorf("healthchecks token not configured")
 	}
-	if err := c.allowRequest(); err != nil {
-		return nil, time.Time{}, err
-	}
 	// Management API v3 gives access to the list at GET /api/v3/checks/.
 	path := "/api/v3/checks/"
-	// LockedClient.Get closes the body before it gives the response.
-	resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
+	// LockedClient.Get closes the body before it gives the response. The budget
+	// is admitted only for a real GET, so a warm cache hit spends no slot.
+	resp, body, err := c.HTTP.GetAdmitted(ctx, c.DestName, path, c.Headers, c) //nolint:bodyclose
 	if err != nil {
 		return nil, time.Time{}, err
 	}
@@ -387,17 +390,13 @@ func (c *Client) TransitionsFrom(ctx context.Context, snapshot Snapshot, service
 			for job := range jobs {
 				entry := &history[job.index]
 				path := "/api/v3/checks/" + url.PathEscape(job.key) + "/flips/?" + query.Encode()
-				if err := c.allowRequest(); err != nil {
-					entry.budget++
-					entry.requests++
-					entry.failures++
-					continue
-				}
-				// LockedClient.Get closes the body before it gives the response.
-				resp, body, err := c.HTTP.Get(ctx, c.DestName, path, c.Headers) //nolint:bodyclose
+				resp, body, err := c.HTTP.GetAdmitted(ctx, c.DestName, path, c.Headers, c) //nolint:bodyclose
 				entry.requests++
 				if err != nil {
 					entry.failures++
+					if errors.Is(err, ErrRequestBudget) {
+						entry.budget++
+					}
 					continue
 				}
 				if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
@@ -653,7 +652,15 @@ func safeSourceID(ch check) string {
 	return "check"
 }
 
-func (c *Client) allowRequest() error {
+// Admit implements httpx.Admitter. It spends one slot of the sliding-minute
+// budget for one real upstream request. The HTTP client calls it after a cache
+// miss and only for the coalesced leader, so a warm hit and a coalesced wait
+// spend nothing. A rejected request sends nothing, and a canceled caller does
+// not spend a slot.
+func (c *Client) Admit(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	limit := c.RequestLimit
 	if limit <= 0 {
 		limit = 100

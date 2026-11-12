@@ -71,6 +71,18 @@ On Unix, store the configuration file in a directory that is not in the
 repository. Set its mode to `0600`. On Windows, set a user-only ACL. The
 binary does not examine Windows ACLs.
 
+## Source request rate
+
+`limits.max_source_requests_per_minute` accepts `1` through `1000`.
+A missing value and `0` both resolve to the effective value `100`.
+A negative value or a value above `1000` fails `--validate` with
+`limits.max_source_requests_per_minute`.
+`evidence_capabilities` reports the effective value, not the configured
+sentinel.
+
+The Healthchecks adapter enforces this bound for one source instance in a
+sliding minute. The other source families do not apply this bound today.
+
 ## Verification sequence
 
 Use this verification sequence:

@@ -314,9 +314,30 @@ func (c *LockedClient) Stats() CacheStats {
 	}
 }
 
+// Admitter decides whether one real upstream request may start. GetAdmitted
+// calls Admit after a cache miss and only for the single coalesced leader,
+// immediately before the network request. A cache hit and a coalesced wait do
+// not call Admit, so they must not consume a quota slot.
+type Admitter interface {
+	// Admit returns nil to permit one upstream request. A non-nil error rejects
+	// the request, and the client sends nothing. The error is shared with the
+	// coalesced waiters. Admit must not contact the network.
+	Admit(ctx context.Context) error
+}
+
+// GetAdmitted is Get with an admission decision for each real upstream request.
+// A nil admitter makes it equal to Get.
+func (c *LockedClient) GetAdmitted(ctx context.Context, destName, path string, headers map[string]string, admitter Admitter) (*http.Response, []byte, error) {
+	return c.get(ctx, destName, path, headers, admitter)
+}
+
 // Get sends a GET request to a destination in the registry and a relative path.
 // The path must start with /. It can include a query string.
 func (c *LockedClient) Get(ctx context.Context, destName, path string, headers map[string]string) (*http.Response, []byte, error) {
+	return c.get(ctx, destName, path, headers, nil)
+}
+
+func (c *LockedClient) get(ctx context.Context, destName, path string, headers map[string]string, admitter Admitter) (*http.Response, []byte, error) {
 	if ctx == nil {
 		return nil, nil, errors.New("nil context")
 	}
@@ -417,7 +438,7 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 		c.flights[cacheKey] = current
 		c.flightMu.Unlock()
 
-		resp, body, fetchErr := c.fetch(ctx, destName, full, headers, cacheKey, info)
+		resp, body, fetchErr := c.fetch(ctx, destName, full, headers, cacheKey, info, admitter)
 		if fetchErr != nil {
 			current.err = fetchErr
 			current.leaderCanceled = ctx.Err() != nil
@@ -436,7 +457,7 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 	}
 }
 
-func (c *LockedClient) fetch(ctx context.Context, destName string, full *url.URL, headers map[string]string, cacheKey string, info *RequestInfo) (*http.Response, []byte, error) {
+func (c *LockedClient) fetch(ctx context.Context, destName string, full *url.URL, headers map[string]string, cacheKey string, info *RequestInfo, admitter Admitter) (*http.Response, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, full.String(), nil)
 	if err != nil {
 		return nil, nil, errors.New("request construction failed")
@@ -455,6 +476,17 @@ func (c *LockedClient) fetch(ctx context.Context, destName string, full *url.URL
 		req.Header.Set(canonical, v)
 	}
 
+	if admitter != nil {
+		// This boundary is after the cache and coalescing decisions and directly
+		// before the network request, so a warm hit and a coalesced wait do not
+		// spend a quota slot. A canceled caller sends nothing.
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		if err := admitter.Admit(ctx); err != nil {
+			return nil, nil, err
+		}
+	}
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, nil, sanitizeNetErr(err, destName)

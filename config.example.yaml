@@ -28,6 +28,8 @@ limits:
   # Only get_evidence sets freshness to cached. Use a low value for snapshots.
   source_cache_ttl: 15s
   max_tool_calls_per_minute: 120
+  # Healthchecks source request bound for a sliding minute. Use 1 through 1000.
+  # A value of 0 uses 100. evidence_capabilities reports the effective value.
   max_source_requests_per_minute: 100
   max_concurrent_tools: 8
   warn_empty_bindings: true
