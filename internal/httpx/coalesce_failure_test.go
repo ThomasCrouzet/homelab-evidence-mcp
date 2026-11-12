@@ -175,7 +175,9 @@ func TestGet_CoalescedWaitersShareSuccess(t *testing.T) {
 
 func TestGet_CanceledLeaderGetsOneReplacementRequest(t *testing.T) {
 	const waiters = 4
+	type waiterKey struct{}
 	var calls atomic.Int32
+	var replacementWaiter atomic.Int32
 	leaderStarted := make(chan struct{})
 	replacementStarted := make(chan struct{})
 	replacementRelease := make(chan struct{})
@@ -191,6 +193,9 @@ func TestGet_CanceledLeaderGetsOneReplacementRequest(t *testing.T) {
 			<-req.Context().Done()
 			return nil, req.Context().Err()
 		default:
+			if index, ok := req.Context().Value(waiterKey{}).(int); ok {
+				replacementWaiter.Store(int32(index + 1))
+			}
 			replacementOnce.Do(func() { close(replacementStarted) })
 			<-replacementRelease
 			return campaignOKResponse(`{"ok":true}`), nil
@@ -208,7 +213,8 @@ func TestGet_CanceledLeaderGetsOneReplacementRequest(t *testing.T) {
 	waitersCtx := make([]*campaignWaiterContext, waiters)
 	bodies := make(chan string, waiters)
 	for i := 0; i < waiters; i++ {
-		waitersCtx[i] = newCampaignWaiterContext(context.Background())
+		marker := context.WithValue(context.Background(), waiterKey{}, i)
+		waitersCtx[i] = newCampaignWaiterContext(marker)
 		go func(ctx context.Context) {
 			_, body, err := client.Get(ctx, "src", "/", nil) //nolint:bodyclose
 			if err != nil {
@@ -223,7 +229,14 @@ func TestGet_CanceledLeaderGetsOneReplacementRequest(t *testing.T) {
 	}
 	cancelLeader()
 	<-replacementStarted
-	for _, ctx := range waitersCtx {
+	replacementIndex := int(replacementWaiter.Load()) - 1
+	if replacementIndex < 0 || replacementIndex >= waiters {
+		t.Fatalf("replacement waiter=%d is not a tracked waiter", replacementIndex)
+	}
+	for i, ctx := range waitersCtx {
+		if i == replacementIndex {
+			continue
+		}
 		<-ctx.second
 	}
 	close(replacementRelease)
