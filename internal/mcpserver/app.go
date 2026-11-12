@@ -3,7 +3,6 @@ package mcpserver
 
 import (
 	"context"
-	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"os"
@@ -136,7 +135,9 @@ func NewApp(cfg *config.Config, log *slog.Logger, aud *audit.Logger) (*App, erro
 	for name, src := range cfg.Sources {
 		client := hc
 		if src.CAFile != "" || len(src.AllowedCIDRs) > 0 {
-			var sourceRoots *x509.CertPool
+			// The isolated client inherits the global extra trust. A source
+			// ca_file replaces that trust for this source only.
+			sourceRoots := roots
 			if src.CAFile != "" {
 				var rootsErr error
 				sourceRoots, rootsErr = config.LoadExtraCertPool(src.CAFile)
