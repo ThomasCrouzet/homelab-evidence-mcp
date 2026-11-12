@@ -58,8 +58,13 @@ Read-only operation has these controls:
 ### SSRF and network resolution
 
 An optional per-source `allowed_cidrs` policy checks every resolved address at
-dial time. A host with no allowed address fails before a connection. This
-mitigates DNS rebinding; it is opt-in and does not replace fixed destinations.
+dial time. A host with no allowed address fails before a connection. If several
+resolved addresses are allowed, the server tries them in order until one accepts
+the connection. It never dials a disallowed address, even when every allowed
+address fails. A canceled or expired request stops the fallback. TLS continues to
+verify the configured hostname, because the dial target is an address and the
+certificate name stays the destination host. This mitigates DNS rebinding; it is
+opt-in and does not replace fixed destinations.
 A request can use only a destination name from the startup configuration.
 The server uses only `http` and `https`. It does not accept redirects. MCP arguments
 cannot supply a URL.
@@ -114,13 +119,27 @@ The server and the operator use these controls for secrets:
 - An HMAC fingerprint also replaces paths and query strings in cache keys.
 - Identical in-flight GETs with the same destination, path, and authentication
   fingerprint share one upstream request. A canceled leader does not poison a
-  waiter. The shared response is independent of the longer-lived source TTL.
+  waiter; one waiter can start a replacement request. An ordinary upstream
+  failure is shared by the active waiters and does not cause one retry per
+  waiter. A canceled waiter returns its own cancellation. The shared response is
+  independent of the longer-lived source TTL.
 - The source response cache does not keep response headers. This includes
   `Set-Cookie` and authentication challenges. It keeps only the ntfy
   `X-Messages-Truncated` signal as a boolean for cache hits.
-- The source response cache honors upstream `Cache-Control: no-store` and
-  `no-cache` by not storing the body. A `max-age` value caps the configured
-  source TTL. A `Pragma: no-cache` response also bypasses storage.
+- The source response cache checks every storage bypass before freshness. A
+  `Cache-Control: no-store`, a `Cache-Control: no-cache`, or a
+  `Pragma: no-cache` response is not stored, even when it also has
+  `Cache-Control: max-age`. A `max-age` value caps the configured source TTL.
+- The source response cache subtracts a valid upstream `Age` value from
+  `max-age` before it stores the body. For example, `max-age=60` with `Age=59`
+  gives about one second. If `Age` is at least `max-age`, or if `Age` is
+  malformed, signed, repeated, empty, or too large for a duration, the server
+  does not store the response. A response without `Age` keeps the previous
+  behavior.
+- The cache cannot see time that a response spent in an upstream cache before
+  the last proxy sends it. It relies on `Age` to describe all consumed freshness.
+  A proxy that omits or understates `Age` can extend stale snapshot evidence. Use
+  a short `source_cache_ttl` when snapshot freshness is critical.
 - Make sure that only the owner can access the YAML configuration.
 - On Unix, the server creates the audit file in mode `0600`.
 - On Windows, use a user-only ACL for the audit file path. Token files are

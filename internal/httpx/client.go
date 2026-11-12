@@ -57,13 +57,14 @@ type CacheStats struct {
 }
 
 type flight struct {
-	done        chan struct{}
-	status      int
-	header      http.Header
-	body        []byte
-	collectedAt time.Time
-	truncated   bool
-	err         error
+	done           chan struct{}
+	status         int
+	header         http.Header
+	body           []byte
+	collectedAt    time.Time
+	truncated      bool
+	err            error
+	leaderCanceled bool
 }
 
 type cacheEntry struct {
@@ -92,6 +93,10 @@ type LockedClient struct {
 	misses       atomic.Uint64
 	coalesced    atomic.Uint64
 	now          func() time.Time
+	// lookupIPAddr and dialContext are seams for deterministic address-policy
+	// tests. The constructor sets the production resolver and dialer.
+	lookupIPAddr func(ctx context.Context, host string) ([]net.IPAddr, error)
+	dialContext  func(ctx context.Context, network, address string) (net.Conn, error)
 }
 
 func (c *LockedClient) clock() time.Time {
@@ -133,10 +138,11 @@ func NewLockedClient(opts Options) *LockedClient {
 		Timeout:   5 * time.Second,
 		KeepAlive: 30 * time.Second,
 	}
-	dialContext := dialer.DialContext
+	var lc *LockedClient
+	transportDial := dialer.DialContext
 	if len(opts.AllowedCIDRs) > 0 {
 		allowed := opts.AllowedCIDRs
-		dialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		transportDial = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(addr)
 			if err != nil {
 				return nil, errors.New("network address rejected")
@@ -145,23 +151,37 @@ func NewLockedClient(opts Options) *LockedClient {
 			if parsed := net.ParseIP(host); parsed != nil {
 				addresses = []net.IPAddr{{IP: parsed}}
 			} else {
-				addresses, err = net.DefaultResolver.LookupIPAddr(ctx, host)
+				addresses, err = lc.lookupIPAddr(ctx, host)
 				if err != nil {
 					return nil, errors.New("destination resolution failed")
 				}
 			}
+			attempted := false
 			for _, candidate := range addresses {
-				if !addressAllowed(candidate.IP, allowed) {
+				if candidate.IP == nil || !addressAllowed(candidate.IP, allowed) {
 					continue
 				}
-				return dialer.DialContext(ctx, network, net.JoinHostPort(candidate.IP.String(), port))
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				attempted = true
+				conn, dialErr := lc.dialContext(ctx, network, net.JoinHostPort(candidate.IP.String(), port))
+				if dialErr == nil {
+					return conn, nil
+				}
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+			}
+			if attempted {
+				return nil, errors.New("all permitted destination addresses failed")
 			}
 			return nil, errors.New("destination resolved outside the allowed address policy")
 		}
 	}
 	transport := &http.Transport{
 		Proxy:               nil, // Do not use HTTP_PROXY for adapter traffic.
-		DialContext:         dialContext,
+		DialContext:         transportDial,
 		TLSHandshakeTimeout: 5 * time.Second,
 		MaxIdleConns:        16,
 		IdleConnTimeout:     60 * time.Second,
@@ -173,7 +193,7 @@ func NewLockedClient(opts Options) *LockedClient {
 			MinVersion: tls.VersionTLS12,
 		}
 	}
-	lc := &LockedClient{
+	lc = &LockedClient{
 		destinations: make(map[string]*destination),
 		maxBody:      opts.MaxBody,
 		userAgent:    opts.UserAgent,
@@ -181,6 +201,8 @@ func NewLockedClient(opts Options) *LockedClient {
 		now:          opts.Now,
 		cache:        make(map[string]cacheEntry),
 		flights:      make(map[string]*flight),
+		lookupIPAddr: net.DefaultResolver.LookupIPAddr,
+		dialContext:  dialer.DialContext,
 	}
 	if _, err := rand.Read(lc.cacheKey[:]); err != nil {
 		// If there is no random key, deactivate the cache. This prevents a weak authentication fingerprint.
@@ -276,7 +298,7 @@ func invalidPath(path string) bool {
 // Stats gives cache counters.
 func (c *LockedClient) Stats() CacheStats {
 	c.mu.Lock()
-	now := time.Now()
+	now := c.clock()
 	c.expireCacheLocked(now)
 	size := len(c.cache)
 	bytes := c.cacheBytes
@@ -371,12 +393,17 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 			c.flightMu.Unlock()
 			select {
 			case <-existing.done:
+				if err := ctx.Err(); err != nil {
+					return nil, nil, err
+				}
 				if existing.err != nil {
-					// A canceled or failed leader must not poison other callers.
-					if err := ctx.Err(); err != nil {
-						return nil, nil, err
+					// A canceled leader must not poison a healthy waiter, so one
+					// waiter can start a replacement request. An ordinary upstream
+					// failure is shared and does not cause one retry per waiter.
+					if existing.leaderCanceled {
+						continue
 					}
-					continue
+					return nil, nil, existing.err
 				}
 				c.coalesced.Add(1)
 				info.recordCoalesced(existing.collectedAt)
@@ -393,6 +420,7 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 		resp, body, fetchErr := c.fetch(ctx, destName, full, headers, cacheKey, info)
 		if fetchErr != nil {
 			current.err = fetchErr
+			current.leaderCanceled = ctx.Err() != nil
 		} else {
 			current.status = resp.StatusCode
 			current.header = resp.Header.Clone()
@@ -484,8 +512,10 @@ func addressAllowed(ip net.IP, allowed []*net.IPNet) bool {
 	return false
 }
 
-// sourceCacheLifetime applies the origin cache directives. no-store and
-// no-cache bypass storage. A max-age value caps the operator TTL.
+// sourceCacheLifetime applies the origin cache directives. no-store, no-cache,
+// and Pragma no-cache bypass storage before a max-age value can apply. A
+// max-age value caps the operator TTL. An Age value reduces the remaining
+// max-age freshness. An unusable Age value bypasses storage.
 func sourceCacheLifetime(header http.Header, ttl time.Duration) (time.Duration, bool) {
 	directives := parseCacheControl(header)
 	if _, ok := directives["no-store"]; ok {
@@ -494,11 +524,25 @@ func sourceCacheLifetime(header http.Header, ttl time.Duration) (time.Duration, 
 	if _, ok := directives["no-cache"]; ok {
 		return 0, false
 	}
+	if strings.Contains(strings.ToLower(strings.Join(header.Values("Pragma"), ",")), "no-cache") {
+		return 0, false
+	}
+	ageSeconds, agePresent, ageValid := parseUpstreamAge(header)
+	if agePresent && !ageValid {
+		return 0, false
+	}
 	// This is a private in-process cache, so a private response is safe here.
 	if value, ok := directives["max-age"]; ok {
-		seconds, err := strconv.Atoi(value)
-		if err != nil || seconds < 0 {
+		rawSeconds, err := strconv.ParseUint(value, 10, 64)
+		if err != nil || rawSeconds > uint64(maxDurationSeconds) {
 			return 0, false
+		}
+		seconds := int64(rawSeconds)
+		if agePresent {
+			if ageSeconds >= seconds {
+				return 0, false
+			}
+			seconds -= ageSeconds
 		}
 		maxAge := time.Duration(seconds) * time.Second
 		if maxAge > ttl {
@@ -509,10 +553,33 @@ func sourceCacheLifetime(header http.Header, ttl time.Duration) (time.Duration, 
 		}
 		return maxAge, true
 	}
-	if strings.Contains(strings.ToLower(strings.Join(header.Values("Pragma"), ",")), "no-cache") {
-		return 0, false
-	}
 	return ttl, true
+}
+
+// maxDurationSeconds bounds an upstream freshness value so that a conversion to
+// time.Duration cannot overflow.
+const maxDurationSeconds int64 = int64(1<<63-1) / int64(time.Second)
+
+// parseUpstreamAge reads one delta-seconds Age value. An absent Age is valid and
+// not present. A malformed, signed, repeated, or oversized value is invalid. It
+// does not reveal the value in an error.
+func parseUpstreamAge(header http.Header) (seconds int64, present bool, valid bool) {
+	values := header.Values("Age")
+	if len(values) == 0 {
+		return 0, false, true
+	}
+	if len(values) != 1 {
+		return 0, true, false
+	}
+	raw := strings.TrimSpace(values[0])
+	if raw == "" {
+		return 0, true, false
+	}
+	parsed, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || parsed > uint64(maxDurationSeconds) {
+		return 0, true, false
+	}
+	return int64(parsed), true, true
 }
 
 func parseCacheControl(header http.Header) map[string]string {
@@ -576,7 +643,7 @@ func (c *LockedClient) cacheGet(key string) ([]byte, int, time.Time, bool, bool)
 	if !ok {
 		return nil, 0, time.Time{}, false, false
 	}
-	if time.Now().After(e.expiresAt) {
+	if now := c.clock(); now.After(e.expiresAt) {
 		c.removeCacheLocked(key)
 		return nil, 0, time.Time{}, false, false
 	}
@@ -596,7 +663,7 @@ func (c *LockedClient) cachePutWithTTL(key string, status int, body []byte, coll
 	if bodyBytes > maxCacheBytes {
 		return
 	}
-	now := time.Now()
+	now := c.clock()
 	c.expireCacheLocked(now)
 	if _, ok := c.cache[key]; ok {
 		c.removeCacheLocked(key)
@@ -692,6 +759,7 @@ func CombinedStats(clients ...*LockedClient) CacheStats {
 		stats := client.Stats()
 		out.Hits += stats.Hits
 		out.Misses += stats.Misses
+		out.Coalesced += stats.Coalesced
 		out.Size += stats.Size
 		out.Bytes += stats.Bytes
 		if out.TTL == "" {
