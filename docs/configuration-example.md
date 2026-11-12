@@ -94,6 +94,22 @@ sentinel.
 The Healthchecks adapter enforces this bound for one source instance in a
 sliding minute. The other source families do not apply this bound today.
 
+## Source response cache budget
+
+`limits.source_cache_max_bytes` sets one shared cached-body budget for every
+source response cache in one server process. The default is 32 MiB. A missing
+value and `0` use the default. Explicit values range from 64 KiB through
+256 MiB. A value below 64 KiB or above 256 MiB fails `--validate` with
+`limits.source_cache_max_bytes`.
+
+The budget counts cached response body bytes. It does not count map overhead,
+active requests, connection buffers, the evidence cache, or exact process
+memory. One server process creates one App, so the budget is process-wide
+there. Separate Apps do not share it.
+
+`limits.source_cache_ttl: 0` still disables source response storage. The byte
+budget is inactive then, but `evidence_capabilities` still reports it.
+
 ## Verification sequence
 
 Use this verification sequence:

@@ -39,6 +39,13 @@
           "type": "string",
           "description": "The source response cache keeps the same GET responses for a short time. The default is 15s. A value of 0 deactivates this cache. The source or collection time supplies the evidence timestamp."
         },
+        "source_cache_max_bytes": {
+          "anyOf": [
+            { "type": "integer", "const": 0 },
+            { "type": "integer", "minimum": 65536, "maximum": 268435456 }
+          ],
+          "description": "Set the shared source response body byte budget for one server process. Missing or 0 uses 32 MiB. Explicit values range from 64 KiB to 256 MiB. The value counts cached response body bytes, not map overhead, active requests, or exact process memory."
+        },
         "max_tool_calls_per_minute": { "type": "integer", "minimum": 0, "maximum": 1000, "description": "A value of 0 uses the default of 120." },
         "max_source_requests_per_minute": {
           "type": "integer",

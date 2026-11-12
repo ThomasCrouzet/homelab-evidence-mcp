@@ -27,6 +27,9 @@ limits:
   # On a cache hit, observed_at keeps the initial collection time.
   # Only get_evidence sets freshness to cached. Use a low value for snapshots.
   source_cache_ttl: 15s
+  # Shared source response body budget for one server process. Missing or 0 uses 32 MiB.
+  # Explicit values range from 64 KiB to 256 MiB. This counts cached body bytes, not process memory.
+  source_cache_max_bytes: 33554432
   max_tool_calls_per_minute: 120
   # Healthchecks source request bound for a sliding minute. Use 1 through 1000.
   # A value of 0 uses 100. evidence_capabilities reports the effective value.

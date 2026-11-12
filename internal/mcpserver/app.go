@@ -55,10 +55,12 @@ type App struct {
 	HTTP     *httpx.LockedClient
 	// SourceClients holds clients with per-source CA trust or address policy.
 	SourceClients []*httpx.LockedClient
-	Redact        *redaction.Engine
-	Cache         *evidence.Cache
-	Audit         *audit.Logger
-	Log           *slog.Logger
+	// SourceCacheBudget is shared by every source client in this App.
+	SourceCacheBudget *httpx.CacheBudget
+	Redact            *redaction.Engine
+	Cache             *evidence.Cache
+	Audit             *audit.Logger
+	Log               *slog.Logger
 
 	gatus  map[string]*gatus.Client
 	dock   map[string]*docker.Client
@@ -109,29 +111,32 @@ func NewApp(cfg *config.Config, log *slog.Logger, aud *audit.Logger) (*App, erro
 	if err != nil {
 		return nil, err
 	}
+	sourceBudget := httpx.NewCacheBudget(cfg.Limits.SourceCacheMaxBytes)
 	hc := httpx.NewLockedClient(httpx.Options{
-		Timeout:   cfg.Limits.TotalTimeout,
-		MaxBody:   cfg.Limits.MaxBodyBytes,
-		UserAgent: version.UserAgent(),
-		CacheTTL:  cfg.Limits.SourceCacheTTL,
-		RootCAs:   roots,
+		Timeout:     cfg.Limits.TotalTimeout,
+		MaxBody:     cfg.Limits.MaxBodyBytes,
+		UserAgent:   version.UserAgent(),
+		CacheTTL:    cfg.Limits.SourceCacheTTL,
+		CacheBudget: sourceBudget,
+		RootCAs:     roots,
 	})
 	app := &App{
-		Cfg:       cfg,
-		Registry:  registry.New(cfg),
-		HTTP:      hc,
-		Redact:    eng,
-		Cache:     evidence.NewCache(cfg.Limits.EvidenceCacheTTL, cfg.Limits.EvidenceCacheMax, cfg.Limits.EvidenceCacheMaxBytes),
-		Audit:     aud,
-		Log:       log,
-		gatus:     map[string]*gatus.Client{},
-		dock:      map[string]*docker.Client{},
-		loki:      map[string]*loki.Client{},
-		hc:        map[string]*healthchecks.Client{},
-		beszel:    map[string]*beszel.Client{},
-		ntfy:      map[string]*ntfy.Client{},
-		budget:    newToolBudget(cfg.Limits.MaxToolCallsPerMinute, cfg.Limits.MaxConcurrentTools),
-		sourceSem: make(chan struct{}, maxConcurrentSourceRequests),
+		Cfg:               cfg,
+		Registry:          registry.New(cfg),
+		HTTP:              hc,
+		SourceCacheBudget: sourceBudget,
+		Redact:            eng,
+		Cache:             evidence.NewCache(cfg.Limits.EvidenceCacheTTL, cfg.Limits.EvidenceCacheMax, cfg.Limits.EvidenceCacheMaxBytes),
+		Audit:             aud,
+		Log:               log,
+		gatus:             map[string]*gatus.Client{},
+		dock:              map[string]*docker.Client{},
+		loki:              map[string]*loki.Client{},
+		hc:                map[string]*healthchecks.Client{},
+		beszel:            map[string]*beszel.Client{},
+		ntfy:              map[string]*ntfy.Client{},
+		budget:            newToolBudget(cfg.Limits.MaxToolCallsPerMinute, cfg.Limits.MaxConcurrentTools),
+		sourceSem:         make(chan struct{}, maxConcurrentSourceRequests),
 	}
 	for name, src := range cfg.Sources {
 		client := hc
@@ -151,6 +156,7 @@ func NewApp(cfg *config.Config, log *slog.Logger, aud *audit.Logger) (*App, erro
 				MaxBody:      cfg.Limits.MaxBodyBytes,
 				UserAgent:    version.UserAgent(),
 				CacheTTL:     cfg.Limits.SourceCacheTTL,
+				CacheBudget:  sourceBudget,
 				RootCAs:      sourceRoots,
 				AllowedCIDRs: src.AllowedCIDRs,
 			})
