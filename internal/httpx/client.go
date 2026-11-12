@@ -57,13 +57,14 @@ type CacheStats struct {
 }
 
 type flight struct {
-	done        chan struct{}
-	status      int
-	header      http.Header
-	body        []byte
-	collectedAt time.Time
-	truncated   bool
-	err         error
+	done           chan struct{}
+	status         int
+	header         http.Header
+	body           []byte
+	collectedAt    time.Time
+	truncated      bool
+	err            error
+	leaderCanceled bool
 }
 
 type cacheEntry struct {
@@ -392,12 +393,17 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 			c.flightMu.Unlock()
 			select {
 			case <-existing.done:
+				if err := ctx.Err(); err != nil {
+					return nil, nil, err
+				}
 				if existing.err != nil {
-					// A canceled or failed leader must not poison other callers.
-					if err := ctx.Err(); err != nil {
-						return nil, nil, err
+					// A canceled leader must not poison a healthy waiter, so one
+					// waiter can start a replacement request. An ordinary upstream
+					// failure is shared and does not cause one retry per waiter.
+					if existing.leaderCanceled {
+						continue
 					}
-					continue
+					return nil, nil, existing.err
 				}
 				c.coalesced.Add(1)
 				info.recordCoalesced(existing.collectedAt)
@@ -414,6 +420,7 @@ func (c *LockedClient) Get(ctx context.Context, destName, path string, headers m
 		resp, body, fetchErr := c.fetch(ctx, destName, full, headers, cacheKey, info)
 		if fetchErr != nil {
 			current.err = fetchErr
+			current.leaderCanceled = ctx.Err() != nil
 		} else {
 			current.status = resp.StatusCode
 			current.header = resp.Header.Clone()
