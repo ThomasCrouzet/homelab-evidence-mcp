@@ -79,8 +79,11 @@ func RebuildDerived(bundle *evidence.Bundle, maxItems int) {
 			"selection omitted %d retrieved item(s)", bundle.OmittedItems))
 	}
 	if bundle.ByteBudgetTruncated {
+		// The warning must not quote byte_size. That field is measured from the
+		// payload that contains this warning, so a quoted value would be stale
+		// and would contradict the final fixed-point accounting.
 		warnings = append(warnings, fmt.Sprintf(
-			"byte budget omitted retrieved evidence; byte_size=%d budget=%d", bundle.ByteSize, bundle.ByteBudget))
+			"byte budget omitted retrieved evidence; budget=%d", bundle.ByteBudget))
 	}
 
 	// Flag critical or error evidence that remains in the final result.

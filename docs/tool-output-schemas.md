@@ -19,8 +19,14 @@ carries the same facts in pretty-printed JSON.
   `canceled`.
 - Source `reason` is a coverage code. See the
   [evidence model](evidence-model.md#outcome-and-coverage).
-- `complete` is required on every evidence result. `truncated` combines
-  `upstream_truncated` and `local_truncated`.
+- `complete` is required on every evidence result. It keeps the same value as
+  `source_complete` in every evidence tool. `delivery_complete` reports local
+  output loss instead. `truncated` combines `upstream_truncated` and
+  `local_truncated`.
+- `byte_size` and `byte_budget` are required on every result that has a
+  response budget. `byte_size` measures the final text and structured payloads,
+  so it includes the digits of `byte_size` itself, plus a documented 512-byte
+  MCP envelope allowance. A result does not exceed its budget.
 - `service_id` is optional and identifies a per-binding source outcome.
 - `discarded` counts unusable source records. `cache_state` is `hit`, `miss`,
   `mixed`, or `disabled`; `cache_age_seconds` is optional.

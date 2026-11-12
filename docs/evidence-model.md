@@ -106,9 +106,12 @@ A grouped response contains:
   complete coverage. A service with no bound source reports
   `reason: no_bound_sources` and `complete: false`; it does not claim a
   successful investigation. `complete` keeps the same value for older clients.
+  Every evidence tool keeps `complete` aligned with `source_complete`,
+  including `search_logs`.
 - `delivery_complete` reports whether the response includes every retrieved
   item. It is false when item selection or the response byte budget omitted a
-  retrieved item.
+  retrieved item. A local delivery trim does not change `source_complete`,
+  because the source coverage stayed complete.
 - `selection_truncated`, `byte_budget_truncated`, and `omitted_items` separate
   an item limit from the response byte limit. `truncated` is true when either
   applies, or when any source reports truncation.
@@ -116,9 +119,11 @@ A grouped response contains:
   and source coverage, not omitted item details.
 - A factual summary without causal claims. Item counts describe returned
   evidence, not total upstream records.
-- `byte_size` and `byte_budget` for the serialized result in compact mode. A
-  compact result does not exceed its budget. When the source metadata alone
-  is too large, the tool returns an explicit error.
+- `byte_size` and `byte_budget` for the serialized result. Every tool with a
+  byte budget reports them. `byte_size` measures the final text and structured
+  payloads, so it includes its own decimal digits, plus the documented 512-byte
+  MCP envelope allowance. A result does not exceed its budget. When the source
+  metadata alone is too large, the tool returns an explicit error.
 
 A canceled request is not a successful collection, even when a warm source
 cache could answer it. The server checks the caller context before a cache read

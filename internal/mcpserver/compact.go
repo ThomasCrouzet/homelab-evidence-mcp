@@ -58,29 +58,36 @@ func compactIncident(bundle evidence.Bundle, maxItems, byteBudget int) (evidence
 	if bundle.OmittedSources == nil {
 		bundle.OmittedSources = []string{}
 	}
-	// Account for item bytes once, then rebuild the envelope from the retained
-	// set. The exact check below is the final authority.
-	trimmed, err := trimToBudget(&bundle, byteBudget)
-	if err != nil {
+	// Enforce the exact serialized envelope. Every drop refreshes the derived
+	// summary and warnings, because both are part of the payload that the
+	// budget limits.
+	RebuildCompactDerived(&bundle, maxItems)
+	if err := finalizeIncidentResponse(&bundle, maxItems); err != nil {
 		return bundle, err
 	}
-	bundle.ByteBudgetTruncated = trimmed
-	bundle.Truncated = bundle.Truncated || trimmed
-	RebuildCompactDerived(&bundle, maxItems)
-	// The rebuilt summary and warnings are part of the payload. Trim further
-	// until the exact serialized envelope fits.
-	for bundle.ByteSize > byteBudget && len(bundle.Items) > 0 {
+	return bundle, nil
+}
+
+// finalizeIncidentResponse sets the delivery flag, drops retained items until
+// the finalized envelope fits the budget, and fails closed when the source
+// metadata alone cannot fit. Every field that changes with an omission is
+// measured again before the next decision.
+func finalizeIncidentResponse(bundle *evidence.Bundle, maxItems int) error {
+	bundle.DeliveryComplete = !bundle.SelectionTruncated && !bundle.ByteBudgetTruncated
+	RebuildCompactDerived(bundle, maxItems)
+	for bundle.ByteSize > bundle.ByteBudget && len(bundle.Items) > 0 {
 		drop, _ := dropCandidate(bundle.Items)
 		bundle.Items = append(bundle.Items[:drop], bundle.Items[drop+1:]...)
 		bundle.OmittedItems++
 		bundle.ByteBudgetTruncated = true
 		bundle.Truncated = true
-		RebuildCompactDerived(&bundle, maxItems)
+		bundle.DeliveryComplete = false
+		RebuildCompactDerived(bundle, maxItems)
 	}
-	if bundle.ByteSize > byteBudget {
-		return bundle, fmt.Errorf("response budget %d bytes cannot hold the source metadata (%d bytes)", byteBudget, bundle.ByteSize)
+	if bundle.ByteSize > bundle.ByteBudget {
+		return fmt.Errorf("response budget %d bytes cannot hold the source metadata (%d bytes)", bundle.ByteBudget, bundle.ByteSize)
 	}
-	return bundle, nil
+	return nil
 }
 
 // RebuildCompactDerived refreshes the item-derived fields after selection.
@@ -93,7 +100,7 @@ func RebuildCompactDerived(bundle *evidence.Bundle, maxItems int) {
 	if bundle.OmittedSources == nil {
 		bundle.OmittedSources = []string{}
 	}
-	bundle.ByteSize = incidentWireSize(*bundle)
+	finalizeIncidentByteSize(bundle)
 }
 
 func trimToNewest(selected map[string]evidence.Item, max int) map[string]evidence.Item {
@@ -117,38 +124,6 @@ func selectedItems(selected map[string]evidence.Item) []evidence.Item {
 	return items
 }
 
-// trimToBudget removes selected items until the estimated result fits. It
-// protects the last selected item of each source until no other choice
-// remains. The caller rechecks the exact wire size after the summary rebuild.
-func trimToBudget(bundle *evidence.Bundle, budget int) (bool, error) {
-	if incidentWireSize(*bundle) <= budget {
-		return false, nil
-	}
-	costs := make(map[string]int, len(bundle.Items))
-	for _, item := range bundle.Items {
-		costs[item.ID] = itemWireSize(item)
-	}
-	estimated := incidentWireSize(*bundle)
-	trimmed := false
-	for len(bundle.Items) > 0 && estimated > budget {
-		drop, dropped := dropCandidate(bundle.Items)
-		bundle.Items = append(bundle.Items[:drop], bundle.Items[drop+1:]...)
-		bundle.OmittedItems++
-		estimated -= costs[dropped.ID]
-		trimmed = true
-	}
-	// The envelope and warning text change with each omission. Make the final
-	// decision on the exact serialized size.
-	for len(bundle.Items) > 0 && incidentWireSize(*bundle) > budget {
-		drop, _ := dropCandidate(bundle.Items)
-		bundle.Items = append(bundle.Items[:drop], bundle.Items[drop+1:]...)
-		bundle.OmittedItems++
-		trimmed = true
-	}
-	bundle.ByteSize = incidentWireSize(*bundle)
-	return trimmed, nil
-}
-
 func dropCandidate(items []evidence.Item) (int, evidence.Item) {
 	counts := map[evidence.SourceKind]int{}
 	for _, item := range items {
@@ -160,18 +135,6 @@ func dropCandidate(items []evidence.Item) (int, evidence.Item) {
 		}
 	}
 	return 0, items[0]
-}
-
-func itemWireSize(item evidence.Item) int {
-	text, err := json.MarshalIndent(item, "", "  ")
-	if err != nil {
-		return 0
-	}
-	structured, err := json.Marshal(item)
-	if err != nil {
-		return len(text)
-	}
-	return len(text) + len(structured) + 2
 }
 
 func finalizeOmittedSources(bundle *evidence.Bundle) {
@@ -204,20 +167,59 @@ func sourceHadItems(bundle *evidence.Bundle, kind evidence.SourceKind) bool {
 	return false
 }
 
+// incidentWireSize gives the settled size of a bundle copy.
 func incidentWireSize(bundle evidence.Bundle) int {
-	out := IncidentContextOut(bundle)
-	text, err := json.MarshalIndent(out, "", "  ")
-	if err != nil {
-		return 0
-	}
-	structured, err := json.Marshal(out)
-	if err != nil {
-		return len(text) + wireOverhead
-	}
-	return len(text) + len(structured) + wireOverhead
+	return finalizeIncidentByteSize(&bundle)
 }
 
-// wireSize estimates the MCP text and structured payload size.
+// finalizeIncidentByteSize writes the byte_size fixed point into the bundle and
+// returns it.
+func finalizeIncidentByteSize(bundle *evidence.Bundle) int {
+	out := IncidentContextOut(*bundle)
+	size := settledWireSize(func() int { return wireSize(out) }, func(size int) { out.ByteSize = size })
+	bundle.ByteSize = size
+	return size
+}
+
+// finalizeServiceStatusSize writes the byte_size fixed point into the response.
+func finalizeServiceStatusSize(out *ServiceStatusOut) int {
+	return settledWireSize(func() int { return wireSize(*out) }, func(size int) { out.ByteSize = size })
+}
+
+// finalizeSearchLogsSize writes the byte_size fixed point into the response.
+func finalizeSearchLogsSize(out *SearchLogsOut) int {
+	return settledWireSize(func() int { return wireSize(*out) }, func(size int) { out.ByteSize = size })
+}
+
+// finalizeFailedCronsSize writes the byte_size fixed point into the response.
+func finalizeFailedCronsSize(out *FailedCronsOut) int {
+	return settledWireSize(func() int { return wireSize(*out) }, func(size int) { out.ByteSize = size })
+}
+
+// finalizeGetEvidenceSize writes the byte_size fixed point into the response.
+func finalizeGetEvidenceSize(out *GetEvidenceOut) int {
+	return settledWireSize(func() int { return wireSize(*out) }, func(size int) { out.ByteSize = size })
+}
+
+// settledWireSize writes candidate sizes into a response's byte_size field
+// until the measured payload equals the written value. byte_size describes the
+// final response, so it includes the decimal digits of byte_size itself. The
+// measured size is monotonic in the field width, so the loop reaches a fixed
+// point in a few steps.
+func settledWireSize(measure func() int, assign func(int)) int {
+	size := measure()
+	for {
+		assign(size)
+		measured := measure()
+		if measured == size {
+			return size
+		}
+		size = measured
+	}
+}
+
+// wireSize measures one serialization of v plus the fixed MCP envelope
+// allowance. It uses the current value of the byte_size field in v.
 func wireSize(v any) int {
 	text, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {

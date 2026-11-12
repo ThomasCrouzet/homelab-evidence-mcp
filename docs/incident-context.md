@@ -42,6 +42,16 @@ budget omits them. `omitted_items` and `omitted_sources` report the loss.
 - The compact structured content.
 - A fixed envelope allowance for MCP metadata.
 
+The documented allowance is 512 bytes. `byte_size` describes the final payloads,
+so it includes the decimal digits of `byte_size` itself. The server computes a
+fixed point: the emitted value equals the measured size of the emitted payloads
+plus the allowance. A budget decision uses that same final value, so a digit
+growth cannot hide bytes.
+
+The same rule applies to `service_status`, `search_logs`, `failed_crons`, and
+`get_evidence`. A tool reports an explicit error when the source metadata alone
+cannot fit the budget.
+
 This is a serialized payload budget, not exact process memory. The minimum
 accepted value is 8192 bytes. The default is 262144 bytes. The maximum is
 4194304 bytes. A smaller value is rejected at configuration load because it

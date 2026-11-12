@@ -104,6 +104,9 @@ exhausted budgets produce tool errors with stable reason codes.
 `service_status` marks Loki and ntfy as `skipped`.
 It collects Gatus, Docker, Healthchecks, and Beszel snapshots.
 `search_logs` accepts optional `text`, `regex`, and `limit` arguments.
+Every evidence result keeps `complete` equal to `source_complete`.
+`delivery_complete` and the omission fields describe local output loss only.
+A byte-budget trim does not change source coverage.
 `failed_crons` selects current `down`, `grace`, and `paused` states.
 Without `service_id`, it reads only Healthchecks bindings declared in the
 service registry. It does not enumerate unbound checks in a source. When a
