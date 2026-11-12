@@ -276,7 +276,7 @@ func invalidPath(path string) bool {
 // Stats gives cache counters.
 func (c *LockedClient) Stats() CacheStats {
 	c.mu.Lock()
-	now := time.Now()
+	now := c.clock()
 	c.expireCacheLocked(now)
 	size := len(c.cache)
 	bytes := c.cacheBytes
@@ -486,7 +486,8 @@ func addressAllowed(ip net.IP, allowed []*net.IPNet) bool {
 
 // sourceCacheLifetime applies the origin cache directives. no-store, no-cache,
 // and Pragma no-cache bypass storage before a max-age value can apply. A
-// max-age value caps the operator TTL.
+// max-age value caps the operator TTL. An Age value reduces the remaining
+// max-age freshness. An unusable Age value bypasses storage.
 func sourceCacheLifetime(header http.Header, ttl time.Duration) (time.Duration, bool) {
 	directives := parseCacheControl(header)
 	if _, ok := directives["no-store"]; ok {
@@ -498,11 +499,22 @@ func sourceCacheLifetime(header http.Header, ttl time.Duration) (time.Duration, 
 	if strings.Contains(strings.ToLower(strings.Join(header.Values("Pragma"), ",")), "no-cache") {
 		return 0, false
 	}
+	ageSeconds, agePresent, ageValid := parseUpstreamAge(header)
+	if agePresent && !ageValid {
+		return 0, false
+	}
 	// This is a private in-process cache, so a private response is safe here.
 	if value, ok := directives["max-age"]; ok {
-		seconds, err := strconv.Atoi(value)
-		if err != nil || seconds < 0 {
+		rawSeconds, err := strconv.ParseUint(value, 10, 64)
+		if err != nil || rawSeconds > uint64(maxDurationSeconds) {
 			return 0, false
+		}
+		seconds := int64(rawSeconds)
+		if agePresent {
+			if ageSeconds >= seconds {
+				return 0, false
+			}
+			seconds -= ageSeconds
 		}
 		maxAge := time.Duration(seconds) * time.Second
 		if maxAge > ttl {
@@ -514,6 +526,32 @@ func sourceCacheLifetime(header http.Header, ttl time.Duration) (time.Duration, 
 		return maxAge, true
 	}
 	return ttl, true
+}
+
+// maxDurationSeconds bounds an upstream freshness value so that a conversion to
+// time.Duration cannot overflow.
+const maxDurationSeconds int64 = int64(1<<63-1) / int64(time.Second)
+
+// parseUpstreamAge reads one delta-seconds Age value. An absent Age is valid and
+// not present. A malformed, signed, repeated, or oversized value is invalid. It
+// does not reveal the value in an error.
+func parseUpstreamAge(header http.Header) (seconds int64, present bool, valid bool) {
+	values := header.Values("Age")
+	if len(values) == 0 {
+		return 0, false, true
+	}
+	if len(values) != 1 {
+		return 0, true, false
+	}
+	raw := strings.TrimSpace(values[0])
+	if raw == "" {
+		return 0, true, false
+	}
+	parsed, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || parsed > uint64(maxDurationSeconds) {
+		return 0, true, false
+	}
+	return int64(parsed), true, true
 }
 
 func parseCacheControl(header http.Header) map[string]string {
@@ -577,7 +615,7 @@ func (c *LockedClient) cacheGet(key string) ([]byte, int, time.Time, bool, bool)
 	if !ok {
 		return nil, 0, time.Time{}, false, false
 	}
-	if time.Now().After(e.expiresAt) {
+	if now := c.clock(); now.After(e.expiresAt) {
 		c.removeCacheLocked(key)
 		return nil, 0, time.Time{}, false, false
 	}
@@ -597,7 +635,7 @@ func (c *LockedClient) cachePutWithTTL(key string, status int, body []byte, coll
 	if bodyBytes > maxCacheBytes {
 		return
 	}
-	now := time.Now()
+	now := c.clock()
 	c.expireCacheLocked(now)
 	if _, ok := c.cache[key]; ok {
 		c.removeCacheLocked(key)
@@ -693,6 +731,7 @@ func CombinedStats(clients ...*LockedClient) CacheStats {
 		stats := client.Stats()
 		out.Hits += stats.Hits
 		out.Misses += stats.Misses
+		out.Coalesced += stats.Coalesced
 		out.Size += stats.Size
 		out.Bytes += stats.Bytes
 		if out.TTL == "" {
