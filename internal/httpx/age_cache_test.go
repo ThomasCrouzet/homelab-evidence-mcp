@@ -44,6 +44,23 @@ func TestSourceCacheLifetime_RejectsUnusableAge(t *testing.T) {
 	}
 }
 
+func TestSourceCacheLifetime_EmptyAndRepeatedAge(t *testing.T) {
+	header := http.Header{}
+	header.Set("Cache-Control", "max-age=60")
+	header.Set("Age", "")
+	if lifetime, storable := sourceCacheLifetime(header, time.Minute); storable || lifetime != 0 {
+		t.Fatalf("empty Age lifetime=%s storable=%v, want storage bypass", lifetime, storable)
+	}
+
+	header = http.Header{}
+	header.Set("Cache-Control", "max-age=60")
+	header.Add("Age", "10")
+	header.Add("Age", "20")
+	if lifetime, storable := sourceCacheLifetime(header, time.Minute); storable || lifetime != 0 {
+		t.Fatalf("repeated Age lifetime=%s storable=%v, want storage bypass", lifetime, storable)
+	}
+}
+
 func TestSourceCacheLifetime_NoAgeKeepsCurrentBehavior(t *testing.T) {
 	header := http.Header{}
 	header.Set("Cache-Control", "max-age=120")
