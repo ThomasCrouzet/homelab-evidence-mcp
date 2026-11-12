@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -309,8 +310,6 @@ var (
 	dockerVersionRe  = regexp.MustCompile(`^[0-9]+\.[0-9]+$`)
 	dockerPathRe     = regexp.MustCompile(`(^|/)v[0-9]+\.[0-9]+$`)
 	yamlScalarRe     = regexp.MustCompile(`!![[:alnum:]_-]+\s+('[^']*'|"[^"]*")`)
-	// A Loki selector accepts labels then simple |= or |~ filters.
-	lokiSelectorRe = regexp.MustCompile(`^\{[a-zA-Z_][a-zA-Z0-9_]*="[^"]*"(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*="[^"]*")*\}(?:\s*\|\s*[=~]\s*"[^"]*")*$`)
 )
 
 // LoadFile reads and validates a YAML file.
@@ -884,6 +883,8 @@ func parseService(path string, f fileService, sources map[string]Source) (Servic
 			errs = append(errs, ValidationError{path + ".sources.loki.selector", "required"})
 		} else if !validLokiSelector(sel) {
 			errs = append(errs, ValidationError{path + ".sources.loki.selector", "must be a simple label selector {k=\"v\"} with optional |= filters"})
+		} else if repeatsLokiEqualityLabel(sel) {
+			errs = append(errs, ValidationError{path + ".sources.loki.selector", "must not repeat an equality label key"})
 		}
 		ss.Loki = &LokiRef{Source: ref.Source, Selector: sel}
 	}
@@ -1015,7 +1016,151 @@ func validLokiSelector(sel string) bool {
 	if hasControl(sel) || strings.ContainsAny(sel, "`") || strings.Contains(sel, "{{") {
 		return false
 	}
-	return lokiSelectorRe.MatchString(sel)
+	_, ok := parseLokiSelector(sel)
+	return ok
+}
+
+// repeatsLokiEqualityLabel reports a repeated equality key in the label set.
+// A repeated key is ambiguous, so the configuration is rejected instead of
+// choosing first-wins or last-wins. The check does not echo the key or value.
+func repeatsLokiEqualityLabel(sel string) bool {
+	matchers, ok := parseLokiSelector(sel)
+	if !ok {
+		return true
+	}
+	seen := make(map[string]struct{}, len(matchers))
+	for _, matcher := range matchers {
+		if _, dup := seen[matcher.key]; dup {
+			return true
+		}
+		seen[matcher.key] = struct{}{}
+	}
+	return false
+}
+
+// lokiMatcher is one equality label matcher from a Loki selector.
+type lokiMatcher struct {
+	key   string
+	value string
+}
+
+// parseLokiSelector parses the narrow equality-label grammar. It scans each
+// quoted value, so a brace or a comma inside a value is data and does not end
+// the label set. It accepts only equality matchers and optional |= or |~
+// filters. ok is false on a grammar violation and on content that the parser
+// does not consume.
+func parseLokiSelector(sel string) ([]lokiMatcher, bool) {
+	pos := 0
+	if pos >= len(sel) || sel[pos] != '{' {
+		return nil, false
+	}
+	pos++
+	matchers := make([]lokiMatcher, 0, 4)
+	for {
+		start := pos
+		if pos >= len(sel) || !lokiLabelStart(sel[pos]) {
+			return nil, false
+		}
+		pos++
+		for pos < len(sel) && lokiLabelChar(sel[pos]) {
+			pos++
+		}
+		key := sel[start:pos]
+		if pos >= len(sel) || sel[pos] != '=' {
+			return nil, false
+		}
+		pos++
+		if pos >= len(sel) || sel[pos] != '"' {
+			return nil, false
+		}
+		value, next, ok := lokiQuoted(sel, pos)
+		if !ok {
+			return nil, false
+		}
+		pos = next
+		matchers = append(matchers, lokiMatcher{key: key, value: value})
+		// A comma may follow optional whitespace. A closing brace must follow
+		// the value directly.
+		afterSpace := pos
+		for afterSpace < len(sel) && lokiSpace(sel[afterSpace]) {
+			afterSpace++
+		}
+		if afterSpace < len(sel) && sel[afterSpace] == ',' {
+			pos = afterSpace + 1
+			for pos < len(sel) && lokiSpace(sel[pos]) {
+				pos++
+			}
+			continue
+		}
+		if pos < len(sel) && sel[pos] == '}' {
+			pos++
+			break
+		}
+		return nil, false
+	}
+	for pos < len(sel) {
+		// A filter may start after optional whitespace. Any other trailing
+		// content makes the selector invalid.
+		afterSpace := pos
+		for afterSpace < len(sel) && lokiSpace(sel[afterSpace]) {
+			afterSpace++
+		}
+		if afterSpace >= len(sel) || sel[afterSpace] != '|' {
+			return nil, false
+		}
+		pos = afterSpace + 1
+		for pos < len(sel) && lokiSpace(sel[pos]) {
+			pos++
+		}
+		if pos >= len(sel) || (sel[pos] != '=' && sel[pos] != '~') {
+			return nil, false
+		}
+		pos++
+		for pos < len(sel) && lokiSpace(sel[pos]) {
+			pos++
+		}
+		if pos >= len(sel) || sel[pos] != '"' {
+			return nil, false
+		}
+		_, next, ok := lokiQuoted(sel, pos)
+		if !ok {
+			return nil, false
+		}
+		pos = next
+	}
+	return matchers, true
+}
+
+// lokiQuoted reads one double-quoted LogQL string that starts at pos. It
+// returns the decoded value and the position after the closing quote. A
+// backslash escapes the next byte, so an escaped quote does not close the
+// string.
+func lokiQuoted(sel string, pos int) (string, int, bool) {
+	for i := pos + 1; i < len(sel); i++ {
+		switch sel[i] {
+		case '\\':
+			i++
+		case '"':
+			value, err := strconv.Unquote(sel[pos : i+1])
+			if err != nil {
+				return "", 0, false
+			}
+			return value, i + 1, true
+		}
+	}
+	return "", 0, false
+}
+
+func lokiLabelStart(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+func lokiLabelChar(b byte) bool {
+	return lokiLabelStart(b) || (b >= '0' && b <= '9')
+}
+
+func lokiSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
 }
 
 func looksLikeSecret(v string) bool {

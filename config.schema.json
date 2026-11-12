@@ -195,7 +195,7 @@
                     "type": "string",
                     "minLength": 3,
                     "maxLength": 512,
-                    "description": "Use a simple LogQL selector with optional |= or |~ filters. The binary validates the syntax."
+                    "description": "Use a simple selector with equality labels and optional |= or |~ filters. Each label key can occur once. The binary validates the syntax and rejects a repeated key."
                   }
                 }
               },

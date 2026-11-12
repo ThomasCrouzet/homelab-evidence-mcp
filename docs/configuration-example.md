@@ -31,6 +31,17 @@ Use these pilot service connections:
 Start with some services. This method limits noise and makes the source map
 easy to examine.
 
+## Loki selectors
+
+A Loki selector uses equality labels and optional `|=` or `|~` filters.
+Each label key can occur once. The binary rejects a repeated key in
+`--validate` and in the adapter. A repeated key is ambiguous, so the binary
+does not choose the first or the last value.
+
+The error names the selector field and does not echo the label keys or values.
+Two distinct labels stay supported, for example
+`{app="media",host="media-01"}`.
+
 ## Minimal configuration
 
 ```yaml
