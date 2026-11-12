@@ -196,7 +196,10 @@ func (c *Client) collectPages(ctx context.Context, path string, first systemPage
 		result.Unverified = false
 		return result, nil
 	}
-	if first.Page < 1 || first.TotalPages < 1 {
+	if first.Page != 1 {
+		return fetchResult{}, fmt.Errorf("beszel first response is page %d, not page 1", first.Page)
+	}
+	if first.TotalPages < 1 {
 		return fetchResult{}, fmt.Errorf("beszel pagination metadata is incomplete")
 	}
 	if first.TotalPages > maxBeszelPages {
@@ -289,73 +292,83 @@ func decodeSystemPage(body []byte) (systemPage, error) {
 	if err := json.Unmarshal(body, &arr); err == nil && arr != nil {
 		return systemPage{Items: arr}, nil
 	}
-	var wrap struct {
-		Items      *[]systemRow `json:"items"`
-		Systems    *[]systemRow `json:"systems"`
-		Data       *[]systemRow `json:"data"`
-		Page       *int         `json:"page"`
-		PerPage    *int         `json:"perPage"`
-		TotalItems *int         `json:"totalItems"`
-		TotalPages *int         `json:"totalPages"`
-	}
+	var wrap systemEnvelope
 	if err := json.Unmarshal(body, &wrap); err != nil {
 		return systemPage{}, fmt.Errorf("beszel decode: invalid JSON")
 	}
 	switch {
 	case wrap.Systems != nil:
-		return systemPage{Items: *wrap.Systems}, nil
+		return decodeWrappedSystemPage(*wrap.Systems, wrap)
 	case wrap.Data != nil:
-		return systemPage{Items: *wrap.Data}, nil
+		return decodeWrappedSystemPage(*wrap.Data, wrap)
 	case wrap.Items != nil:
-		paginated := wrap.Page != nil || wrap.PerPage != nil || wrap.TotalItems != nil || wrap.TotalPages != nil
-		if !paginated {
-			return systemPage{Items: *wrap.Items}, nil
-		}
-		if wrap.Page == nil || wrap.PerPage == nil || *wrap.Page < 1 || *wrap.PerPage < 1 {
-			return systemPage{}, fmt.Errorf("beszel pagination metadata is incomplete")
-		}
-		if wrap.TotalItems != nil && *wrap.TotalItems < 0 {
-			return systemPage{}, fmt.Errorf("beszel pagination metadata is invalid")
-		}
-		if wrap.TotalPages != nil && *wrap.TotalPages < 0 {
-			return systemPage{}, fmt.Errorf("beszel pagination metadata is invalid")
-		}
-		totalPages := 0
-		switch {
-		case wrap.TotalPages != nil && *wrap.TotalPages > 0:
-			totalPages = *wrap.TotalPages
-		case wrap.TotalPages != nil && *wrap.TotalPages == 0:
-			if wrap.TotalItems == nil || *wrap.TotalItems != 0 || len(*wrap.Items) != 0 {
-				return systemPage{}, fmt.Errorf("beszel pagination metadata is incomplete")
-			}
-			totalPages = 1
-		case wrap.TotalItems != nil:
-			totalPages = *wrap.TotalItems / *wrap.PerPage
-			if *wrap.TotalItems%*wrap.PerPage != 0 {
-				totalPages++
-			}
-			if totalPages == 0 {
-				totalPages = 1
-			}
-		default:
-			return systemPage{}, fmt.Errorf("beszel pagination metadata is incomplete")
-		}
-		if *wrap.Page > totalPages {
-			return systemPage{}, fmt.Errorf("beszel pagination metadata is invalid")
-		}
-		totalItems := 0
-		if wrap.TotalItems != nil {
-			totalItems = *wrap.TotalItems
-			if totalItems < len(*wrap.Items) {
-				return systemPage{}, fmt.Errorf("beszel pagination metadata is invalid")
-			}
-		}
-		return systemPage{
-			Items: *wrap.Items, Page: *wrap.Page, PerPage: *wrap.PerPage, TotalItems: totalItems,
-			TotalPages: totalPages, Paginated: true, HasTotalItems: wrap.TotalItems != nil,
-		}, nil
+		return decodeWrappedSystemPage(*wrap.Items, wrap)
 	}
 	return systemPage{}, fmt.Errorf("beszel decode: empty systems list")
+}
+
+// systemEnvelope holds every supported systems wrapper and its counters.
+type systemEnvelope struct {
+	Items      *[]systemRow `json:"items"`
+	Systems    *[]systemRow `json:"systems"`
+	Data       *[]systemRow `json:"data"`
+	Page       *int         `json:"page"`
+	PerPage    *int         `json:"perPage"`
+	TotalItems *int         `json:"totalItems"`
+	TotalPages *int         `json:"totalPages"`
+}
+
+// decodeWrappedSystemPage applies one pagination contract to every wrapper.
+// Every wrapper keeps its counters, because a partial page must not become a
+// complete inventory.
+func decodeWrappedSystemPage(items []systemRow, wrap systemEnvelope) (systemPage, error) {
+	paginated := wrap.Page != nil || wrap.PerPage != nil || wrap.TotalItems != nil || wrap.TotalPages != nil
+	if !paginated {
+		return systemPage{Items: items}, nil
+	}
+	if wrap.Page == nil || wrap.PerPage == nil || *wrap.Page < 1 || *wrap.PerPage < 1 {
+		return systemPage{}, fmt.Errorf("beszel pagination metadata is incomplete")
+	}
+	if wrap.TotalItems != nil && *wrap.TotalItems < 0 {
+		return systemPage{}, fmt.Errorf("beszel pagination metadata is invalid")
+	}
+	if wrap.TotalPages != nil && *wrap.TotalPages < 0 {
+		return systemPage{}, fmt.Errorf("beszel pagination metadata is invalid")
+	}
+	totalPages := 0
+	switch {
+	case wrap.TotalPages != nil && *wrap.TotalPages > 0:
+		totalPages = *wrap.TotalPages
+	case wrap.TotalPages != nil && *wrap.TotalPages == 0:
+		if wrap.TotalItems == nil || *wrap.TotalItems != 0 || len(items) != 0 {
+			return systemPage{}, fmt.Errorf("beszel pagination metadata is incomplete")
+		}
+		totalPages = 1
+	case wrap.TotalItems != nil:
+		totalPages = *wrap.TotalItems / *wrap.PerPage
+		if *wrap.TotalItems%*wrap.PerPage != 0 {
+			totalPages++
+		}
+		if totalPages == 0 {
+			totalPages = 1
+		}
+	default:
+		return systemPage{}, fmt.Errorf("beszel pagination metadata is incomplete")
+	}
+	if *wrap.Page > totalPages {
+		return systemPage{}, fmt.Errorf("beszel pagination metadata is invalid")
+	}
+	totalItems := 0
+	if wrap.TotalItems != nil {
+		totalItems = *wrap.TotalItems
+		if totalItems < len(items) {
+			return systemPage{}, fmt.Errorf("beszel pagination metadata is invalid")
+		}
+	}
+	return systemPage{
+		Items: items, Page: *wrap.Page, PerPage: *wrap.PerPage, TotalItems: totalItems,
+		TotalPages: totalPages, Paginated: true, HasTotalItems: wrap.TotalItems != nil,
+	}, nil
 }
 
 // findSystem scans the whole collection by identity tier. Canonical names win
