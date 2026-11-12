@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,27 +19,18 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// documentedToolErrorReasons is the closed set of request rejection reasons
-// that the README and docs/tool-output-schemas.md advertise. A tool budget
-// refusal uses its specific code; any other admission failure uses the generic
-// capacity code.
-var documentedToolErrorReasons = []string{
-	"invalid_arguments",
-	"unknown_service",
-	"binding_missing",
-	"evidence_not_found",
-	"response_budget_exceeded",
-	"canceled",
-	"concurrent_tool_limit",
-	"tool_rate_limit",
-	"tool_budget_exhausted",
+type envelopeCampaignFixture struct {
+	ctx         context.Context
+	session     *mcp.ClientSession
+	schemas     map[string]*jsonschema.Resolved
+	stderr      *bytes.Buffer
+	slowStarted chan struct{}
 }
 
-type envelopeCampaignFixture struct {
-	ctx     context.Context
-	session *mcp.ClientSession
-	schemas map[string]*jsonschema.Resolved
-	stderr  *bytes.Buffer
+// envelopeCampaignOptions select the tool budgets and fixture latency.
+type envelopeCampaignOptions struct {
+	maxCallsPerMinute  int
+	maxConcurrentTools int
 }
 
 type envelopeCampaignBody struct {
@@ -199,7 +191,41 @@ func TestStdioToolErrorReasons(t *testing.T) {
 	fixture.callError(t, "search_logs", map[string]any{"service_id": "cron-history"}, "binding_missing")
 }
 
+// This executable test detects tool budget refusals without a stable reason.
+func TestStdioToolBudgetReasons(t *testing.T) {
+	t.Run("tool_rate_limit", func(t *testing.T) {
+		fixture := startEnvelopeCampaignFixtureWith(t, envelopeCampaignOptions{maxCallsPerMinute: 3, maxConcurrentTools: 4})
+		for index := 0; index < 3; index++ {
+			fixture.callOK(t, "list_services", map[string]any{})
+		}
+		fixture.callError(t, "list_services", map[string]any{}, "tool_rate_limit")
+	})
+
+	t.Run("concurrent_tool_limit", func(t *testing.T) {
+		fixture := startEnvelopeCampaignFixtureWith(t, envelopeCampaignOptions{maxCallsPerMinute: 100, maxConcurrentTools: 1})
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_, _ = fixture.session.CallTool(fixture.ctx, &mcp.CallToolParams{
+				Name: "search_logs", Arguments: map[string]any{"service_id": "slow-logs"},
+			})
+		}()
+		select {
+		case <-fixture.slowStarted:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the slow source request did not start")
+		}
+		fixture.callError(t, "list_services", map[string]any{}, "concurrent_tool_limit")
+		<-done
+	})
+}
+
 func startEnvelopeCampaignFixture(t *testing.T) *envelopeCampaignFixture {
+	t.Helper()
+	return startEnvelopeCampaignFixtureWith(t, envelopeCampaignOptions{maxCallsPerMinute: 1000, maxConcurrentTools: 8})
+}
+
+func startEnvelopeCampaignFixtureWith(t *testing.T, options envelopeCampaignOptions) *envelopeCampaignFixture {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	t.Cleanup(cancel)
@@ -234,10 +260,16 @@ func startEnvelopeCampaignFixture(t *testing.T) *envelopeCampaignFixture {
 	}))
 	t.Cleanup(docker.Close)
 
+	slowStarted := make(chan struct{})
+	var slowOnce sync.Once
 	loki := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/loki/api/v1/query_range" {
 			http.NotFound(w, r)
 			return
+		}
+		if strings.Contains(r.URL.Query().Get("query"), "slow") {
+			slowOnce.Do(func() { close(slowStarted) })
+			time.Sleep(900 * time.Millisecond)
 		}
 		values := make([][]string, 0, 120)
 		for index := 0; index < 120; index++ {
@@ -303,8 +335,8 @@ limits:
   per_source_timeout: 2s
   total_timeout: 10s
   source_cache_ttl: 0s
-  max_tool_calls_per_minute: 1000
-  max_concurrent_tools: 8
+  max_tool_calls_per_minute: %d
+  max_concurrent_tools: %d
 sources:
   gatus:
     kind: gatus
@@ -329,7 +361,10 @@ services:
   - id: cron-history
     sources:
       healthchecks: { source: hc, check_name: nightly, history_mode: transitions }
-`, gatus.URL, docker.URL, loki.URL, healthchecks.URL)
+  - id: slow-logs
+    sources:
+      loki: { source: loki, selector: '{container="slow"}' }
+`, options.maxCallsPerMinute, options.maxConcurrentTools, gatus.URL, docker.URL, loki.URL, healthchecks.URL)
 	if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +405,7 @@ services:
 		}
 		schemas[tool.Name] = resolved
 	}
-	return &envelopeCampaignFixture{ctx: ctx, session: session, schemas: schemas, stderr: &stderr}
+	return &envelopeCampaignFixture{ctx: ctx, session: session, schemas: schemas, stderr: &stderr, slowStarted: slowStarted}
 }
 
 func (f *envelopeCampaignFixture) callOK(t *testing.T, name string, args map[string]any) (*mcp.CallToolResult, envelopeCampaignBody) {

@@ -3,6 +3,7 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -250,6 +251,12 @@ type toolBudget struct {
 	clock  func() time.Time
 }
 
+// errToolBudgetConcurrent marks refusal by the concurrent tool budget.
+var errToolBudgetConcurrent = errors.New("too many concurrent tool calls (budget)")
+
+// errToolBudgetRate marks refusal by the per-minute tool budget.
+var errToolBudgetRate = errors.New("tool call rate limit exceeded")
+
 func newToolBudget(perMin, concurrent int) *toolBudget {
 	if perMin <= 0 {
 		perMin = 120
@@ -271,7 +278,7 @@ func (b *toolBudget) acquire() error {
 	select {
 	case b.sem <- struct{}{}:
 	default:
-		return fmt.Errorf("too many concurrent tool calls (budget)")
+		return errToolBudgetConcurrent
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -286,7 +293,7 @@ func (b *toolBudget) acquire() error {
 	b.recent = kept
 	if len(b.recent) >= b.perMin {
 		<-b.sem
-		return fmt.Errorf("tool call rate limit exceeded (%d/min)", b.perMin)
+		return fmt.Errorf("%w (%d/min)", errToolBudgetRate, b.perMin)
 	}
 	b.recent = append(b.recent, now)
 	return nil

@@ -43,7 +43,27 @@ redacted before emission.
 
 A failed tool call sets `isError: true` and returns a text error envelope. It
 does not return `structuredContent`, so a client cannot treat an error as a
-successful typed result. The envelope can contain a stable `reason` code.
+successful typed result. The envelope keeps a readable `error` message and a
+stable `reason` from this closed set:
+
+- `invalid_arguments`: a parameter is missing or malformed. Fix the arguments.
+- `unknown_service`: no configured service has that id. Call `list_services`.
+- `binding_missing`: the service lacks the source that the tool needs. Use
+  another tool or correct the configuration.
+- `evidence_not_found`: the evidence id expired or was evicted. Collect the
+  evidence again.
+- `response_budget_exceeded`: the response cannot fit the byte budget. Narrow
+  the window or lower `max_items`.
+- `concurrent_tool_limit`: the concurrent tool budget is full. Retry after
+  another call completes.
+- `tool_rate_limit`: the per-minute tool budget is exhausted. Retry after the
+  minute window.
+- `tool_budget_exhausted`: a tool budget refused the call for another reason.
+  Treat it as a capacity error and retry later.
+- `canceled`: the caller canceled the request. Send a new request.
+
+A failed single-source `search_logs` request reports the source coverage code
+from the [evidence model](evidence-model.md#outcome-and-coverage) instead.
 
 A multi-source collection failure is different: the call succeeds and the
 result has `complete: false` with per-source `status` and `reason`. A mixed
