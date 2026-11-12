@@ -24,6 +24,12 @@ func TestStdioNtfyTruncationOnCacheHits(t *testing.T) {
 	defer cancel()
 
 	t0 := time.Now().UTC().Truncate(time.Second).Add(-time.Minute)
+	// Pin the incident window. The ntfy request path carries the window start
+	// as `since`, and the source cache key includes that path. A window that
+	// ends at the current time changes the key when a call crosses a wall-clock
+	// second, which turns the expected cache hit into a second upstream request.
+	windowStart := t0.Add(-time.Minute)
+	windowEnd := t0.Add(time.Minute)
 	var upstreamCalls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Query().Get("poll") != "1" {
@@ -104,7 +110,12 @@ services:
 	call := func(service string) (bundle, []byte) {
 		t.Helper()
 		result, err := session.CallTool(ctx, &mcp.CallToolParams{
-			Name: "incident_context", Arguments: map[string]any{"service_id": service},
+			Name: "incident_context",
+			Arguments: map[string]any{
+				"service_id": service,
+				"start":      windowStart.Format(time.RFC3339),
+				"end":        windowEnd.Format(time.RFC3339),
+			},
 		})
 		if err != nil || result.IsError {
 			t.Fatalf("%s incident_context failed: %v", service, err)
