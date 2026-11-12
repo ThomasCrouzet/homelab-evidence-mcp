@@ -586,6 +586,15 @@ func parseLimits(f fileLimits) (Limits, ValidationErrors) {
 	if l.MaxToolCallsPerMinute > 1000 {
 		errs = append(errs, ValidationError{"limits.max_tool_calls_per_minute", "must be <= 1000"})
 	}
+	if l.MaxSourceRequestsPerMinute <= 0 {
+		if l.MaxSourceRequestsPerMinute < 0 {
+			errs = append(errs, ValidationError{"limits.max_source_requests_per_minute", "must be positive"})
+		}
+		l.MaxSourceRequestsPerMinute = 100
+	}
+	if l.MaxSourceRequestsPerMinute > 1000 {
+		errs = append(errs, ValidationError{"limits.max_source_requests_per_minute", "must be <= 1000"})
+	}
 	if l.MaxConcurrentTools <= 0 {
 		if l.MaxConcurrentTools < 0 {
 			errs = append(errs, ValidationError{"limits.max_concurrent_tools", "must be positive"})

@@ -252,8 +252,12 @@ Set only one of `token_env` and `token_file` per source.
   4 MiB.
 - **Timeouts:** `limits.per_source_timeout` defaults to `3s`;
   `limits.total_timeout` defaults to `10s`.
-- **Source rate:** `limits.max_source_requests_per_minute` defaults to `100`
-  and bounds one source instance over a sliding minute.
+- **Source rate:** `limits.max_source_requests_per_minute` accepts `1`
+  through `1000`; a missing value and `0` resolve to `100`. Only the
+  Healthchecks adapter enforces this bound, for one source instance over a
+  sliding minute today. `evidence_capabilities` reports the effective value.
+  It counts real upstream GET requests. A warm source cache hit and a
+  coalesced wait send no request and consume no slot.
 - **Caches:** `limits.source_cache_ttl` defaults to `15s`; `0` disables it.
   `limits.evidence_cache_ttl` defaults to `5m`.
   `limits.evidence_cache_max` defaults to `256`; `0` disables storage.
