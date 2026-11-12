@@ -41,10 +41,17 @@ func TestGet_PragmaNoCacheWithMaxAgeIsNotStored(t *testing.T) {
 	if err := client.RegisterDestination("src", ts.URL); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := client.Get(context.Background(), "src", "/", nil); err != nil { //nolint:bodyclose
+	resp, _, err := client.Get(context.Background(), "src", "/", nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
-	_, second, err := client.Get(context.Background(), "src", "/", nil) //nolint:bodyclose
+	resp, second, err := client.Get(context.Background(), "src", "/", nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

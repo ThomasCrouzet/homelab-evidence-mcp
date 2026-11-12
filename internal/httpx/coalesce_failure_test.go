@@ -78,7 +78,10 @@ func TestGet_CoalescedWaitersSharePersistentFailure(t *testing.T) {
 
 	leaderErr := make(chan error, 1)
 	go func() {
-		_, _, err := client.Get(context.Background(), "src", "/", nil) //nolint:bodyclose
+		resp, _, err := client.Get(context.Background(), "src", "/", nil)
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		leaderErr <- err
 	}()
 	<-started
@@ -88,7 +91,10 @@ func TestGet_CoalescedWaitersSharePersistentFailure(t *testing.T) {
 	for i := 0; i < waiters; i++ {
 		waitersCtx[i] = newCampaignWaiterContext(context.Background())
 		go func(ctx context.Context) {
-			_, _, err := client.Get(ctx, "src", "/", nil) //nolint:bodyclose
+			resp, _, err := client.Get(ctx, "src", "/", nil)
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
 			errs <- err
 		}(waitersCtx[i])
 	}
@@ -134,7 +140,10 @@ func TestGet_CoalescedWaitersShareSuccess(t *testing.T) {
 
 	leaderErr := make(chan error, 1)
 	go func() {
-		_, _, err := client.Get(context.Background(), "src", "/", nil) //nolint:bodyclose
+		resp, _, err := client.Get(context.Background(), "src", "/", nil)
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		leaderErr <- err
 	}()
 	<-started
@@ -144,7 +153,10 @@ func TestGet_CoalescedWaitersShareSuccess(t *testing.T) {
 	for i := 0; i < waiters; i++ {
 		waitersCtx[i] = newCampaignWaiterContext(context.Background())
 		go func(ctx context.Context) {
-			_, body, err := client.Get(ctx, "src", "/", nil) //nolint:bodyclose
+			resp, body, err := client.Get(ctx, "src", "/", nil)
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
 			if err != nil {
 				bodies <- "error: " + err.Error()
 				return
@@ -205,7 +217,10 @@ func TestGet_CanceledLeaderGetsOneReplacementRequest(t *testing.T) {
 	leaderCtx, cancelLeader := context.WithCancel(context.Background())
 	leaderErr := make(chan error, 1)
 	go func() {
-		_, _, err := client.Get(leaderCtx, "src", "/", nil) //nolint:bodyclose
+		resp, _, err := client.Get(leaderCtx, "src", "/", nil)
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		leaderErr <- err
 	}()
 	<-leaderStarted
@@ -216,7 +231,10 @@ func TestGet_CanceledLeaderGetsOneReplacementRequest(t *testing.T) {
 		marker := context.WithValue(context.Background(), waiterKey{}, i)
 		waitersCtx[i] = newCampaignWaiterContext(marker)
 		go func(ctx context.Context) {
-			_, body, err := client.Get(ctx, "src", "/", nil) //nolint:bodyclose
+			resp, body, err := client.Get(ctx, "src", "/", nil)
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
 			if err != nil {
 				bodies <- "error: " + err.Error()
 				return
@@ -272,7 +290,10 @@ func TestGet_CanceledWaiterDoesNotRetry(t *testing.T) {
 	})
 	leaderErr := make(chan error, 1)
 	go func() {
-		_, _, err := client.Get(context.Background(), "src", "/", nil) //nolint:bodyclose
+		resp, _, err := client.Get(context.Background(), "src", "/", nil)
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		leaderErr <- err
 	}()
 	<-leaderStarted
@@ -281,7 +302,10 @@ func TestGet_CanceledWaiterDoesNotRetry(t *testing.T) {
 	counting := newCampaignWaiterContext(waiterCtx)
 	waiterErr := make(chan error, 1)
 	go func() {
-		_, _, err := client.Get(counting, "src", "/", nil) //nolint:bodyclose
+		resp, _, err := client.Get(counting, "src", "/", nil)
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		waiterErr <- err
 	}()
 	<-counting.first
@@ -318,7 +342,10 @@ func TestGet_DoesNotCoalesceDifferentDestinations(t *testing.T) {
 	errs := make(chan error, 2)
 	for _, name := range []string{"one", "two"} {
 		go func(dest string) {
-			_, _, err := client.Get(context.Background(), dest, "/", nil) //nolint:bodyclose
+			resp, _, err := client.Get(context.Background(), dest, "/", nil)
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
 			errs <- err
 		}(name)
 	}

@@ -82,7 +82,10 @@ func TestAllowedCIDRs_FallsBackToNextPermittedAddress(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp, body, err := client.Get(context.Background(), "src", "/", nil) //nolint:bodyclose
+	resp, body, err := client.Get(context.Background(), "src", "/", nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
 	if err != nil {
 		t.Fatalf("permitted fallback failed: %v (dialed %v)", err, dialed.snapshot())
 	}
@@ -118,7 +121,10 @@ func TestAllowedCIDRs_NeverDialsOutsideThePolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp, body, err := client.Get(context.Background(), "src", "/", nil) //nolint:bodyclose
+	resp, body, err := client.Get(context.Background(), "src", "/", nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
 	if err == nil || resp != nil || body != nil {
 		t.Fatalf("all failed: resp=%v body=%v err=%v", resp, body, err)
 	}
@@ -158,7 +164,10 @@ func TestAllowedCIDRs_DeadlineStopsFallback(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	_, _, err := client.Get(ctx, "src", "/", nil) //nolint:bodyclose
+	resp, _, err := client.Get(ctx, "src", "/", nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
 	elapsed := time.Since(started)
 	if err == nil {
 		t.Fatal("expected deadline error")
@@ -192,7 +201,10 @@ func TestAllowedCIDRs_KeepsTLSHostnameVerification(t *testing.T) {
 	if err := client.RegisterDestination("src", campaignSourceURL(t, upstream.URL, "name.invalid")); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = client.Get(context.Background(), "src", "/", nil) //nolint:bodyclose
+	resp, _, err := client.Get(context.Background(), "src", "/", nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("TLS accepted a certificate for a different hostname")
 	}

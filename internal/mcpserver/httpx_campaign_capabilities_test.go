@@ -45,7 +45,10 @@ func TestEvidenceCapabilitiesIncludesCoalescedSourceRequests(t *testing.T) {
 
 	leaderDone := make(chan error, 1)
 	go func() {
-		_, _, err := app.HTTP.Get(context.Background(), "httpx-campaign", "/shared", nil) //nolint:bodyclose
+		resp, _, err := app.HTTP.Get(context.Background(), "httpx-campaign", "/shared", nil)
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		leaderDone <- err
 	}()
 	<-entered
@@ -55,7 +58,10 @@ func TestEvidenceCapabilitiesIncludesCoalescedSourceRequests(t *testing.T) {
 	counting := &httpxCampaignCountingContext{Context: waiterCtx, reached: make(chan struct{})}
 	waiterDone := make(chan error, 1)
 	go func() {
-		_, _, err := app.HTTP.Get(counting, "httpx-campaign", "/shared", nil) //nolint:bodyclose
+		resp, _, err := app.HTTP.Get(counting, "httpx-campaign", "/shared", nil)
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		waiterDone <- err
 	}()
 	<-counting.reached
