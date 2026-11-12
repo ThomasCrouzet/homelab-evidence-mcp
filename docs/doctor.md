@@ -73,6 +73,28 @@ A binding uses the source outcome status from the
 - A responsive HTTP server is not enough. A binding that selects no object is
   `partial` or `error` with `unmatched_binding`.
 
+A source row summarizes its bindings. The worst binding status ranks the source:
+`error` above `timeout`, `timeout` above `canceled`, `canceled` above `partial`,
+and `partial` above `ok`. When two bindings share the worst status, the row
+takes the lowest reason code and then the lowest service ID. The row `reason`
+and `error` therefore come from one binding and do not change with the worker
+completion order. Each binding keeps its own status, reason, completeness, item
+count, and sanitized error.
+
+## Diagnostic completeness
+
+Diagnostic completeness is not historical evidence completeness. A source is
+diagnostically complete when the doctor reached it, its authorization was
+accepted, its response decoded, and the configured binding matched.
+
+The ntfy replay buffer is a short-lived cache. It cannot prove that a window
+holds no earlier notification. `incident_context` reports that limit with
+`retention_limited: true` and `complete: false`. The doctor keeps a healthy
+ntfy binding `ok` and complete, because a bounded replay is not a diagnostic
+fault. The doctor still fails an ntfy source for a reachability,
+authorization, decoding, or binding fault: a wrong topic, a malformed replay,
+HTTP 401 or 403, and a timeout remain failures.
+
 ## Deadlines
 
 `--doctor` uses the configured `limits.per_source_timeout` for each adapter call
@@ -82,8 +104,9 @@ deadline reports `timeout`.
 
 ## Exit codes
 
-- `0`: every configured source is reachable and every binding is complete.
-  Unbound sources produce a warning and do not fail the command.
+- `0`: every configured source is reachable and every binding is
+  diagnostically complete. Unbound sources produce a warning and do not fail
+  the command.
 - `1`: a source failed or a binding is incomplete. The report still lists all
   sources that answered.
 - `2`: usage or configuration error, including a bad flag combination, a
@@ -105,6 +128,8 @@ bindings per source and sets `omitted_bindings` with a warning above that
 limit. The source status still summarizes every checked binding.
 
 `--doctor` converts snapshots and logs like the MCP tools. It does not prove that
-a credential is read-only at the upstream service. It does not replace the
+a credential is read-only at the upstream service. A successful ntfy check does
+not prove unbounded historical retention, because the doctor publishes
+diagnostic completeness only. It does not replace the
 versioned fixture matrix or a live integration lane. See
 [upstream fixtures](upstream-fixtures.md).
